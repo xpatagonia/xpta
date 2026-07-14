@@ -188,11 +188,31 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             {activeTab === 'insights' && (
               <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">Publicaciones de Insight</h2>
-                  <button onClick={() => setIsInsightModalOpen(true)} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-purple-500/20">
-                    <Plus className="w-4 h-4" /> Nuevo Artículo
-                  </button>
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <button onClick={async () => {
+                      if (window.confirm("¿Deseas forzar la ejecución del cron (Generar Noticia Automática)?")) {
+                        try {
+                           const token = await auth.currentUser?.getIdToken();
+                           const res = await fetch(`${getApiUrl()}/api/cron/publish-insight`, {
+                             method: 'POST',
+                             headers: { 'Authorization': `Bearer ${token}` }
+                           });
+                           const data = await res.json();
+                           if (!res.ok) throw new Error(data.error || 'Error ejecutando cron');
+                           alert('Se generó la noticia exitosamente. Recarga la página para verla.');
+                        } catch(e: any) {
+                           alert('Error: ' + e.message);
+                        }
+                      }
+                    }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-900 dark:text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2">
+                      <Sparkles className="w-4 h-4" /> Ejecutar Cron AI
+                    </button>
+                    <button onClick={() => setIsInsightModalOpen(true)} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-purple-500/20">
+                      <Plus className="w-4 h-4" /> Nuevo Artículo
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

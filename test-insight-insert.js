@@ -1,3 +1,17 @@
-import { db, addDoc, collection } from './src/lib/db.js';
+import { addDoc, collection, db } from './src/lib/db.js';
 
-// Oh wait, db.ts imports supabase, let's see if it works
+async function run() {
+  try {
+    const docRef = await addDoc(collection(db, 'insights'), {
+        title: "Test",
+        category: "Test",
+        content: "Test",
+        author: "Test",
+        createdAt: new Date().toISOString()
+    });
+    console.log(docRef);
+  } catch (err) {
+    console.error(err);
+  }
+}
+run();

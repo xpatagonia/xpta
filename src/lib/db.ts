@@ -98,17 +98,21 @@ function mapTableName(path) {
   return path;
 }
 
-function mapDataToDb(data) {
+function mapDataToDb(data: any) {
   const mapped = { ...data };
   if (mapped.createdAt) { mapped.created_at = mapped.createdAt; delete mapped.createdAt; }
+  if (mapped.videoUrl !== undefined) { mapped.video_url = mapped.videoUrl; delete mapped.videoUrl; }
+  if (mapped.sourceUrl !== undefined) { mapped.source_url = mapped.sourceUrl; delete mapped.sourceUrl; }
   return mapped;
 }
 
-function mapDataFromDb(data) {
+function mapDataFromDb(data: any) {
   const mapped = { ...data };
   if (mapped.created_at) { mapped.createdAt = mapped.created_at; }
   if (mapped.user_uid) { mapped.userId = mapped.user_uid; }
   if (mapped.company_id) { mapped.companyId = mapped.company_id; }
+  if (mapped.video_url !== undefined) { mapped.videoUrl = mapped.video_url; }
+  if (mapped.source_url !== undefined) { mapped.sourceUrl = mapped.source_url; }
   return mapped;
 }
 
