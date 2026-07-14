@@ -147,7 +147,7 @@ async function startServer() {
       const prompt = `Crea un resumen semanal estratégico curado y formateado en Markdown sobre actualidad empresarial, startups e innovación en la región patagónica (Chubut, Río Negro, Neuquén, Santa Cruz y Tierra del Fuego). Busca en internet las últimas noticias relevantes del mes en curso y sintetízalas. Enfócate en negocios, inversiones, startups y desarrollo económico. Incluye enlaces a fuentes si es posible. Formatea el texto con títulos, subtítulos, listas y negritas de manera profesional, adecuado para un "Hub de Servicios Inteligentes".`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -183,7 +183,7 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
@@ -237,7 +237,11 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
       }
       
       const result = await runAutoInsight();
-      console.log('Sending result:', result); res.json({ success: true, message: 'Automation triggered', result });
+      console.log('Sending result:', result);
+      if (result?.error) {
+        return res.status(500).json({ error: result.error });
+      }
+      res.json({ success: true, message: 'Automation triggered', result });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to trigger automation" });
     }
@@ -261,7 +265,7 @@ Genera 3 sugerencias breves de búsqueda de servicios B2B o insumos industriales
 Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
