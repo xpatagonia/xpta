@@ -172,8 +172,9 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
       
-      const prompt = `Busca información pública reciente y noticias oficiales de los Ministerios de Producción (o equivalentes) y de las Secretarías de Trabajo, dando prioridad PRINCIPAL y ABSOLUTA a la provincia de Chubut, y secundariamente a Santa Cruz y las demás provincias de la Patagonia Argentina (Río Negro, Neuquén, Tierra del Fuego).
-Crea un resumen de una sola noticia relevante sobre economía, industria, pymes, innovación, desarrollo productivo, promociones en capacitación laboral o facilidades para empresas basada en esas fuentes oficiales, asegurándote de buscar y priorizar noticias de Chubut y Santa Cruz primero.
+      const prompt = `Busca información pública reciente y noticias de las provincias de la Patagonia Argentina. Debes enfocar tu búsqueda siguiendo este orden de prioridad estricto: 1) Chubut (máxima prioridad), 2) Santa Cruz, 3) Río Negro, 4) Neuquén, 5) Tierra del Fuego.
+Concéntrate en contenido generado por los ministerios de producción y áreas relacionadas a: producción, turismo, innovación, pesca, agricultura, sector privado y emprendedurismo.
+Selecciona la noticia MÁS relevante e importante que encuentres siguiendo esos criterios y crea un resumen de la misma.
 Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes claves, no uses markdown de código alrededor:
 {
   "title": "Título llamativo para la noticia",
