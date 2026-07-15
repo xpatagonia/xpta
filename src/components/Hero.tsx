@@ -83,6 +83,20 @@ export default function Hero() {
 
   useEffect(() => {
     async function fetchAiSuggestions() {
+      // Check cache first
+      const cached = sessionStorage.getItem('hero_ai_suggestions');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.length > 0) {
+            setSuggestions(parsed);
+            return;
+          }
+        } catch (e) {
+          // Ignore cache error
+        }
+      }
+
       setSuggestionsLoading(true);
       try {
         const res = await fetch('/api/hero-suggestions', { method: 'POST' });
@@ -90,6 +104,7 @@ export default function Hero() {
           const data = await res.json();
           if (data.suggestions && data.suggestions.length > 0) {
             setSuggestions(data.suggestions);
+            sessionStorage.setItem('hero_ai_suggestions', JSON.stringify(data.suggestions));
           }
         }
       } catch (err) {
