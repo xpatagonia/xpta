@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import crypto from "crypto";
@@ -129,7 +130,7 @@ async function startServer() {
 
   app.post("/api/generate-insights", async (req, res) => {
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY; 
       if (!apiKey) {
         throw new Error("GEMINI_API_KEY no configurada");
       }
@@ -166,7 +167,7 @@ async function startServer() {
   let retError = null;
     console.log("Running automated insight generation...");
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY; 
       if (!apiKey) throw new Error("GEMINI_API_KEY no configurada");
       
       const { GoogleGenAI } = await import("@google/genai");
@@ -179,6 +180,7 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
 {
   "title": "Título llamativo para la noticia",
   "category": "Una categoría entre: Actualidad, Empresarial, Negocios, Startups, Innovación, Sector Público",
+  "location": "Nombre de la provincia de la noticia (ej. Chubut, Santa Cruz, Río Negro, Neuquén, Tierra del Fuego)",
   "content": "Breve adelanto o resumen de la noticia (2-3 párrafos).",
   "url": "Enlace original a la fuente de la noticia para seguir leyendo"
 }`;
@@ -201,7 +203,7 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
       const insight = {
         title: data.title,
         category: data.category || "Actualidad",
-        content: data.content + (data.url ? `\n\n[Leer noticia completa](${data.url})` : ''),
+        content: (data.location ? `__LOC__${data.location}__LOC__ ` : '') + data.content + (data.url ? `\n\n[Leer noticia completa](${data.url})` : ''),
         image: null,
         videoUrl: null,
         author: "IA Reportero",
@@ -253,7 +255,7 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
 
   app.post("/api/hero-suggestions", async (req, res) => {
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY; 
       if (!apiKey) {
         throw new Error("GEMINI_API_KEY no configurada");
       }
