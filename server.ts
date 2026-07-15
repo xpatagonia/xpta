@@ -178,10 +178,11 @@ Concéntrate en contenido generado por los ministerios de producción y áreas r
 Selecciona la noticia MÁS relevante e importante que encuentres siguiendo esos criterios y crea un resumen de la misma.
 Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes claves, no uses markdown de código alrededor:
 {
-  "title": "Título llamativo para la noticia",
+  "title": "Título llamativo, corto y conciso para la noticia, OMITIENDO mencionar el nombre de la provincia en el titular",
   "category": "Una categoría entre: Actualidad, Empresarial, Negocios, Startups, Innovación, Sector Público",
   "location": "Nombre de la provincia de la noticia (ej. Chubut, Santa Cruz, Río Negro, Neuquén, Tierra del Fuego)",
   "content": "Breve adelanto o resumen de la noticia (2-3 párrafos).",
+  "source_name": "Nombre de la fuente o medio de la noticia",
   "url": "Enlace original a la fuente de la noticia para seguir leyendo"
 }`;
 
@@ -203,7 +204,7 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
       const insight = {
         title: data.title,
         category: data.category || "Actualidad",
-        content: (data.location ? `__LOC__${data.location}__LOC__ ` : '') + data.content + (data.url ? `\n\n[Leer noticia completa](${data.url})` : ''),
+        content: (data.location ? `__LOC__${data.location}__LOC__ ` : '') + data.content + (data.url ? `\n\n**Fuente:** [${data.source_name || 'Leer noticia completa'}](${data.url})` : ''),
         image: null,
         videoUrl: null,
         author: "IA Reportero",
