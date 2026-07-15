@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Truck, MapPin, Package, Search, ArrowRight, ShieldCheck, FileText, CheckCircle2, ChevronDown, ListFilter, Play, Plus, Route, Navigation2 } from 'lucide-react';
+import { Truck, MapPin, Package, Search, ArrowRight, ShieldCheck, FileText, CheckCircle2, ChevronDown, ListFilter, Play, Plus, Route, Navigation2, Activity, TrendingUp, Wind } from 'lucide-react';
 import { collection, onSnapshot, doc, getDoc, db, auth } from '../lib/db';
 
 const CARRIERS = [
@@ -15,7 +15,7 @@ const SHIPMENTS = [
 ];
 
 export default function LogisticsModule() {
-  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'flotas' | 'guias' | 'rutas'>('cotizador');
+  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'colaborativa' | 'flotas' | 'guias' | 'rutas'>('cotizador');
   const [quoteOrigin, setQuoteOrigin] = useState('');
   const [quoteDest, setQuoteDest] = useState('');
   const [quoteWeight, setQuoteWeight] = useState('');
@@ -90,6 +90,16 @@ export default function LogisticsModule() {
             className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap ${activeTab === 'envios' ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
             Mis Envíos
+          </button>
+          <button
+            onClick={() => setActiveTab('colaborativa')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap relative overflow-hidden group ${activeTab === 'colaborativa' ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            <span className="relative z-10 flex items-center gap-2">
+              <Truck className={`w-4 h-4 ${activeTab === 'colaborativa' ? 'text-white' : 'text-indigo-500'}`} />
+              Fletes Colaborativos (IA)
+            </span>
+            {activeTab !== 'colaborativa' && <div className="absolute inset-0 bg-indigo-50 dark:bg-indigo-500/10 opacity-0 group-hover:opacity-100 transition-opacity z-0" />}
           </button>
           {isLogisticsProvider && (
             <>
@@ -344,6 +354,106 @@ export default function LogisticsModule() {
                        </tbody>
                     </table>
                   </div>
+               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'colaborativa' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+               <div className="bg-indigo-600 rounded-3xl p-8 text-white relative overflow-hidden shadow-lg shadow-indigo-500/20">
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/3"></div>
+                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-900/40 blur-2xl rounded-full translate-y-1/3 -translate-x-1/4"></div>
+                 
+                 <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                   <div>
+                     <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 rounded-full text-xs font-bold uppercase tracking-wider mb-4 border border-white/20 backdrop-blur-sm">
+                       <ShieldCheck className="w-4 h-4" /> Impacto Regional (IA)
+                     </div>
+                     <h2 className="text-3xl font-display font-bold mb-4">Optimización de Fletes Vacíos</h2>
+                     <p className="text-indigo-100 mb-6 max-w-md">
+                       Conectamos camiones que regresan vacíos desde los puertos con empresas que necesitan enviar carga. Reduce hasta un <strong className="text-white">40% en costos logísticos</strong> y disminuye las emisiones de CO2.
+                     </p>
+                     
+                     <div className="flex flex-wrap gap-4">
+                       <button className="px-6 py-3 bg-white text-indigo-600 font-bold rounded-xl shadow-md hover:bg-slate-50 transition-colors flex items-center gap-2">
+                         <Search className="w-4 h-4" /> Buscar Flete de Retorno
+                       </button>
+                       <button className="px-6 py-3 bg-indigo-500 hover:bg-indigo-400 border border-indigo-400 text-white font-bold rounded-xl transition-colors flex items-center gap-2">
+                         <Plus className="w-4 h-4" /> Publicar Camión Vacío
+                       </button>
+                     </div>
+                   </div>
+                   
+                   <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6">
+                     <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                       <Activity className="w-5 h-5 text-indigo-300" /> Matches Recomendados (IA)
+                     </h3>
+                     
+                     <div className="space-y-3">
+                       {/* Match 1 */}
+                       <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/10 transition cursor-pointer group">
+                         <div>
+                           <div className="flex items-center gap-2 mb-1">
+                             <div className="font-bold">Comodoro Rivadavia</div>
+                             <ArrowRight className="w-3 h-3 text-indigo-300" />
+                             <div className="font-bold">Neuquén (Vaca Muerta)</div>
+                           </div>
+                           <div className="text-indigo-200 text-xs flex items-center gap-3">
+                             <span className="flex items-center gap-1"><Truck className="w-3 h-3" /> Semirremolque (28t)</span>
+                             <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> Sale: Hoy 18:00hs</span>
+                           </div>
+                         </div>
+                         <div className="text-left sm:text-right w-full sm:w-auto">
+                           <div className="text-indigo-200 text-[10px] font-bold uppercase tracking-wider mb-1">Ahorro Estimado</div>
+                           <div className="text-xl font-black text-emerald-400">-35% Off</div>
+                         </div>
+                       </div>
+                       
+                       {/* Match 2 */}
+                       <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/10 transition cursor-pointer group">
+                         <div>
+                           <div className="flex items-center gap-2 mb-1">
+                             <div className="font-bold">Puerto Madryn</div>
+                             <ArrowRight className="w-3 h-3 text-indigo-300" />
+                             <div className="font-bold">Buenos Aires</div>
+                           </div>
+                           <div className="text-indigo-200 text-xs flex items-center gap-3">
+                             <span className="flex items-center gap-1"><Truck className="w-3 h-3" /> Térmico (24t)</span>
+                             <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> Sale: Mañana 08:00hs</span>
+                           </div>
+                         </div>
+                         <div className="text-left sm:text-right w-full sm:w-auto">
+                           <div className="text-indigo-200 text-[10px] font-bold uppercase tracking-wider mb-1">Ahorro Estimado</div>
+                           <div className="text-xl font-black text-emerald-400">-42% Off</div>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
+                   <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-4">
+                     <TrendingUp className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                   </div>
+                   <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Reducción de Costos</h3>
+                   <p className="text-slate-600 dark:text-slate-400 text-sm">Al aprovechar fletes de retorno, las empresas pagan tarifas significativamente menores por el transporte de sus cargas.</p>
+                 </div>
+                 <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
+                   <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-4">
+                     <Wind className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                   </div>
+                   <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Impacto Ambiental</h3>
+                   <p className="text-slate-600 dark:text-slate-400 text-sm">Optimizando rutas vacías reducimos los viajes ociosos, disminuyendo directamente la huella de carbono regional.</p>
+                 </div>
+                 <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
+                   <div className="w-12 h-12 bg-amber-50 dark:bg-amber-500/10 rounded-2xl flex items-center justify-center mb-4">
+                     <Truck className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                   </div>
+                   <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Rentabilidad Transportista</h3>
+                   <p className="text-slate-600 dark:text-slate-400 text-sm">Los transportistas monetizan los regresos vacíos, mejorando la rentabilidad global de su flota y operaciones.</p>
+                 </div>
                </div>
             </motion.div>
           )}
