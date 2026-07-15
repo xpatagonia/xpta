@@ -15,7 +15,7 @@ const SHIPMENTS = [
 ];
 
 export default function LogisticsModule() {
-  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'colaborativa' | 'flotas' | 'guias' | 'rutas'>('cotizador');
+  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'colaborativa' | 'flotas' | 'guias' | 'rutas'>('colaborativa');
   const [quoteOrigin, setQuoteOrigin] = useState('');
   const [quoteDest, setQuoteDest] = useState('');
   const [quoteWeight, setQuoteWeight] = useState('');
