@@ -49,54 +49,67 @@ const indicators = [
   }
 ];
 
-const currencyIndicators = [
-  {
-    title: "Dólar Americano",
-    metric: "USD / ARS (Mayorista)",
-    value: "$ 940.50",
-    change: "+0.1%",
-    isPositive: true,
-    icon: <DollarSign className="w-5 h-5" />,
-    color: "from-green-400 to-emerald-500",
-    bgLight: "bg-green-50 dark:bg-green-500/10",
-    textLight: "text-green-600 dark:text-green-400"
-  },
-  {
-    title: "Euro",
-    metric: "EUR / ARS (Oficial)",
-    value: "$ 1.020.30",
-    change: "+0.2%",
-    isPositive: true,
-    icon: <Euro className="w-5 h-5" />,
-    color: "from-blue-400 to-indigo-500",
-    bgLight: "bg-blue-50 dark:bg-blue-500/10",
-    textLight: "text-blue-600 dark:text-blue-400"
-  },
-  {
-    title: "Yuan Chino",
-    metric: "CNY / ARS",
-    value: "$ 129.50",
-    change: "-0.1%",
-    isPositive: false,
-    icon: <Coins className="w-5 h-5" />,
-    color: "from-red-400 to-rose-500",
-    bgLight: "bg-red-50 dark:bg-red-500/10",
-    textLight: "text-red-600 dark:text-red-400"
-  },
-  {
-    title: "Real Brasileño",
-    metric: "BRL / ARS",
-    value: "$ 175.20",
-    change: "+0.4%",
-    isPositive: true,
-    icon: <Banknote className="w-5 h-5" />,
-    color: "from-yellow-400 to-amber-500",
-    bgLight: "bg-yellow-50 dark:bg-yellow-500/10",
-    textLight: "text-yellow-600 dark:text-yellow-400"
-  }
-];
-
 export default function RegionalIndicators() {
+  const [rates, setRates] = React.useState<{usd: number, eur: number, brl: number, cny: number} | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/currencies')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) {
+          setRates(data);
+        }
+      })
+      .catch(err => console.error("Error fetching currencies:", err));
+  }, []);
+
+  const currencyIndicators = [
+    {
+      title: "Dólar Americano",
+      metric: "USD / ARS (Mayorista)",
+      value: rates ? `$ ${rates.usd.toFixed(2)}` : "Cargando...",
+      change: "~",
+      isPositive: true,
+      icon: <DollarSign className="w-5 h-5" />,
+      color: "from-green-400 to-emerald-500",
+      bgLight: "bg-green-50 dark:bg-green-500/10",
+      textLight: "text-green-600 dark:text-green-400"
+    },
+    {
+      title: "Euro",
+      metric: "EUR / ARS (Oficial)",
+      value: rates ? `$ ${rates.eur.toFixed(2)}` : "Cargando...",
+      change: "~",
+      isPositive: true,
+      icon: <Euro className="w-5 h-5" />,
+      color: "from-blue-400 to-indigo-500",
+      bgLight: "bg-blue-50 dark:bg-blue-500/10",
+      textLight: "text-blue-600 dark:text-blue-400"
+    },
+    {
+      title: "Yuan Chino",
+      metric: "CNY / ARS",
+      value: rates ? `$ ${rates.cny.toFixed(2)}` : "Cargando...",
+      change: "~",
+      isPositive: true,
+      icon: <Coins className="w-5 h-5" />,
+      color: "from-red-400 to-rose-500",
+      bgLight: "bg-red-50 dark:bg-red-500/10",
+      textLight: "text-red-600 dark:text-red-400"
+    },
+    {
+      title: "Real Brasileño",
+      metric: "BRL / ARS",
+      value: rates ? `$ ${rates.brl.toFixed(2)}` : "Cargando...",
+      change: "~",
+      isPositive: true,
+      icon: <Banknote className="w-5 h-5" />,
+      color: "from-yellow-400 to-amber-500",
+      bgLight: "bg-yellow-50 dark:bg-yellow-500/10",
+      textLight: "text-yellow-600 dark:text-yellow-400"
+    }
+  ];
+
   return (
     <section className="py-12 bg-slate-50 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/5 relative z-10">
       <div className="max-w-7xl mx-auto px-6 md:px-12">

@@ -287,6 +287,39 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
     }
   });
 
+  app.get("/api/currencies", async (req, res) => {
+    try {
+      // Dolar Oficial / Mayorista
+      const usdRes = await fetch("https://dolarapi.com/v1/dolares/mayorista");
+      const usdData = await usdRes.json();
+      
+      // Euro
+      const eurRes = await fetch("https://dolarapi.com/v1/cotizaciones/eur");
+      const eurData = await eurRes.json();
+      
+      // Real
+      const brlRes = await fetch("https://dolarapi.com/v1/cotizaciones/brl");
+      const brlData = await brlRes.json();
+
+      // Yuan (CNY) - Aproximación usando open.er-api.com
+      const openRes = await fetch("https://open.er-api.com/v6/latest/USD");
+      const openData = await openRes.json();
+      
+      const cnyRate = openData.rates.CNY; // USD to CNY
+      const cnyArs = usdData.venta / cnyRate; // USD/ARS / USD/CNY = CNY/ARS
+
+      res.json({
+        usd: usdData.venta,
+        eur: eurData.venta,
+        brl: brlData.venta,
+        cny: cnyArs
+      });
+    } catch (error) {
+      console.error("Error fetching currencies:", error);
+      res.status(500).json({ error: "Failed to fetch currency rates" });
+    }
+  });
+
   app.get("/api/maps-key", (req, res) => {
     res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });
   });
