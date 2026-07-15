@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
+import RegionalIndicators from './components/RegionalIndicators';
 import Categories from './components/Categories';
 import HowItWorks from './components/HowItWorks';
 import EcosystemGrid from './components/EcosystemGrid';
@@ -31,6 +32,7 @@ function Home() {
   return (
     <>
       <Hero />
+      <RegionalIndicators />
       <Categories />
       <HowItWorks />
       <NewsMagazine />
