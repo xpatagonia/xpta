@@ -38,6 +38,18 @@ const hardcodedNews = [
   }
 ];
 
+const parseInsightLocation = (content: string) => {
+  if (!content) return { location: null, cleanContent: "" };
+  const match = content.match(/__LOC__(.*?)__LOC__\s*/);
+  if (match) {
+    return {
+      location: match[1],
+      cleanContent: content.replace(match[0], ""),
+    };
+  }
+  return { location: null, cleanContent: content };
+};
+
 export default function NewsMagazine() {
   const [news, setNews] = useState<any[]>(hardcodedNews);
   
@@ -46,16 +58,20 @@ export default function NewsMagazine() {
     getDocs(q).then(querySnapshot => {
       if (!querySnapshot.empty) {
         const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const formattedNews = data.map((item: any) => ({
-          id: item.id,
-          category: item.category || 'Actualidad',
-          title: item.title,
-          excerpt: item.content ? item.content.substring(0, 150) + '...' : '',
-          date: item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Reciente',
-          icon: Newspaper,
-          color: 'text-orange-500',
-          bg: 'bg-orange-500/10'
-        }));
+        const formattedNews = data.map((item: any) => {
+          const parsed = parseInsightLocation(item.content);
+          return {
+            id: item.id,
+            category: item.category || 'Actualidad',
+            location: parsed.location,
+            title: item.title,
+            excerpt: parsed.cleanContent.replace(/[#*`_~]/g, "").substring(0, 150) + '...',
+            date: item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Reciente',
+            icon: Newspaper,
+            color: 'text-orange-500',
+            bg: 'bg-orange-500/10'
+          };
+        });
         setNews(formattedNews);
       }
     }).catch(console.error);
@@ -101,11 +117,21 @@ export default function NewsMagazine() {
                 className="group relative bg-slate-50 dark:bg-[#1A1625] rounded-3xl p-8 border border-slate-200 dark:border-white/5 hover:border-orange-500/30 transition-all flex flex-col h-full"
               >
                 <div className="flex items-center justify-between mb-6">
-                  <div className={`px-3 py-1.5 rounded-lg ${item.bg} flex items-center gap-2`}>
-                    <Icon className={`w-4 h-4 ${item.color}`} />
-                    <span className={`text-xs font-bold uppercase tracking-wider ${item.color}`}>
-                      {item.category}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className={`px-3 py-1.5 rounded-lg ${item.bg} flex items-center gap-2`}>
+                      <Icon className={`w-4 h-4 ${item.color}`} />
+                      <span className={`text-xs font-bold uppercase tracking-wider ${item.color}`}>
+                        {item.category}
+                      </span>
+                    </div>
+                    {item.location && (
+                      <div className="px-3 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/10 flex items-center gap-1">
+                        <Map className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                          {item.location}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <TrendingUp className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" />
                 </div>

@@ -232,7 +232,7 @@ export default function AdminDashboard() {
                            <span className="text-[10px] text-slate-500">{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : 'Nuevo'}</span>
                         </div>
                         <h3 className="font-bold text-slate-900 dark:text-white text-lg mb-2 line-clamp-2">{post.title}</h3>
-                        <p className="text-slate-500 text-sm line-clamp-3 mb-4">{post.content.replace(/[#*]/g, '').substring(0, 150)}...</p>
+                        <p className="text-slate-500 text-sm line-clamp-3 mb-4">{post.content.replace(/__LOC__.*?__LOC__\s*/, '').replace(/[#*]/g, '').substring(0, 150)}...</p>
                       </div>
                     </div>
                   ))}
