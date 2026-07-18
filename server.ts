@@ -150,9 +150,6 @@ async function startServer() {
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }]
-        }
       });
 
       res.json({ insights: response.text });
@@ -190,7 +187,6 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
-          tools: [{ googleSearch: {} }],
           responseMimeType: "application/json"
         }
       });

@@ -9,6 +9,8 @@ import {
   PlayCircle,
   Search,
   MapPin,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { db, getDocs, collection, query, orderBy, limit } from "../lib/db";
@@ -34,6 +36,9 @@ export default function Insights() {
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
   const [selectedPost, setSelectedPost] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 7; // Number of posts per page
+
 
   const categories = [
     "Todos",
@@ -67,10 +72,25 @@ export default function Insights() {
     fetchPosts();
   }, []);
 
-  const filteredPosts =
-    selectedCategory === "Todos"
-      ? posts
-      : posts.filter((p) => p.category === selectedCategory);
+  const filteredPosts = posts.filter(post => {
+    const matchesCategory = selectedCategory === "Todos" || post.category === selectedCategory;
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch = !searchQuery || 
+                          (post.title && post.title.toLowerCase().includes(searchLower)) || 
+                          (post.content && post.content.toLowerCase().includes(searchLower));
+    return matchesCategory && matchesSearch;
+  });
+
+  const totalPages = Math.ceil(filteredPosts.length / itemsPerPage);
+  
+  const currentPosts = filteredPosts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory, searchQuery]);
 
   const handleShare = (post: any) => {
     if (navigator.share) {
@@ -140,20 +160,20 @@ export default function Insights() {
             <div className="flex justify-center items-center h-64">
               <div className="w-10 h-10 border-4 border-slate-200 dark:border-white/10 border-t-purple-500 rounded-full animate-spin"></div>
             </div>
-          ) : filteredPosts.length === 0 ? (
+          ) : currentPosts.length === 0 ? (
             <div className="bg-white dark:bg-[#1A1625] rounded-3xl p-12 text-center border border-slate-200 dark:border-white/5">
               <Newspaper className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
               <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                No hay artículos publicados
+                No hay artículos encontrados
               </h3>
               <p className="text-slate-500">
-                Pronto el equipo editorial publicará nuevos contenidos en esta
-                categoría.
+                Intenta ajustar los filtros de búsqueda.
               </p>
             </div>
           ) : (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredPosts.map((post, index) => (
+              {currentPosts.map((post, index) => (
                 <motion.article
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -250,6 +270,44 @@ export default function Insights() {
                 </motion.article>
               ))}
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-8">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`w-10 h-10 rounded-xl text-sm font-bold transition-all ${
+                        currentPage === page
+                          ? "bg-purple-600 text-white shadow-md"
+                          : "bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+            </>
           )}
         </div>
 
