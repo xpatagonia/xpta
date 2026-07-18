@@ -31,7 +31,7 @@ export default function Inbox() {
     setLoading(true);
     setError('');
     try {
-      // If userObj is an event or not a firebase user, fallback to auth.currentUser
+      // If userObj is an event or not a supabase user, fallback to auth.currentUser
       const user = (userObj && userObj.id) ? userObj : auth.currentUser;
       if (!user) {
         setError('Debes iniciar sesión para ver los correos.');

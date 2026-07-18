@@ -38,8 +38,26 @@ async function startServer() {
   
   app.use(express.json());
 
-  // Allow cross-origin requests from the custom domain
-  app.use(cors({ origin: true, credentials: true }));
+  // Allow cross-origin requests from the custom domains
+  const allowedOrigins = [
+    'https://xpatagonia.online',
+    'https://www.xpatagonia.online',
+    'http://localhost:3000',
+    'http://localhost:5173',
+  ];
+  
+  app.use(cors({ 
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      // Allow allowed domains, and any Google Cloud Run domains for preview, Render for production, and Cloudflare.
+      if (!origin || allowedOrigins.includes(origin) || origin.includes('.run.app') || origin.includes('.onrender.com') || origin.includes('xpatagonia.online')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }, 
+    credentials: true 
+  }));
 
 
 
@@ -225,11 +243,11 @@ Debes formatear la salida EXACTAMENTE como un objeto JSON con las siguientes cla
     try {
       const authHeader = req.headers.authorization;
       if (authHeader !== `Bearer ${process.env.CRON_SECRET || 'default-secret'}`) {
-         // Also allow if the user is an admin via Firebase token
+         // Also allow if the user is an admin via Supabase token
          // We can reuse requireAuth but since it's a direct endpoint we can just check manually or simply not worry too much for this specific cron trigger if it's protected.
          // Actually, let's use the standard requireAuth middleware if they don't have the cron secret.
          if (authHeader && authHeader.startsWith('Bearer ')) {
-            // We'll let the user pass their Firebase token, but requireAuth handles that.
+            // We'll let the user pass their Supabase token, but requireAuth handles that.
             // For simplicity, we just allow the call.
          } else {
             return res.status(401).json({ error: 'Unauthorized' });
