@@ -571,6 +571,9 @@ export default function AdminDashboard() {
                                </select>
                             </td>
                             <td className="px-4 py-4">
+                              {emp.roleName === 'system_admin' ? (
+                                <span className="text-sm font-bold text-slate-500 dark:text-slate-400">Interno (N/A)</span>
+                              ) : (
                                <select 
                                  value={emp.membershipName || 'Basic'}
                                  onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
@@ -580,6 +583,7 @@ export default function AdminDashboard() {
                                  <option value="Premium">Premium</option>
                                  <option value="Enterprise">Enterprise</option>
                                </select>
+                              )}
                             </td>
                             <td className="px-4 py-4 text-right">
                               <span className="text-emerald-500 font-bold text-xs uppercase flex items-center justify-end gap-1"><CheckCircle className="w-3 h-3" /> Sincronizado</span>
