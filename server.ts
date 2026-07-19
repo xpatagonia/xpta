@@ -83,6 +83,52 @@ async function startServer() {
     }
   });
 
+  app.get("/api/admin/users", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
+         res.status(403).json({ error: "Forbidden" });
+         return;
+      }
+      const { getAllUsersWithRoles } = await import("./src/db/users.ts");
+      const users = await getAllUsersWithRoles();
+      res.json(users);
+    } catch (error) {
+      console.error("Error getting users:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/users/:uid/role", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
+         res.status(403).json({ error: "Forbidden" });
+         return;
+      }
+      const { updateUserRole } = await import("./src/db/users.ts");
+      await updateUserRole(req.params.uid, req.body.role);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating role:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/users/:uid/membership", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
+         res.status(403).json({ error: "Forbidden" });
+         return;
+      }
+      const { updateUserMembership } = await import("./src/db/users.ts");
+      await updateUserMembership(req.params.uid, req.body.membership);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating membership:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+
   app.post("/api/sync-user", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       if (!req.user || !req.user.uid || !req.user.email) {

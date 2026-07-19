@@ -29,8 +29,14 @@ export default function AdminDashboard() {
       if (user && (user.email === 'xpatagonia.com@gmail.com' || user.email === 'admin@xpatagonia.com')) {
         setIsAdmin(true);
         try {
-          const usersSnap = await getDocs(collection(db, 'users'));
-          setEmpresas(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+          const token = await user.getIdToken();
+          const response = await fetch(`${getApiUrl()}/api/admin/users`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setEmpresas(data.map((d: any) => ({ id: d.uid, ...d })));
+          }
 
           const reqsSnap = await getDocs(query(collection(db, 'module_requests')));
           setRequests(reqsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]);
@@ -72,6 +78,46 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error(error);
       alert('Error aprobando módulo');
+    }
+  };
+
+  const handleUpdateMembership = async (uid: string, membership: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiUrl()}/api/admin/users/${uid}/membership`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ membership })
+      });
+      if (res.ok) {
+        setEmpresas(prev => prev.map(emp => emp.id === uid ? { ...emp, membershipName: membership } : emp));
+        alert('Membresía actualizada con éxito.');
+      } else {
+        throw new Error('Error en la respuesta del servidor');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Error actualizando membresía');
+    }
+  };
+
+  const handleUpdateRole = async (uid: string, role: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiUrl()}/api/admin/users/${uid}/role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ role })
+      });
+      if (res.ok) {
+        setEmpresas(prev => prev.map(emp => emp.id === uid ? { ...emp, roleName: role } : emp));
+        alert('Rol actualizado con éxito.');
+      } else {
+        throw new Error('Error en la respuesta del servidor');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Error actualizando rol');
     }
   };
 
@@ -403,7 +449,7 @@ export default function AdminDashboard() {
                 </div>
                 
                 <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Asignación de Membresías (Simulación)</h3>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Gestión de Usuarios, Roles y Membresías</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 dark:bg-[#110E17] text-slate-500 border-b border-slate-200 dark:border-white/10">
@@ -415,26 +461,34 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {empresas.slice(0, 5).map((emp) => (
+                        {empresas.map((emp) => (
                           <tr key={emp.id} className="border-b border-slate-100 dark:border-white/5">
                             <td className="px-4 py-4 font-medium text-slate-900 dark:text-white">{emp.companyName || emp.email}</td>
                             <td className="px-4 py-4">
-                              <span className="px-2 py-1 bg-slate-100 dark:bg-white/10 rounded text-xs font-bold">VENDOR</span>
+                               <select 
+                                 value={emp.roleName || 'vendor'}
+                                 onChange={(e) => handleUpdateRole(emp.id, e.target.value)}
+                                 className="bg-transparent border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1 text-sm font-bold uppercase outline-none focus:border-orange-500"
+                               >
+                                 <option value="vendor">Vendor</option>
+                                 <option value="buyer">Buyer</option>
+                                 <option value="company_admin">Company Admin</option>
+                                 <option value="system_admin">System Admin</option>
+                               </select>
                             </td>
                             <td className="px-4 py-4">
                                <select 
-                                 defaultValue={emp.membershipLevel || 'basic'}
+                                 value={emp.membershipName || 'Basic'}
+                                 onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
                                  className="bg-transparent border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1 text-sm outline-none focus:border-orange-500"
                                >
-                                 <option value="basic">Basic (Gratis)</option>
-                                 <option value="premium">Premium</option>
-                                 <option value="enterprise">Enterprise</option>
+                                 <option value="Basic">Basic (Gratis)</option>
+                                 <option value="Premium">Premium</option>
+                                 <option value="Enterprise">Enterprise</option>
                                </select>
                             </td>
                             <td className="px-4 py-4 text-right">
-                              <button className="text-orange-500 hover:text-orange-600 font-bold text-xs uppercase">
-                                Actualizar
-                              </button>
+                              <span className="text-emerald-500 font-bold text-xs uppercase flex items-center justify-end gap-1"><CheckCircle className="w-3 h-3" /> Sincronizado</span>
                             </td>
                           </tr>
                         ))}
