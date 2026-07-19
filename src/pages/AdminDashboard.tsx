@@ -460,15 +460,21 @@ export default function AdminDashboard() {
                         
                         <div>
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Membresía Activa</label>
-                          <select 
-                            value={emp.membershipName || 'Basic'}
-                            onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
-                            className="w-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
-                          >
-                            <option value="Basic">Basic (Gratis)</option>
-                            <option value="Premium">Premium</option>
-                            <option value="Enterprise">Enterprise</option>
-                          </select>
+                          {emp.roleName === 'system_admin' ? (
+                            <div className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-bold text-slate-500 dark:text-slate-400">
+                              Interno (N/A)
+                            </div>
+                          ) : (
+                            <select 
+                              value={emp.membershipName || 'Basic'}
+                              onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
+                              className="w-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
+                            >
+                              <option value="Basic">Basic (Gratis)</option>
+                              <option value="Premium">Premium</option>
+                              <option value="Enterprise">Enterprise</option>
+                            </select>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -685,14 +691,16 @@ export default function AdminDashboard() {
                     <option value="system_admin">System Admin</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Membresía</label>
-                  <select value={newUserMembership} onChange={(e) => setNewUserMembership(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors appearance-none">
-                    <option value="Basic">Basic (Gratis)</option>
-                    <option value="Premium">Premium</option>
-                    <option value="Enterprise">Enterprise</option>
-                  </select>
-                </div>
+                {newUserRole !== 'system_admin' && (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Membresía</label>
+                    <select value={newUserMembership} onChange={(e) => setNewUserMembership(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors appearance-none">
+                      <option value="Basic">Basic (Gratis)</option>
+                      <option value="Premium">Premium</option>
+                      <option value="Enterprise">Enterprise</option>
+                    </select>
+                  </div>
+                )}
                 
                 <div className="pt-4 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsCreateUserModalOpen(false)} className="px-5 py-2.5 font-bold text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">Cancelar</button>
