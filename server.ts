@@ -129,6 +129,72 @@ async function startServer() {
   });
 
 
+  app.post("/api/admin/users/create", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
+         res.status(403).json({ error: "Forbidden" });
+         return;
+      }
+      
+      const { email, password, roleName, membershipName, companyName } = req.body;
+      
+      if (!email || !password) {
+        res.status(400).json({ error: "Email and password are required" });
+        return;
+      }
+
+      // Create the user using Supabase Auth (server-side, so it doesn't affect admin's client session)
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+      // If we have a service key, we should use it. Otherwise use anon key (which may require email confirmation or rate limits)
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+      const sbAdmin = createClient(supabaseUrl, serviceKey);
+      
+      let uid = '';
+      
+      if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        const { data, error } = await sbAdmin.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true
+        });
+        if (error) throw error;
+        uid = data.user.id;
+      } else {
+        const { data, error } = await sbAdmin.auth.signUp({
+          email,
+          password
+        });
+        if (error) throw error;
+        uid = data.user?.id || '';
+      }
+      
+      if (!uid) {
+        throw new Error("Failed to get user ID after creation");
+      }
+
+      // Create user records in DB
+      const { getOrCreateUser, updateUserRole, updateUserMembership } = await import("./src/db/users.ts");
+      await getOrCreateUser(uid, email);
+      await updateUserRole(uid, roleName);
+      await updateUserMembership(uid, membershipName);
+      
+      // Update company profile if provided
+      const { db } = await import("./src/db/index.ts");
+      const { companyProfiles } = await import("./src/db/schema.ts");
+      const { eq } = await import("drizzle-orm");
+      if (companyName) {
+        await db.update(companyProfiles).set({ companyName }).where(eq(companyProfiles.userId, uid));
+      }
+
+      res.json({ success: true, uid });
+    } catch (error: any) {
+      console.error("Error creating internal user:", error);
+      res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
   app.post("/api/sync-user", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       if (!req.user || !req.user.uid || !req.user.email) {

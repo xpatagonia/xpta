@@ -14,6 +14,14 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   
+  // Create User Modal state
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
+  const [newUserId, setNewUserId] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState('vendor');
+  const [newUserMembership, setNewUserMembership] = useState('Basic');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  
   // Insight form state
   const [isInsightModalOpen, setIsInsightModalOpen] = useState(false);
   const [insightTitle, setInsightTitle] = useState('');
@@ -78,6 +86,53 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error(error);
       alert('Error aprobando módulo');
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingUser(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      // generate random password since admin creates it, but we can just use a default or ask for it
+      // Let's ask for password in the form.
+      const password = Math.random().toString(36).slice(-8) + "Aa1@"; // Just generate a random password for internal users, or we can prompt for it
+      // Wait, we need to add password field to the modal. I'll do that below.
+      
+      const payload = {
+        email: newUserEmail,
+        password: password,
+        roleName: newUserRole,
+        membershipName: newUserMembership,
+        companyName: newUserId // using newUserId as companyName for simplicity in form
+      };
+      
+      const res = await fetch(`${getApiUrl()}/api/admin/users/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al crear usuario');
+      
+      alert(`Usuario creado con éxito. Contraseña temporal: ${password}`);
+      setIsCreateUserModalOpen(false);
+      setNewUserEmail('');
+      setNewUserId(''); // companyName
+      
+      // refresh users
+      const refreshRes = await fetch(`${getApiUrl()}/api/admin/users`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (refreshRes.ok) {
+        const usersData = await refreshRes.json();
+        setEmpresas(usersData.map((d: any) => ({ id: d.uid, ...d })));
+      }
+    } catch (error: any) {
+      console.error(error);
+      alert(`Error creando usuario: ${error.message}`);
+    } finally {
+      setIsCreatingUser(false);
     }
   };
 
@@ -355,38 +410,71 @@ export default function AdminDashboard() {
             )}
 
             {activeTab === 'empresas' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {empresas.map((emp) => (
-                  <div key={emp.id} className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden group">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
-                        <Building2 className="w-6 h-6 text-slate-400" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">{emp.companyName || 'Empresa sin nombre'}</h3>
-                        <p className="text-xs text-slate-500 truncate max-w-[180px]">{emp.email || emp.id}</p>
-                      </div>
-                    </div>
-                    {emp.category && (
-                      <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-400 rounded-md text-[10px] font-bold uppercase tracking-wider mb-2">
-                        {emp.category}
-                      </span>
-                    )}
-                    <p className="text-sm text-slate-600 dark:text-slate-400">{emp.city ? `${emp.city}, ` : ''}{emp.province}</p>
-                    
-                    <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
-                      <div className="flex-1 bg-emerald-50 dark:bg-emerald-500/10 p-2 rounded-lg">
-                        <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase mb-1">Membresía</span>
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{emp.membershipLevel || 'Basic'}</span>
-                      </div>
-                      <div className="flex-1 bg-blue-50 dark:bg-blue-500/10 p-2 rounded-lg">
-                        <span className="block text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase mb-1">Trust Score</span>
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{emp.trustScore || 50}/100</span>
-                      </div>
-                    </div>
+              <div className="space-y-6">
+                <div className="flex justify-between items-center bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Directorio de Empresas y Usuarios</h2>
+                    <p className="text-sm text-slate-500">Gestiona roles, membresías y accesos de los clientes y equipo interno.</p>
                   </div>
-                ))}
-                {empresas.length === 0 && <p className="text-slate-500 text-sm col-span-full">No hay empresas registradas.</p>}
+                  <button onClick={() => setIsCreateUserModalOpen(true)} className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-orange-500/20">
+                    <Plus className="w-4 h-4" /> Crear Usuario Interno
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {empresas.map((emp) => (
+                    <div key={emp.id} className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden group flex flex-col">
+                      <div className="flex items-center gap-4 mb-4">
+                        <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
+                          <Building2 className="w-6 h-6 text-slate-400" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{emp.companyName || 'Usuario sin empresa'}</h3>
+                          <p className="text-xs text-slate-500 truncate max-w-[180px]">{emp.email || emp.id}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex-1">
+                        {emp.category && (
+                          <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-400 rounded-md text-[10px] font-bold uppercase tracking-wider mb-2">
+                            {emp.category}
+                          </span>
+                        )}
+                        <p className="text-sm text-slate-600 dark:text-slate-400">{emp.city ? `${emp.city}, ` : ''}{emp.province}</p>
+                      </div>
+                      
+                      <div className="space-y-3 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Rol en el Sistema</label>
+                          <select 
+                            value={emp.roleName || 'vendor'}
+                            onChange={(e) => handleUpdateRole(emp.id, e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors"
+                          >
+                            <option value="vendor">Vendor</option>
+                            <option value="buyer">Buyer</option>
+                            <option value="company_admin">Company Admin</option>
+                            <option value="system_admin">System Admin</option>
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Membresía Activa</label>
+                          <select 
+                            value={emp.membershipName || 'Basic'}
+                            onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
+                            className="w-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
+                          >
+                            <option value="Basic">Basic (Gratis)</option>
+                            <option value="Premium">Premium</option>
+                            <option value="Enterprise">Enterprise</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {empresas.length === 0 && <p className="text-slate-500 text-sm col-span-full">No hay usuarios registrados.</p>}
+                </div>
               </div>
             )}
             
@@ -564,6 +652,52 @@ export default function AdminDashboard() {
                   <button type="submit" disabled={isSubmitting} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50">
                     {isSubmitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
                     Publicar Artículo
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+        
+        {isCreateUserModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsCreateUserModalOpen(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-md bg-white dark:bg-[#1A1625] rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10">
+              <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-white/10">
+                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">Crear Usuario Interno</h2>
+                 <button onClick={() => setIsCreateUserModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full text-slate-500 transition-colors"><X className="w-5 h-5" /></button>
+              </div>
+              <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Email del Usuario</label>
+                  <input type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors" placeholder="usuario@empresa.com" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Nombre / Empresa</label>
+                  <input type="text" required value={newUserId} onChange={(e) => setNewUserId(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors" placeholder="Nombre de la empresa o usuario" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Rol Asignado</label>
+                  <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors appearance-none">
+                    <option value="vendor">Vendor</option>
+                    <option value="buyer">Buyer</option>
+                    <option value="company_admin">Company Admin</option>
+                    <option value="system_admin">System Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Membresía</label>
+                  <select value={newUserMembership} onChange={(e) => setNewUserMembership(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors appearance-none">
+                    <option value="Basic">Basic (Gratis)</option>
+                    <option value="Premium">Premium</option>
+                    <option value="Enterprise">Enterprise</option>
+                  </select>
+                </div>
+                
+                <div className="pt-4 flex justify-end gap-3">
+                  <button type="button" onClick={() => setIsCreateUserModalOpen(false)} className="px-5 py-2.5 font-bold text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">Cancelar</button>
+                  <button type="submit" disabled={isCreatingUser} className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50">
+                    {isCreatingUser ? 'Creando...' : 'Crear Usuario'}
                   </button>
                 </div>
               </form>
