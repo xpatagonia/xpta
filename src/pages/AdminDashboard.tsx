@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X } from 'lucide-react';
+import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X, Search, Mail, Calendar, AlertCircle } from 'lucide-react';
 import { db, auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
 import {  collection, getDocs, updateDoc, doc, query, orderBy, setDoc, getDoc, addDoc, serverTimestamp, deleteDoc, onAuthStateChanged  } from '../lib/db';
@@ -13,6 +13,7 @@ export default function AdminDashboard() {
   const [insights, setInsights] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
   
   // Create User Modal state
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
@@ -247,6 +248,15 @@ export default function AdminDashboard() {
     );
   }
 
+  const filteredEmpresas = empresas.filter(emp => {
+    const term = userSearchTerm.toLowerCase();
+    return (
+      (emp.companyName && emp.companyName.toLowerCase().includes(term)) || 
+      (emp.email && emp.email.toLowerCase().includes(term)) || 
+      (emp.roleName && emp.roleName.toLowerCase().includes(term))
+    );
+  });
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12">
       <div className="max-w-7xl mx-auto px-6">
@@ -455,12 +465,14 @@ export default function AdminDashboard() {
                             <option value="buyer">Buyer</option>
                             <option value="company_admin">Company Admin</option>
                             <option value="system_admin">System Admin</option>
+                            <option value="content_editor">Editor de Contenidos</option>
+                            <option value="support_operator">Soporte y Operaciones</option>
                           </select>
                         </div>
                         
                         <div>
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Membresía Activa</label>
-                          {emp.roleName === 'system_admin' ? (
+                          {['system_admin', 'content_editor', 'support_operator'].includes(emp.roleName) ? (
                             <div className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-bold text-slate-500 dark:text-slate-400">
                               Interno (N/A)
                             </div>
@@ -543,21 +555,37 @@ export default function AdminDashboard() {
                 </div>
                 
                 <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Gestión de Usuarios, Roles y Membresías</h3>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Gestión de Usuarios, Roles y Membresías</h3>
+                    <div className="relative w-full sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input 
+                        type="text" 
+                        placeholder="Buscar usuario o empresa..."
+                        value={userSearchTerm}
+                        onChange={(e) => setUserSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors"
+                      />
+                    </div>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 dark:bg-[#110E17] text-slate-500 border-b border-slate-200 dark:border-white/10">
                         <tr>
-                          <th className="px-4 py-3 font-semibold">Empresa</th>
+                          <th className="px-4 py-3 font-semibold">Empresa / Email</th>
                           <th className="px-4 py-3 font-semibold">Rol Actual</th>
                           <th className="px-4 py-3 font-semibold">Membresía</th>
-                          <th className="px-4 py-3 font-semibold text-right">Acción</th>
+                          <th className="px-4 py-3 font-semibold">Registro</th>
+                          <th className="px-4 py-3 font-semibold text-right">Estado</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {empresas.map((emp) => (
+                        {filteredEmpresas.map((emp) => (
                           <tr key={emp.id} className="border-b border-slate-100 dark:border-white/5">
-                            <td className="px-4 py-4 font-medium text-slate-900 dark:text-white">{emp.companyName || emp.email}</td>
+                            <td className="px-4 py-4 font-medium text-slate-900 dark:text-white">
+                              <div>{emp.companyName || 'Sin Empresa'}</div>
+                              <div className="text-xs text-slate-500 font-normal">{emp.email}</div>
+                            </td>
                             <td className="px-4 py-4">
                                <select 
                                  value={emp.roleName || 'vendor'}
@@ -568,10 +596,12 @@ export default function AdminDashboard() {
                                  <option value="buyer">Buyer</option>
                                  <option value="company_admin">Company Admin</option>
                                  <option value="system_admin">System Admin</option>
+                                 <option value="content_editor">Editor de Contenidos</option>
+                                 <option value="support_operator">Soporte y Operaciones</option>
                                </select>
                             </td>
                             <td className="px-4 py-4">
-                              {emp.roleName === 'system_admin' ? (
+                              {['system_admin', 'content_editor', 'support_operator'].includes(emp.roleName) ? (
                                 <span className="text-sm font-bold text-slate-500 dark:text-slate-400">Interno (N/A)</span>
                               ) : (
                                <select 
@@ -585,13 +615,20 @@ export default function AdminDashboard() {
                                </select>
                               )}
                             </td>
+                            <td className="px-4 py-4 text-slate-500 text-xs">
+                              {emp.createdAt ? new Date(emp.createdAt).toLocaleDateString() : '-'}
+                            </td>
                             <td className="px-4 py-4 text-right">
-                              <span className="text-emerald-500 font-bold text-xs uppercase flex items-center justify-end gap-1"><CheckCircle className="w-3 h-3" /> Sincronizado</span>
+                              {emp.isEmailVerified ? (
+                                <span className="text-emerald-500 font-bold text-[10px] uppercase flex items-center justify-end gap-1"><CheckCircle className="w-3 h-3" /> Verificado</span>
+                              ) : (
+                                <span className="text-amber-500 font-bold text-[10px] uppercase flex items-center justify-end gap-1"><AlertCircle className="w-3 h-3" /> Pendiente</span>
+                              )}
                             </td>
                           </tr>
                         ))}
-                        {empresas.length === 0 && (
-                          <tr><td colSpan={4} className="px-4 py-4 text-center text-slate-500">No hay empresas para mostrar</td></tr>
+                        {filteredEmpresas.length === 0 && (
+                          <tr><td colSpan={5} className="px-4 py-4 text-center text-slate-500">No hay empresas para mostrar</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -693,9 +730,11 @@ export default function AdminDashboard() {
                     <option value="buyer">Buyer</option>
                     <option value="company_admin">Company Admin</option>
                     <option value="system_admin">System Admin</option>
+                    <option value="content_editor">Editor de Contenidos</option>
+                    <option value="support_operator">Soporte y Operaciones</option>
                   </select>
                 </div>
-                {newUserRole !== 'system_admin' && (
+                {!['system_admin', 'content_editor', 'support_operator'].includes(newUserRole) && (
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Membresía</label>
                     <select value={newUserMembership} onChange={(e) => setNewUserMembership(e.target.value)} className="w-full bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors appearance-none">
