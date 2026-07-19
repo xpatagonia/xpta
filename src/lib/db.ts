@@ -42,15 +42,24 @@ export const createUserWithEmailAndPassword = (authObj, email, password) => supa
 
 export const collection = (db, path) => ({ type: 'collection', path });
 
-export const doc = (dbOrColl: any, pathOrId?: any, idParam?: any) => {
+export const doc = (dbOrColl: any, ...pathSegments: any[]) => {
   let path = '';
   let id = '';
   if (dbOrColl && dbOrColl.type === 'firestore_mock') {
-    path = pathOrId;
-    id = idParam;
+    if (pathSegments.length >= 2) {
+      if (pathSegments.length === 4 && pathSegments[0] === 'users' && pathSegments[2] === 'settings' && pathSegments[3] === 'modules') {
+        path = 'module_settings';
+        id = pathSegments[1];
+      } else {
+        path = pathSegments[0];
+        id = pathSegments[1];
+      }
+    } else {
+      path = pathSegments[0];
+    }
   } else if (dbOrColl && dbOrColl.type === 'collection') {
     path = dbOrColl.path;
-    id = pathOrId || 'generated_' + Math.random().toString(36).substring(2);
+    id = pathSegments[0] || 'generated_' + Math.random().toString(36).substring(2);
   }
   return { type: 'doc', path, id };
 };
@@ -141,7 +150,7 @@ export const getDocs = async (qOrColl) => {
 
 export const getDoc = async (docRef) => {
   const path = mapTableName(docRef.path);
-  const field = path === 'company_profiles' ? 'user_uid' : 'id';
+  const field = (path === 'company_profiles' || path === 'module_settings') ? 'user_uid' : 'id';
   
   let val = docRef.id;
   if (!isNaN(val) && field === 'id') val = Number(val);
@@ -166,7 +175,7 @@ export const addDoc = async (coll, data) => {
 
 export const setDoc = async (docRef, data, options = {}) => {
   const path = mapTableName(docRef.path);
-  const field = path === 'company_profiles' ? 'user_uid' : 'id';
+  const field = (path === 'company_profiles' || path === 'module_settings') ? 'user_uid' : 'id';
   let val = docRef.id;
   if (!isNaN(val) && field === 'id') val = Number(val);
   const payload = { ...mapDataToDb(data), [field]: val };
@@ -177,7 +186,7 @@ export const setDoc = async (docRef, data, options = {}) => {
 
 export const updateDoc = async (docRef, data) => {
   const path = mapTableName(docRef.path);
-  const field = path === 'company_profiles' ? 'user_uid' : 'id';
+  const field = (path === 'company_profiles' || path === 'module_settings') ? 'user_uid' : 'id';
   let val = docRef.id;
   if (!isNaN(val) && field === 'id') val = Number(val);
   const payload = mapDataToDb(data);
@@ -187,7 +196,7 @@ export const updateDoc = async (docRef, data) => {
 
 export const deleteDoc = async (docRef) => {
   const path = mapTableName(docRef.path);
-  const field = path === 'company_profiles' ? 'user_uid' : 'id';
+  const field = (path === 'company_profiles' || path === 'module_settings') ? 'user_uid' : 'id';
   let val = docRef.id;
   if (!isNaN(val) && field === 'id') val = Number(val);
   const { error } = await supabase.from(path).delete().eq(field, val);

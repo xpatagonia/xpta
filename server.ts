@@ -66,6 +66,23 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  app.post("/api/register-setup", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !req.user.uid || !req.user.email) {
+         res.status(400).json({ error: "Invalid user data" });
+         return;
+      }
+      
+      const { cuit, category } = req.body;
+      const { registerUserSetup } = await import("./src/db/users.ts");
+      const user = await registerUserSetup(req.user.uid, req.user.email, cuit, category);
+      res.json({ user });
+    } catch (error) {
+      console.error("Error setting up new user:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/sync-user", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       if (!req.user || !req.user.uid || !req.user.email) {

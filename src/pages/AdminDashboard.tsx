@@ -7,7 +7,7 @@ import {  collection, getDocs, updateDoc, doc, query, orderBy, setDoc, getDoc, a
 import ReactMarkdown from 'react-markdown';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'empresas' | 'solicitudes' | 'insights'>('solicitudes');
+  const [activeTab, setActiveTab] = useState<'empresas' | 'solicitudes' | 'insights' | 'membresias'>('solicitudes');
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
@@ -180,6 +180,12 @@ export default function AdminDashboard() {
           >
             <Newspaper className="w-4 h-4" /> Insights (Blog)
           </button>
+          <button
+            onClick={() => setActiveTab('membresias')}
+            className={`px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'membresias' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+          >
+            <Shield className="w-4 h-4" /> Roles & Membresías
+          </button>
         </div>
 
         {isLoading ? (
@@ -321,9 +327,124 @@ export default function AdminDashboard() {
                       </span>
                     )}
                     <p className="text-sm text-slate-600 dark:text-slate-400">{emp.city ? `${emp.city}, ` : ''}{emp.province}</p>
+                    
+                    <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
+                      <div className="flex-1 bg-emerald-50 dark:bg-emerald-500/10 p-2 rounded-lg">
+                        <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase mb-1">Membresía</span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">{emp.membershipLevel || 'Basic'}</span>
+                      </div>
+                      <div className="flex-1 bg-blue-50 dark:bg-blue-500/10 p-2 rounded-lg">
+                        <span className="block text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase mb-1">Trust Score</span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">{emp.trustScore || 50}/100</span>
+                      </div>
+                    </div>
                   </div>
                 ))}
                 {empresas.length === 0 && <p className="text-slate-500 text-sm col-span-full">No hay empresas registradas.</p>}
+              </div>
+            )}
+            
+            {activeTab === 'membresias' && (
+              <div className="space-y-6">
+                <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Gestión de Roles y Membresías (RBAC)</h2>
+                  <p className="text-slate-600 dark:text-slate-400 text-sm mb-6 max-w-2xl">
+                    Administra los niveles de acceso y los beneficios para las empresas registradas. La estructura soporta control de acceso basado en roles (RBAC) y límites de uso según la membresía.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Basic Tier */}
+                    <div className="border border-slate-200 dark:border-white/10 rounded-xl p-5 relative">
+                      <div className="absolute top-0 right-0 p-3">
+                         <span className="px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-500 rounded-md text-[10px] font-bold uppercase tracking-wider">Tier 1</span>
+                      </div>
+                      <Shield className="w-8 h-8 text-slate-400 mb-4" />
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Basic</h3>
+                      <p className="text-2xl font-black text-slate-900 dark:text-white mb-4">Gratis</p>
+                      <ul className="space-y-2 mb-6 text-sm text-slate-600 dark:text-slate-400">
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Max 10 productos</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> 3 RFQs mensuales</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Matchmaking Básico</li>
+                      </ul>
+                    </div>
+                    
+                    {/* Premium Tier */}
+                    <div className="border-2 border-orange-500 rounded-xl p-5 relative bg-orange-50 dark:bg-orange-500/5">
+                      <div className="absolute top-0 right-0 p-3">
+                         <span className="px-2.5 py-1 bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-md text-[10px] font-bold uppercase tracking-wider">Tier 2</span>
+                      </div>
+                      <Sparkles className="w-8 h-8 text-orange-500 mb-4" />
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Premium</h3>
+                      <p className="text-2xl font-black text-slate-900 dark:text-white mb-4">U$D 49<span className="text-sm font-normal text-slate-500">/mes</span></p>
+                      <ul className="space-y-2 mb-6 text-sm text-slate-600 dark:text-slate-400">
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Productos Ilimitados</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> RFQs Ilimitados</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Insignia Verificada</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> AI Insights Avanzados</li>
+                      </ul>
+                    </div>
+                    
+                    {/* Enterprise Tier */}
+                    <div className="border border-slate-200 dark:border-white/10 rounded-xl p-5 relative">
+                      <div className="absolute top-0 right-0 p-3">
+                         <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded-md text-[10px] font-bold uppercase tracking-wider">Tier 3</span>
+                      </div>
+                      <Building2 className="w-8 h-8 text-purple-500 mb-4" />
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Enterprise</h3>
+                      <p className="text-2xl font-black text-slate-900 dark:text-white mb-4">A Medida</p>
+                      <ul className="space-y-2 mb-6 text-sm text-slate-600 dark:text-slate-400">
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Todo de Premium</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> SLA & Soporte Prioritario</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> Auditoría ESG & Sustainability</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> API Access</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Asignación de Membresías (Simulación)</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 dark:bg-[#110E17] text-slate-500 border-b border-slate-200 dark:border-white/10">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Empresa</th>
+                          <th className="px-4 py-3 font-semibold">Rol Actual</th>
+                          <th className="px-4 py-3 font-semibold">Membresía</th>
+                          <th className="px-4 py-3 font-semibold text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {empresas.slice(0, 5).map((emp) => (
+                          <tr key={emp.id} className="border-b border-slate-100 dark:border-white/5">
+                            <td className="px-4 py-4 font-medium text-slate-900 dark:text-white">{emp.companyName || emp.email}</td>
+                            <td className="px-4 py-4">
+                              <span className="px-2 py-1 bg-slate-100 dark:bg-white/10 rounded text-xs font-bold">VENDOR</span>
+                            </td>
+                            <td className="px-4 py-4">
+                               <select 
+                                 defaultValue={emp.membershipLevel || 'basic'}
+                                 className="bg-transparent border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1 text-sm outline-none focus:border-orange-500"
+                               >
+                                 <option value="basic">Basic (Gratis)</option>
+                                 <option value="premium">Premium</option>
+                                 <option value="enterprise">Enterprise</option>
+                               </select>
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              <button className="text-orange-500 hover:text-orange-600 font-bold text-xs uppercase">
+                                Actualizar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {empresas.length === 0 && (
+                          <tr><td colSpan={4} className="px-4 py-4 text-center text-slate-500">No hay empresas para mostrar</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
           </div>
