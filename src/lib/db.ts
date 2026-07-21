@@ -207,6 +207,7 @@ export const onSnapshot = (qOrColl: any, callback: any, errorCallback?: any) => 
   let isCancelled = false;
   const fetchAndCallback = async () => {
     if (isCancelled) return;
+    if (typeof document !== 'undefined' && document.hidden) return; // Save costs when tab is inactive
     try {
       const snap = await getDocs(qOrColl);
       if (!isCancelled) callback(snap);
@@ -216,7 +217,7 @@ export const onSnapshot = (qOrColl: any, callback: any, errorCallback?: any) => 
   };
   
   fetchAndCallback();
-  const interval = setInterval(fetchAndCallback, 3000);
+  const interval = setInterval(fetchAndCallback, 30000); // 30 seconds instead of 3 to save DB/Server costs
   
   return () => {
     isCancelled = true;

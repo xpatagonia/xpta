@@ -6,7 +6,7 @@ import {  doc, getDoc, setDoc  } from '../lib/db';
 import { APIProvider, Map, AdvancedMarker, Pin, useMap } from '@vis.gl/react-google-maps';
 import { auth, db } from '../lib/db';
 
-const API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || 'AIzaSyBe7nGVlMgO1AXjfmyYLFDNxNKCUkzunT4';
+const API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
 
 
