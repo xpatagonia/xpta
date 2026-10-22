@@ -65,6 +65,10 @@ export default function Navbar() {
             <Link to="/marketplace" className="text-orange-500 hover:text-orange-600 transition-colors flex items-center gap-1">
               B2B Store
             </Link>
+            <Link to="/chat" className="text-slate-700 dark:text-slate-200 hover:text-orange-500 dark:hover:text-orange-400 transition-colors flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Chat B2B
+            </Link>
             <Link to="/planes" className="hover:text-slate-900 dark:text-white transition-colors">Planes</Link>
             <Link to="/insights" className="hover:text-purple-600 dark:text-purple-400 transition-colors flex items-center gap-1">
                <Sparkles className="w-3.5 h-3.5" /> Insights
@@ -86,6 +90,9 @@ export default function Navbar() {
                   </Link>
                   <Link to="/inbox" className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5">
                     <MessageSquare className="w-4 h-4 text-blue-500" /> <span className="font-semibold text-xs tracking-wide">Comunicaciones</span>
+                  </Link>
+                  <Link to="/chat" className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span> <span className="font-semibold text-xs tracking-wide text-orange-500">Chat B2B (Patagonia Link)</span>
                   </Link>
                   <Link to="/perfil-empresa" className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5">
                     <UserIcon className="w-4 h-4 text-emerald-500" /> <span className="font-semibold text-xs tracking-wide">Mi Perfil</span>
@@ -142,6 +149,9 @@ export default function Navbar() {
               <Link to="/#categorias" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-slate-900 dark:hover:text-white transition-colors">Categorías</Link>
               <Link to="/servicios" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-slate-900 dark:hover:text-white transition-colors">Directorio</Link>
               <Link to="/marketplace" onClick={() => setIsMobileMenuOpen(false)} className="text-orange-500 hover:text-orange-400 transition-colors">B2B Store</Link>
+              <Link to="/chat" onClick={() => setIsMobileMenuOpen(false)} className="text-slate-800 dark:text-white hover:text-orange-500 transition-colors flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Chat B2B
+              </Link>
               <Link to="/planes" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-slate-900 dark:hover:text-white transition-colors">Planes</Link>
               <Link to="/insights" onClick={() => setIsMobileMenuOpen(false)} className="text-purple-500 hover:text-purple-400 transition-colors flex items-center gap-2"><Sparkles className="w-4 h-4" /> Insights</Link>
               
@@ -150,6 +160,7 @@ export default function Navbar() {
                   <div className="pt-4 border-t border-slate-100 dark:border-white/5 flex flex-col space-y-4">
                     <span className="text-[10px] text-slate-500">Cuenta: {user.email}</span>
                     <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-orange-500 transition-colors flex items-center gap-2"><LayoutDashboard className="w-4 h-4" /> Inicio</Link>
+                    <Link to="/chat" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-orange-500 transition-colors flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Chat B2B</Link>
                     <Link to="/inbox" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-blue-500 transition-colors flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Comunicaciones</Link>
                     <Link to="/perfil-empresa" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-emerald-500 transition-colors flex items-center gap-2"><UserIcon className="w-4 h-4" /> Mi Perfil</Link>
                     <Link to="/apps" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-purple-500 transition-colors flex items-center gap-2"><Grid2X2 className="w-4 h-4" /> Módulos</Link>

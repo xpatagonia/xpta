@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import CompanyProducts from '../components/CompanyProducts';
 import CompanyInbox from '../components/CompanyInbox';
+import RfqNegotiationModal from '../components/RfqNegotiationModal';
 import { getApiUrl } from '../lib/apiConfig';
 
 interface RFQ {
@@ -19,9 +20,31 @@ interface RFQ {
   createdAt: string;
 }
 
+const DEFAULT_SAMPLE_RFQS: RFQ[] = [
+  {
+    id: 1042,
+    title: 'Adquisición de 40 Pallets Térmicos y Flete a -20°C',
+    category: 'Logística y Almacenamiento',
+    priority: 'high',
+    description: 'Requerimos provisión de pallets homologados con transporte garantizado a -20°C desde Chubut a Santa Cruz.',
+    status: 'quoted',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 1041,
+    title: 'Válvulas Esféricas Acero Forjado 3" ANSI 600',
+    category: 'Sector Metalúrgico y Metalmecánico',
+    priority: 'medium',
+    description: 'Suministro de 24 válvulas para tendido de gasoducto en Cuenca Neuquina. Certificación API 6D requerida.',
+    status: 'quoted',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+  }
+];
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'rfqs'|'products'|'received_rfqs'>('rfqs');
-  const [rfqs, setRfqs] = useState<RFQ[]>([]);
+  const [rfqs, setRfqs] = useState<RFQ[]>(DEFAULT_SAMPLE_RFQS);
+  const [negotiationRfq, setNegotiationRfq] = useState<RFQ | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [installedModules, setInstalledModules] = useState<string[]>([]);
@@ -58,7 +81,9 @@ export default function Dashboard() {
         });
         if (res.ok) {
           const data = await res.json();
-          setRfqs(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setRfqs(data);
+          }
         }
       } catch (error) {
         console.error("Error fetching RFQs:", error);
@@ -582,8 +607,12 @@ export default function Dashboard() {
                           )}
                         </td>
                         <td className="px-6 py-5 text-right">
-                          <button className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
-                            <ChevronRight className="w-5 h-5 ml-auto" />
+                          <button 
+                            onClick={() => setNegotiationRfq(rfq)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500/10 hover:bg-orange-500 text-orange-600 dark:text-orange-400 hover:text-white rounded-xl text-xs font-bold transition shadow-sm"
+                          >
+                            <span>Negociar Ofertas</span>
+                            <ChevronRight className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
@@ -634,6 +663,18 @@ export default function Dashboard() {
       </div>
 
       {mounted && createPortal(modalContent, document.body)}
+
+      {/* MODAL DE NEGOCIACIÓN Y CIERRE DE RFQ */}
+      {negotiationRfq && (
+        <RfqNegotiationModal
+          rfq={negotiationRfq}
+          isOpen={Boolean(negotiationRfq)}
+          onClose={() => setNegotiationRfq(null)}
+          onAward={(propId) => {
+            setRfqs(prev => prev.map(r => r.id === negotiationRfq.id ? { ...r, status: 'awarded' } : r));
+          }}
+        />
+      )}
 
       <AnimatePresence>
         {showSuccessToast && (

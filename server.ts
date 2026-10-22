@@ -49,8 +49,8 @@ async function startServer() {
   app.use(cors({ 
     origin: function (origin, callback) {
       // Allow requests with no origin (like mobile apps or curl requests)
-      // Allow allowed domains, and any Google Cloud Run domains for preview, Render for production, and Cloudflare.
-      if (!origin || allowedOrigins.includes(origin) || origin.includes('.run.app') || origin.includes('.onrender.com') || origin.includes('xpatagonia.online')) {
+      // Allow allowed domains, Google Cloud Run preview, Render backend, Vercel frontend, and Cloudflare.
+      if (!origin || allowedOrigins.includes(origin) || origin.includes('.run.app') || origin.includes('.onrender.com') || origin.includes('.vercel.app') || origin.includes('xpatagonia.online')) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

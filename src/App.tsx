@@ -27,6 +27,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Inbox from './pages/Inbox';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Insights from './pages/Insights';
+import B2BMessenger from './pages/B2BMessenger';
 
 function Home() {
   return (
@@ -65,6 +66,8 @@ export default function App() {
             <Route path="/ecommerce" element={<EcommerceModule />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/inbox" element={<Inbox />} />
+            <Route path="/chat" element={<B2BMessenger />} />
+            <Route path="/comunicaciones-b2b" element={<B2BMessenger />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
           </Routes>

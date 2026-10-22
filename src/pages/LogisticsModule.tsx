@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Truck, MapPin, Package, Search, ArrowRight, ShieldCheck, FileText, CheckCircle2, ChevronDown, ListFilter, Play, Plus, Route, Navigation2, Activity, TrendingUp, Wind } from 'lucide-react';
+import { Truck, MapPin, Package, Search, ArrowRight, ShieldCheck, FileText, CheckCircle2, ChevronDown, ListFilter, Play, Plus, Route, Navigation2, Activity, TrendingUp, Wind, Thermometer, Radio, Gauge, Clock, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { collection, onSnapshot, doc, getDoc, db, auth } from '../lib/db';
+import LogisticsLiveMonitoring from '../components/LogisticsLiveMonitoring';
 
 const CARRIERS = [
   { id: 'cruz-sur', name: 'Cruz del Sur', logo: 'CS', type: 'Carga General y Peligrosa', status: 'active', rate: 'Desde $850/kg' },
@@ -15,7 +16,7 @@ const SHIPMENTS = [
 ];
 
 export default function LogisticsModule() {
-  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'colaborativa' | 'flotas' | 'guias' | 'rutas'>('colaborativa');
+  const [activeTab, setActiveTab] = useState<'cotizador' | 'transportistas' | 'envios' | 'colaborativa' | 'monitoreo' | 'flotas' | 'guias' | 'rutas'>('monitoreo');
   const [quoteOrigin, setQuoteOrigin] = useState('');
   const [quoteDest, setQuoteDest] = useState('');
   const [quoteWeight, setQuoteWeight] = useState('');
@@ -74,6 +75,13 @@ export default function LogisticsModule() {
         {/* Tabs */}
         <div className="flex gap-2 overflow-x-auto mb-8 bg-white dark:bg-[#1A1625] p-2 rounded-2xl border border-slate-200 dark:border-white/5">
           <button
+            onClick={() => setActiveTab('monitoreo')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'monitoreo' ? 'bg-orange-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            <Radio className={`w-4 h-4 ${activeTab === 'monitoreo' ? 'text-white' : 'text-orange-500'}`} />
+            Telemetría & Rutas en Vivo
+          </button>
+          <button
             onClick={() => {setActiveTab('cotizador'); setShowResults(false);}}
             className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap ${activeTab === 'cotizador' ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
@@ -127,6 +135,12 @@ export default function LogisticsModule() {
 
         {/* Content */}
         <AnimatePresence mode="wait">
+          {activeTab === 'monitoreo' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+              <LogisticsLiveMonitoring />
+            </motion.div>
+          )}
+
           {activeTab === 'cotizador' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               

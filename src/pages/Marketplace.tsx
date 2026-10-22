@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Filter, ShoppingCart, ArrowRight, Building2, MapPin, Package, Shield, Settings, Ruler, ChevronDown, Check, Trash2, Send, Video, Droplets, Anchor, Tractor, Utensils, Pickaxe, Zap, Cpu, Hammer, Sprout, Wrench, Truck, Flame } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, Filter, ShoppingCart, ArrowRight, Building2, MapPin, Package, Shield, Settings, Ruler, ChevronDown, Check, Trash2, Send, Video, Droplets, Anchor, Tractor, Utensils, Pickaxe, Zap, Cpu, Hammer, Sprout, Wrench, Truck, Flame, MessageSquare } from 'lucide-react';
 import { db, collection, query, onSnapshot } from '../lib/db';
 import { MAIN_CATEGORIES } from '../lib/categories';
 
@@ -386,6 +387,14 @@ export default function Marketplace() {
                         <ShoppingCart className="w-4 h-4 group-hover/btn:scale-110 transition-transform" /> 
                         {cartItems.find(i => i.id === product.id) ? 'Añadido a Cotización' : 'Agregar a Cotización'}
                       </button>
+
+                      <Link
+                        to="/chat"
+                        className="w-full mt-2 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:border-orange-500 text-slate-600 dark:text-slate-300 hover:text-orange-500 font-bold text-[11px] flex items-center justify-center gap-1.5 transition"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-orange-500" />
+                        <span>Consultar por Chat B2B</span>
+                      </Link>
                     </div>
                   </motion.div>
                 ))}

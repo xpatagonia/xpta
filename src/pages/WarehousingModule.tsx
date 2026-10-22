@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { db, doc, collection, onSnapshot, writeBatch } from '../lib/db';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import WarehousingBaysColdChain from '../components/WarehousingBaysColdChain';
 
 const API_KEY =
   (typeof process !== 'undefined' ? process.env.GOOGLE_MAPS_PLATFORM_KEY : undefined) ||
@@ -29,7 +30,7 @@ const DEFAULT_INVENTORY = [
 ];
 
 export default function WarehousingModule() {
-  const [activeTab, setActiveTab] = useState<'mapa' | 'inventario' | 'turnos'>('mapa');
+  const [activeTab, setActiveTab] = useState<'mapa' | 'inventario' | 'camaras' | 'turnos'>('camaras');
   const [inventory, setInventory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
@@ -142,31 +143,6 @@ export default function WarehousingModule() {
   const lowStockCount = inventory.filter(i => i.status === 'low-stock').length;
   const outOfStockCount = inventory.filter(i => i.status === 'out-of-stock').length;
 
-  if (!hasValidKey) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12 flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-[#1A1625] rounded-3xl p-8 max-w-lg w-full text-center border border-slate-200 dark:border-white/10 shadow-xl">
-          <MapIcon className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-6" />
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Se requiere API Key de Google Maps</h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm">
-            Para visualizar tus almacenes distribuidos en el territorio, necesitas configurar tu clave de Google Maps Platform.
-          </p>
-          <div className="text-left text-sm bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5 mb-6">
-            <p className="mb-2 font-bold text-slate-700 dark:text-slate-300">Pasos para activar:</p>
-            <ol className="list-decimal pl-5 space-y-2 text-slate-600 dark:text-slate-400">
-              <li>Abre <strong>Settings</strong> (⚙️ esquina superior derecha)</li>
-              <li>Selecciona <strong>Secrets</strong></li>
-              <li>Agrega <code>GOOGLE_MAPS_PLATFORM_KEY</code> y pega tu clave.</li>
-            </ol>
-          </div>
-          <a href="https://console.cloud.google.com/google/maps-apis/start" target="_blank" rel="noopener noreferrer" className="inline-block w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold transition">
-            Obtener API Key
-          </a>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12">
       <div className="max-w-6xl mx-auto px-6">
@@ -178,23 +154,30 @@ export default function WarehousingModule() {
               </div>
               <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Warehousing & Almacenamiento</h1>
             </div>
-            <p className="text-slate-600 dark:text-slate-400">Gestiona tu red de almacenamiento y stock distribuido regionalmente.</p>
+            <p className="text-slate-600 dark:text-slate-400">Gestiona tu red de almacenamiento, stock distribuido y cámaras de frío.</p>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="flex gap-2 overflow-x-auto mb-8 bg-white dark:bg-[#1A1625] p-2 rounded-2xl border border-slate-200 dark:border-white/5">
           <button
-            onClick={() => setActiveTab('mapa')}
-            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap ${activeTab === 'mapa' ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+            onClick={() => setActiveTab('camaras')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'camaras' ? 'bg-orange-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
-            Mapa de Red
+            <Layers className={`w-4 h-4 ${activeTab === 'camaras' ? 'text-white' : 'text-orange-500'}`} />
+            Cámaras de Frío & Bahías
           </button>
           <button
             onClick={() => setActiveTab('inventario')}
             className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap ${activeTab === 'inventario' ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
             Inventario Remoto
+          </button>
+          <button
+            onClick={() => setActiveTab('mapa')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-colors whitespace-nowrap ${activeTab === 'mapa' ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            Mapa de Red
           </button>
           <button
             onClick={() => setActiveTab('turnos')}
@@ -206,7 +189,33 @@ export default function WarehousingModule() {
 
         {/* Content */}
         <AnimatePresence mode="wait">
+          {activeTab === 'camaras' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+              <WarehousingBaysColdChain />
+            </motion.div>
+          )}
+
           {activeTab === 'mapa' && (
+            !hasValidKey ? (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-white dark:bg-[#1A1625] rounded-3xl p-8 max-w-lg mx-auto text-center border border-slate-200 dark:border-white/10 shadow-xl">
+                <MapIcon className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-6" />
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Se requiere API Key de Google Maps</h2>
+                <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm">
+                  Para visualizar tus almacenes distribuidos en el mapa interactivo satelital, puedes configurar tu clave de Google Maps Platform en los ajustes del proyecto.
+                </p>
+                <div className="text-left text-sm bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5 mb-6">
+                  <p className="mb-2 font-bold text-slate-700 dark:text-slate-300">Pasos para activar:</p>
+                  <ol className="list-decimal pl-5 space-y-2 text-slate-600 dark:text-slate-400 text-xs">
+                    <li>Abre <strong>Settings</strong> (⚙️ en AI Studio)</li>
+                    <li>Selecciona <strong>Secrets</strong></li>
+                    <li>Agrega <code>GOOGLE_MAPS_PLATFORM_KEY</code> con tu clave activa.</li>
+                  </ol>
+                </div>
+                <a href="https://console.cloud.google.com/google/maps-apis/start" target="_blank" rel="noopener noreferrer" className="inline-block w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold transition text-xs">
+                  Obtener API Key en Google Cloud
+                </a>
+              </motion.div>
+            ) : (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
               <div className="lg:col-span-4 space-y-4">
@@ -274,7 +283,7 @@ export default function WarehousingModule() {
                 </div>
               </div>
             </motion.div>
-          )}
+          ))}
 
           {activeTab === 'inventario' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
