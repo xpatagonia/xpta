@@ -1,9 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+const FALLBACK_SUPABASE_URL = 'https://cjbafuclfgdexapfmyzd.supabase.co';
+const FALLBACK_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
+
+const rawUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const rawKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+
+const supabaseUrl = rawUrl.startsWith('http') ? rawUrl : FALLBACK_SUPABASE_URL;
+const supabaseAnonKey = rawKey.length > 10 ? rawKey : FALLBACK_ANON_KEY;
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 
 export interface AuthRequest extends Request {
   user?: any;

@@ -249,21 +249,29 @@ export default function WarehousingModule() {
 
               <div className="lg:col-span-8">
                 <div className="bg-white dark:bg-[#1A1625] rounded-3xl overflow-hidden border border-slate-200 dark:border-white/5 h-[600px] shadow-sm relative">
-                  <APIProvider apiKey={API_KEY} version="weekly">
-                    <Map
-                      defaultCenter={{lat: -40.5, lng: -65.0}} // Default around Patagonia
-                      mapId="MAP_WAREHOUSE_ID"
-                      defaultZoom={4}
-                      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                      style={{width: '100%', height: '100%'}}
-                    >
-                      {WAREHOUSES.map((wh) => (
-                         <AdvancedMarker key={wh.id} position={{lat: wh.lat, lng: wh.lng}} title={wh.name}>
-                           <Pin background={wh.status === 'warning' ? '#ef4444' : wh.status === 'high' ? '#f59e0b' : '#f97316'} glyphColor="#fff" borderColor="rgba(255,255,255,0.2)" />
-                         </AdvancedMarker>
-                      ))}
-                    </Map>
-                  </APIProvider>
+                  {hasValidKey ? (
+                    <APIProvider apiKey={API_KEY} version="weekly">
+                      <Map
+                        defaultCenter={{lat: -40.5, lng: -65.0}} // Default around Patagonia
+                        mapId="MAP_WAREHOUSE_ID"
+                        defaultZoom={4}
+                        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+                        style={{width: '100%', height: '100%'}}
+                      >
+                        {WAREHOUSES.map((wh) => (
+                           <AdvancedMarker key={wh.id} position={{lat: wh.lat, lng: wh.lng}} title={wh.name}>
+                             <Pin background={wh.status === 'warning' ? '#ef4444' : wh.status === 'high' ? '#f59e0b' : '#f97316'} glyphColor="#fff" borderColor="rgba(255,255,255,0.2)" />
+                           </AdvancedMarker>
+                        ))}
+                      </Map>
+                    </APIProvider>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-slate-900/40">
+                      <MapIcon className="w-12 h-12 text-orange-400 mb-3 opacity-60" />
+                      <h4 className="font-bold text-white text-base mb-1">Mapa Satelital de Almacenes</h4>
+                      <p className="text-xs text-slate-400 max-w-md">Para activar la visualización satelital en vivo, configure la variable VITE_GOOGLE_MAPS_PLATFORM_KEY en su panel de Vercel.</p>
+                    </div>
+                  )}
                   
                   {/* Floating legend */}
                   <div className="absolute bottom-6 left-6 bg-white/90 dark:bg-black/80 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-slate-200 dark:border-white/10">

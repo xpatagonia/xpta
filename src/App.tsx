@@ -70,6 +70,8 @@ export default function App() {
             <Route path="/comunicaciones-b2b" element={<B2BMessenger />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
+            {/* Redundancia para rutas no coincidentes */}
+            <Route path="*" element={<Home />} />
           </Routes>
         </main>
         <Footer />
