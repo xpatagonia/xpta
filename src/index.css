@@ -25,3 +25,24 @@ html.dark body {
 h1, h2, h3, h4, h5, h6, .font-display {
   font-family: var(--font-display);
 }
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-ticker {
+  display: flex;
+  width: max-content;
+  animation: marquee 45s linear infinite;
+}
+
+.animate-ticker:hover,
+.ticker-paused {
+  animation-play-state: paused !important;
+}
+

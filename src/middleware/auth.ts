@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { createClient } from '@supabase/supabase-js';
 
 const FALLBACK_SUPABASE_URL = 'https://cjbafuclfgdexapfmyzd.supabase.co';
