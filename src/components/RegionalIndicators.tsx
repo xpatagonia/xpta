@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Wind, Anchor, Activity, DollarSign, Euro, Banknote,
-  Flame, Zap, ShieldCheck, RefreshCw, Layers, ExternalLink, HelpCircle
+  Flame, Zap, ShieldCheck, RefreshCw, Layers, ExternalLink, HelpCircle,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import WallStreetTicker from './WallStreetTicker';
 
 interface MarketDataState {
@@ -64,6 +65,7 @@ export default function RegionalIndicators() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSourcesModal, setShowSourcesModal] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<string>('');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const loadData = async () => {
     setIsRefreshing(true);
@@ -346,169 +348,231 @@ export default function RegionalIndicators() {
     }
   ];
 
+  // 4 Core Benchmark Highlights for compact accompanying view
+  const primaryCards = [
+    allCards.find(c => c.id === 'btc')!,
+    allCards.find(c => c.id === 'blue')!,
+    allCards.find(c => c.id === 'medanito')!,
+    allCards.find(c => c.id === 'eolica')!,
+  ].filter(Boolean);
+
   const filteredCards = filter === 'all' 
     ? allCards 
     : allCards.filter(c => c.category === filter);
 
   return (
-    <section className="bg-slate-50 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/5 relative z-20">
-      {/* 1. Wall Street Infinite Marquee Ticker */}
+    <section className="bg-slate-50/70 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/5 relative z-20">
+      {/* 1. Wall Street Infinite Marquee Ticker (Framed in container) */}
       <WallStreetTicker />
 
-      {/* 2. Structured Section Container */}
-      <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
-        {/* Header with Title and Controls */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-6">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                <TrendingUp className="w-3.5 h-3.5" />
-                Inteligencia Financiera & Productiva
-              </span>
-              {lastRefreshed && (
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  · Última sincronización: {lastRefreshed}
-                </span>
-              )}
+      {/* 2. Structured Section Container (Compact Accompanying Context) */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 pt-2 pb-6 md:pb-8">
+        {/* Subtle Accompanying Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-200/70 dark:border-white/5 gap-3">
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
+              <TrendingUp className="w-3.5 h-3.5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Indicadores de Contexto & Mercado
+                </h3>
+                {lastRefreshed && (
+                  <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
+                    · Sinc: {lastRefreshed}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Variables económicas y productivas que acompañan la actividad de la región.
+              </p>
             </div>
-            <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-              Indicadores Estratégicos Patagonia & Mercado Cambiario
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-sm max-w-3xl mt-1">
-              Monitoreo integral de variables energéticas, agroindustriales, cotizaciones cambiarias y el activo líder Bitcoin (BTC) con fuentes institucionales verificadas.
-            </p>
           </div>
 
-          <div className="flex items-center gap-3 self-start md:self-end">
+          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
             <button
               onClick={loadData}
               disabled={isRefreshing}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 shadow-sm transition-all"
+              title="Refrescar cotizaciones"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 shadow-xs transition-all"
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-purple-500 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span>Actualizar</span>
+              <RefreshCw className={`w-3 h-3 text-purple-500 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden md:inline">Actualizar</span>
             </button>
             <button
               onClick={() => setShowSourcesModal(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition-colors"
+              title="Auditar fuentes oficiales"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 shadow-xs transition-colors"
             >
-              <ShieldCheck className="w-3.5 h-3.5" />
+              <ShieldCheck className="w-3 h-3 text-emerald-500" />
               <span>Auditar Fuentes</span>
+            </button>
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors"
+            >
+              <span>{isExpanded ? 'Vista compacta' : 'Ver todos (11)'}</span>
+              {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
           </div>
         </div>
 
-        {/* Category Filters */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 scrollbar-none text-xs font-bold">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
-              filter === 'all'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
-                : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            Todos ({allCards.length})
-          </button>
-          <button
-            onClick={() => setFilter('crypto-forex')}
-            className={`px-4 py-2 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-              filter === 'crypto-forex'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
-                : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            Cripto & Divisas (BTC, Blue, MEP, Oficial)
-          </button>
-          <button
-            onClick={() => setFilter('energy')}
-            className={`px-4 py-2 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-              filter === 'energy'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
-                : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5 text-orange-400" />
-            Energía & Vaca Muerta (Medanito, Brent, Gas)
-          </button>
-          <button
-            onClick={() => setFilter('patagonia')}
-            className={`px-4 py-2 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-              filter === 'patagonia'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
-                : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Wind className="w-3.5 h-3.5 text-emerald-400" />
-            Sectores Patagónicos (Eólica, Pesca, Lanas)
-          </button>
-        </div>
-
-        {/* Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
-          {filteredCards.map((card, index) => (
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-              key={card.id}
-              className={`p-5 rounded-3xl border transition-all relative overflow-hidden group bg-white dark:bg-[#1A1625] ${
-                card.id === 'btc' 
-                  ? 'border-amber-500/30 shadow-md shadow-amber-500/5 hover:border-amber-400' 
-                  : 'border-slate-200 dark:border-white/5 shadow-sm hover:shadow-md hover:border-purple-500/30'
-              }`}
-            >
-              {/* Glow backdrop */}
-              <div className={`absolute -right-6 -top-6 w-24 h-24 bg-gradient-to-br ${card.color} opacity-5 group-hover:opacity-15 transition-opacity rounded-full blur-2xl z-0`} />
-
-              <div className="relative z-10">
-                {/* Header with icon and change pill */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${card.bgLight} ${card.textLight}`}>
-                    {card.icon}
+        {/* 4 Core Benchmark Micro-Cards (Compact Default Row) */}
+        {!isExpanded && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+            {primaryCards.map((card) => (
+              <div
+                key={card.id}
+                className={`p-2.5 sm:p-3 rounded-xl border transition-all bg-white dark:bg-[#181424] flex flex-col justify-between ${
+                  card.id === 'btc' 
+                    ? 'border-amber-500/30 hover:border-amber-400' 
+                    : 'border-slate-200/80 dark:border-white/5 hover:border-purple-500/30'
+                } shadow-xs hover:shadow-sm`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2 truncate">
+                    <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${card.bgLight} ${card.textLight}`}>
+                      {React.cloneElement(card.icon, { className: 'w-3.5 h-3.5' })}
+                    </div>
+                    <div className="truncate">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block truncate leading-none mb-0.5">
+                        {card.badge}
+                      </span>
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate leading-none">
+                        {card.title}
+                      </h4>
+                    </div>
                   </div>
-                  <div className={`flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg ${
+                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ml-1.5 ${
                     card.isPositive 
                       ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-500/20' 
                       : 'text-rose-600 bg-rose-50 dark:bg-rose-500/10 border border-rose-500/20'
                   }`}>
                     {card.change}
-                  </div>
-                </div>
-
-                {/* Subtitle / Badge */}
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-0.5">
-                  {card.badge}
-                </div>
-
-                {/* Title */}
-                <h3 className="text-slate-800 dark:text-slate-100 font-bold text-sm mb-1.5 flex items-center gap-1">
-                  {card.title}
-                </h3>
-
-                {/* Value */}
-                <p className="text-2xl font-black font-mono tracking-tight text-slate-900 dark:text-white mb-1">
-                  {card.value}
-                </p>
-
-                {/* Secondary metric */}
-                <p className="text-xs font-mono text-slate-500 dark:text-slate-400 mb-3 truncate">
-                  {card.subValue}
-                </p>
-
-                {/* Source Verification Badge */}
-                <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[10px] text-slate-400">
-                  <span className="flex items-center gap-1 truncate" title={card.source}>
-                    <ShieldCheck className="w-3 h-3 text-emerald-500 shrink-0" />
-                    <span className="truncate">{card.source}</span>
                   </span>
-                  <span className="font-mono text-slate-400 text-[9px] uppercase">En vivo</span>
+                </div>
+
+                <div className="flex items-baseline justify-between pt-1 border-t border-slate-100 dark:border-white/5 gap-1">
+                  <span className="text-xs sm:text-sm font-black font-mono text-slate-900 dark:text-white truncate">
+                    {card.value}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate max-w-[130px]">
+                    {card.subValue}
+                  </span>
                 </div>
               </div>
-            </motion.div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {/* Expanded Micro-Grid with Category Tabs */}
+        {isExpanded && (
+          <div className="space-y-3">
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] font-bold">
+              <button
+                onClick={() => setFilter('all')}
+                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${
+                  filter === 'all'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Todos ({allCards.length})
+              </button>
+              <button
+                onClick={() => setFilter('crypto-forex')}
+                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                  filter === 'crypto-forex'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Zap className="w-3 h-3 text-amber-400" />
+                Cripto & Divisas
+              </button>
+              <button
+                onClick={() => setFilter('energy')}
+                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                  filter === 'energy'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Flame className="w-3 h-3 text-orange-400" />
+                Energía & Vaca Muerta
+              </button>
+              <button
+                onClick={() => setFilter('patagonia')}
+                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                  filter === 'patagonia'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/5 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Wind className="w-3 h-3 text-emerald-400" />
+                Sectores Patagónicos
+              </button>
+            </div>
+
+            {/* Compact Micro-Cards Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {filteredCards.map((card) => (
+                <div
+                  key={card.id}
+                  className={`p-2.5 sm:p-3 rounded-xl border transition-all bg-white dark:bg-[#181424] flex flex-col justify-between ${
+                    card.id === 'btc' 
+                      ? 'border-amber-500/30' 
+                      : 'border-slate-200/80 dark:border-white/5'
+                  } shadow-xs hover:border-purple-500/30`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2 truncate">
+                      <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${card.bgLight} ${card.textLight}`}>
+                        {React.cloneElement(card.icon, { className: 'w-3.5 h-3.5' })}
+                      </div>
+                      <div className="truncate">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block truncate leading-none mb-0.5">
+                          {card.badge}
+                        </span>
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate leading-none">
+                          {card.title}
+                        </h4>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ml-1.5 ${
+                      card.isPositive 
+                        ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-500/20' 
+                        : 'text-rose-600 bg-rose-50 dark:bg-rose-500/10 border border-rose-500/20'
+                    }`}>
+                      {card.change}
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between pt-1 border-t border-slate-100 dark:border-white/5 gap-1">
+                    <span className="text-xs sm:text-sm font-black font-mono text-slate-900 dark:text-white truncate">
+                      {card.value}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate max-w-[120px]">
+                      {card.subValue}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={() => setIsExpanded(false)}
+                className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                Reducir a indicadores clave
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Verified Sources Transparency Modal */}

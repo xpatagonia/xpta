@@ -77,7 +77,6 @@ export default function Hero() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Todas');
   const [suggestions, setSuggestions] = useState<string[]>(['Logística Frío', 'Auditoría Ambiental', 'Maquinaria Agrícola']);
-  const [showForm, setShowForm] = useState(false);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -119,40 +118,33 @@ export default function Hero() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setShowForm(false);
-      setTimeout(() => {
-        setActiveFrame((prev) => (prev + 1) % framesConfig.length);
-      }, 300);
-    }, 15000); // 15 seconds
+      setActiveFrame((prev) => (prev + 1) % framesConfig.length);
+    }, 12000); // 12 seconds per frame
 
     return () => clearInterval(timer);
-  }, [activeFrame]);
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (auth.currentUser) {
-      navigate('/dashboard');
-    } else {
-      alert('Debes iniciar sesión para realizar búsquedas en el directorio de industrias.');
-    }
+    navigate('/servicios');
   };
 
   return (
-    <section className="relative pt-24 pb-32 lg:pt-32 lg:pb-40 overflow-hidden px-6 md:px-12 bg-white dark:bg-[#110E17] min-h-[600px] flex items-center">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-purple-200/50 via-white to-white dark:from-purple-900/20 dark:via-[#110E17] dark:to-[#110E17] -z-10"></div>
+    <section className="relative pt-20 pb-20 lg:pt-28 lg:pb-24 overflow-hidden px-4 sm:px-6 md:px-12 bg-white dark:bg-[#110E17] min-h-[560px] flex items-center justify-center">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-purple-200/50 via-white to-white dark:from-purple-900/20 dark:via-[#110E17] dark:to-[#110E17] -z-10 pointer-events-none"></div>
       
       <div className="max-w-5xl mx-auto relative text-center w-full">
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.6 }}
         >
           <motion.div 
             key={`tag-${activeFrame}`}
-            animate={{ y: [0, -4, 0], opacity: [0, 1] }}
+            animate={{ y: [0, -4, 0], opacity: [0.8, 1] }}
             initial={{ opacity: 0 }}
-            transition={{ y: { repeat: Infinity, duration: 3, ease: "easeInOut" }, opacity: { duration: 0.5 } }}
-            className="inline-flex items-center px-4 py-2 rounded-full border border-slate-200 dark:border-white/10 bg-white/5 text-slate-700 dark:text-slate-300 text-[10px] font-bold uppercase tracking-widest mb-10 shadow-sm backdrop-blur-sm"
+            transition={{ y: { repeat: Infinity, duration: 3, ease: "easeInOut" }, opacity: { duration: 0.4 } }}
+            className="inline-flex items-center px-4 py-2 rounded-full border border-slate-200 dark:border-white/10 bg-white/5 text-slate-700 dark:text-slate-300 text-[10px] font-bold uppercase tracking-widest mb-6 shadow-sm backdrop-blur-sm"
           >
             {(() => {
               const Icon = framesConfig[activeFrame].icon;
@@ -161,29 +153,29 @@ export default function Hero() {
             {framesConfig[activeFrame].tag}
           </motion.div>
           
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.2] mb-8 text-slate-900 dark:text-white tracking-tight h-[180px] md:h-[160px] flex items-center justify-center">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.2] mb-6 text-slate-900 dark:text-white tracking-tight min-h-[130px] md:min-h-[150px] flex items-center justify-center">
             <div>
               <ModernTextReveal 
                 key={`title-${activeFrame}`}
                 text={framesConfig[activeFrame].title} 
-                onComplete={() => setShowForm(true)}
               />
             </div>
           </h1>
           
-          <AnimatePresence mode="wait">
-            {showForm && (
+          {/* Stably sized container so the section height NEVER shifts or bounces */}
+          <div className="min-h-[220px] md:min-h-[200px] flex flex-col justify-start">
+            <AnimatePresence mode="wait">
               <motion.div
                 key={`content-${activeFrame}`}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3 }}
-                className="min-h-[220px]"
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.25 }}
+                className="w-full"
               >
-                <p className="text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto mb-12 font-medium flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 mr-2 text-orange-400" />
-                  {framesConfig[activeFrame].subtitle}
+                <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto mb-8 font-medium flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-orange-400 shrink-0" />
+                  <span>{framesConfig[activeFrame].subtitle}</span>
                 </p>
                 
                 {framesConfig[activeFrame].type === 'search' && (
@@ -263,19 +255,14 @@ export default function Hero() {
                   </div>
                 )}
               </motion.div>
-            )}
-          </AnimatePresence>
+            </AnimatePresence>
+          </div>
 
-          <div className="mt-16 flex justify-center gap-3">
+          <div className="mt-12 flex justify-center gap-3">
             {framesConfig.map((frame, idx) => (
               <button
                 key={frame.id}
-                onClick={() => {
-                  if (activeFrame !== idx) {
-                    setShowForm(false);
-                    setTimeout(() => setActiveFrame(idx), 300);
-                  }
-                }}
+                onClick={() => setActiveFrame(idx)}
                 className={`h-2 rounded-full transition-all duration-500 ${activeFrame === idx ? 'bg-purple-500 w-16' : 'bg-slate-300 dark:bg-slate-700 w-6 hover:bg-purple-400'}`}
                 aria-label={`Ir al slide ${idx + 1}`}
               />

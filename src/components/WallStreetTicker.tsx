@@ -326,61 +326,62 @@ export default function WallStreetTicker() {
   }, []);
 
   return (
-    <div className="w-full bg-[#0B0912] border-y border-white/10 text-white select-none relative z-30 shadow-2xl overflow-hidden">
-      {/* Top micro bar for live status */}
-      <div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-between text-[11px] font-mono border-b border-white/5 text-slate-400">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-emerald-400 font-bold uppercase tracking-wider">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 pt-3 pb-1 select-none relative z-30">
+      <div className="rounded-2xl border border-slate-200/90 dark:border-white/10 bg-[#0B0912] text-white shadow-lg overflow-hidden">
+        {/* Top micro bar for live status */}
+        <div className="px-4 py-1.5 flex items-center justify-between text-[11px] font-mono border-b border-white/10 bg-white/[0.02] text-slate-400">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-emerald-400 font-bold uppercase tracking-wider text-[10px] sm:text-[11px]">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              Terminal Financiera Patagonia · En Vivo
             </span>
-            Terminal Financiera Patagonia · En Vivo
-          </span>
-          <span className="hidden sm:inline-block text-slate-600">|</span>
-          <span className="hidden sm:flex items-center gap-1 text-slate-400">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            Fuentes Verificadas: DolarApi · CoinGecko / Coinbase · CAMMESA · BYMA
-          </span>
+            <span className="hidden sm:inline-block text-slate-600">|</span>
+            <span className="hidden md:flex items-center gap-1 text-slate-400 text-[10px]">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              DolarApi · CoinGecko / Coinbase · CAMMESA · BYMA
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {lastUpdated && (
+              <span className="hidden lg:inline-block text-slate-500 text-[10px]">
+                Actualizado: <span className="text-slate-300 font-semibold">{lastUpdated}</span>
+              </span>
+            )}
+            <button
+              onClick={fetchMarketData}
+              disabled={isLoading}
+              title="Actualizar cotizaciones en vivo"
+              className="flex items-center gap-1 hover:text-white transition-colors text-slate-400 disabled:opacity-50 text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded hover:bg-white/5"
+            >
+              <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-purple-400' : ''}`} />
+              <span className="hidden sm:inline">Refrescar</span>
+            </button>
+            <button
+              onClick={() => setIsPaused(!isPaused)}
+              title={isPaused ? "Reanudar cinta" : "Pausar cinta"}
+              className="flex items-center gap-1 hover:text-white transition-colors text-slate-400 text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded hover:bg-white/5"
+            >
+              {isPaused ? <Play className="w-3 h-3 text-emerald-400" /> : <Pause className="w-3 h-3 text-amber-400" />}
+              <span className="hidden sm:inline">{isPaused ? "Reanudar" : "Pausa"}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {lastUpdated && (
-            <span className="hidden md:inline-block text-slate-500 text-[10px]">
-              Actualizado: <span className="text-slate-300 font-semibold">{lastUpdated}</span>
-            </span>
-          )}
-          <button
-            onClick={fetchMarketData}
-            disabled={isLoading}
-            title="Actualizar cotizaciones en vivo"
-            className="flex items-center gap-1 hover:text-white transition-colors text-slate-400 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-purple-400' : ''}`} />
-            <span className="hidden sm:inline">Refrescar</span>
-          </button>
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            title={isPaused ? "Reanudar cinta" : "Pausar cinta"}
-            className="flex items-center gap-1 hover:text-white transition-colors text-slate-400"
-          >
-            {isPaused ? <Play className="w-3 h-3 text-emerald-400" /> : <Pause className="w-3 h-3 text-amber-400" />}
-            <span className="hidden sm:inline">{isPaused ? "Reanudar" : "Pausa"}</span>
-          </button>
-        </div>
-      </div>
+        {/* Ticker marquee ribbon */}
+        <div 
+          className="relative overflow-hidden py-2 bg-gradient-to-r from-[#0d0a17] via-[#090710] to-[#0d0a17]"
+          onMouseEnter={() => setIsPaused(true)}
+          onMouseLeave={() => setIsPaused(false)}
+        >
+          {/* Edge vignettes blending seamlessly into the framed card */}
+          <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-[#0B0912] to-transparent z-10 pointer-events-none" />
+          <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-[#0B0912] to-transparent z-10 pointer-events-none" />
 
-      {/* Ticker marquee ribbon */}
-      <div 
-        className="relative overflow-hidden py-2.5 bg-gradient-to-r from-[#0d0a17] via-[#090710] to-[#0d0a17]"
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => setIsPaused(false)}
-      >
-        {/* Subtle left & right edge vignettes */}
-        <div className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-[#0B0912] to-transparent z-10 pointer-events-none" />
-        <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-[#0B0912] to-transparent z-10 pointer-events-none" />
-
-        <div className={`animate-ticker ${isPaused ? 'ticker-paused' : ''} flex items-center gap-6`}>
+          <div className={`animate-ticker ${isPaused ? 'ticker-paused' : ''} flex items-center gap-5`}>
           {/* We render the array twice for smooth infinite loop */}
           {[...items, ...items].map((item, idx) => {
             const isCrypto = item.category === 'crypto';
@@ -435,6 +436,7 @@ export default function WallStreetTicker() {
           })}
         </div>
       </div>
+    </div>
 
       {/* Interactive Detail Modal for clicked indicator */}
       {selectedItem && (

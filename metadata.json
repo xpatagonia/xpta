@@ -1,6 +1,6 @@
 {
-  "name": "xpatagonia.online",
-  "description": "Plataforma de innovación de la Patagonia. Desarrollo de proyectos de bioeconomía, tecnología y economía circular.",
+  "name": "xPatagonia | Hub de Servicios Inteligentes B2B",
+  "description": "Plataforma integral B2B e inteligencia comercial para empresas, proveedores e inversiones en la región patagónica.",
   "requestFramePermissions": [
     "geolocation"
   ],

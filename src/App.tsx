@@ -5,9 +5,6 @@ import RegionalIndicators from './components/RegionalIndicators';
 import Categories from './components/Categories';
 import HowItWorks from './components/HowItWorks';
 import EcosystemGrid from './components/EcosystemGrid';
-import Projects from './components/Projects';
-import TripleImpact from './components/TripleImpact';
-import Alliances from './components/Alliances';
 import Contact from './components/Contact';
 import Footer from './components/Footer';
 import BackToTop from './components/BackToTop';
@@ -20,7 +17,6 @@ import CompanyProfile from './pages/CompanyProfile';
 import Marketplace from './pages/Marketplace';
 import AppStore from './pages/AppStore';
 import LogisticsModule from './pages/LogisticsModule';
-
 import WarehousingModule from './pages/WarehousingModule';
 import EcommerceModule from './pages/EcommerceModule';
 import AdminDashboard from './pages/AdminDashboard';
@@ -34,20 +30,16 @@ function Home() {
     <>
       <Hero />
       <RegionalIndicators />
+      <NewsMagazine />
       <Categories />
       <HowItWorks />
-      <NewsMagazine />
       <EcosystemGrid />
-      <Projects />
-      <Alliances />
-      <TripleImpact />
       <Contact />
     </>
   );
 }
 
 export default function App() {
-  console.log("App loaded - testing GitHub integration");
   return (
     <Router>
       <div className="min-h-screen text-slate-800 dark:text-slate-100 bg-white dark:bg-[#110E17] font-sans selection:bg-purple-500 selection:text-white flex flex-col">
@@ -81,5 +73,3 @@ export default function App() {
     </Router>
   );
 }
-
-
