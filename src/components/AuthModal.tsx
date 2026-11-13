@@ -13,6 +13,26 @@ interface AuthModalProps {
   initialMode?: 'login' | 'register' | 'recovery' | 'update_password';
 }
 
+function translateAuthError(rawMsg: string): string {
+  const msg = String(rawMsg || '');
+  if (/rate limit|over_email_send_rate_limit/i.test(msg)) {
+    return 'Límite temporal de correos de Supabase alcanzado (el SMTP gratuito de Supabase permite 2–4 envíos por hora). Esperá unos minutos o definí tu clave directo desde Supabase → Authentication → Users.';
+  }
+  if (/security purposes|only request this after/i.test(msg)) {
+    return 'Por seguridad de Supabase debés esperar 60 segundos antes de pedir otro enlace.';
+  }
+  if (/otp_expired|expired|invalid/i.test(msg) && /link|token|otp/i.test(msg)) {
+    return 'El enlace de recuperación expiró o ya fue usado. Solicitá uno nuevo desde "Recuperar acceso".';
+  }
+  if (/Auth session missing/i.test(msg)) {
+    return 'La sesión de recuperación no está activa o el enlace expiró. Volvé a solicitar "Recuperar acceso" y abrí el enlace en la misma pestaña.';
+  }
+  if (/different from the old password/i.test(msg)) {
+    return 'La nueva contraseña debe ser diferente a la contraseña anterior.';
+  }
+  return msg || 'Ha ocurrido un error inesperado';
+}
+
 export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalProps) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<'login' | 'register' | 'recovery' | 'update_password'>(initialMode || 'login');
@@ -47,6 +67,22 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
       setError(null);
       setSuccess(null);
       setMode(initialMode || 'login');
+      return;
+    }
+
+    // Check if redirected back with a Supabase error in hash/query (e.g. otp_expired)
+    if (typeof window !== 'undefined') {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const searchParams = new URLSearchParams(window.location.search);
+      const errDesc =
+        hashParams.get('error_description') ||
+        searchParams.get('error_description') ||
+        hashParams.get('error') ||
+        searchParams.get('error');
+      if (errDesc) {
+        setError(translateAuthError(errDesc));
+        setMode('recovery');
+      }
     }
   }, [isOpen, initialMode]);
 
@@ -61,19 +97,43 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
         if (!newPassword || newPassword.length < 6) {
           throw new Error('La nueva contraseña debe tener al menos 6 caracteres.');
         }
+
+        // Ensure session is hydrated if tokens are still in the URL hash or ?code= query
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session && typeof window !== 'undefined') {
+          const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+          const access_token = hashParams.get('access_token');
+          const refresh_token = hashParams.get('refresh_token');
+          const code = new URLSearchParams(window.location.search).get('code');
+
+          if (access_token && refresh_token) {
+            const { error: setSessErr } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
+            if (setSessErr) throw setSessErr;
+          } else if (code) {
+            const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchErr) throw exchErr;
+          }
+        }
+
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         if (error) throw error;
-        setSuccess('¡Contraseña actualizada con éxito! Ya podés operar con tu cuenta.');
+        setSuccess('¡Contraseña actualizada con éxito! Ya podés ingresar al Panel.');
+        if (typeof window !== 'undefined' && (window.location.hash || window.location.search)) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
         setTimeout(() => {
           onClose();
           navigate('/dashboard');
         }, 1200);
       } else if (mode === 'recovery') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + '/dashboard?recovery=1',
+          redirectTo: window.location.origin + '/?recovery=1',
         });
         if (error) throw error;
-        setSuccess('Te hemos enviado un enlace a tu correo para restablecer tu contraseña.');
+        setSuccess('Te hemos enviado un enlace a tu correo para restablecer tu contraseña. Revisá también Spam.');
       } else if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -107,7 +167,7 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
         navigate('/perfil-empresa');
       }
     } catch (err: any) {
-      setError(err.message || 'Ha ocurrido un error inesperado');
+      setError(translateAuthError(err?.message || 'Ha ocurrido un error inesperado'));
     } finally {
       setLoading(false);
     }
@@ -131,7 +191,7 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
       if (error) throw error;
       setSuccess('¡Magic Link enviado! Revisa tu bandeja de entrada.');
     } catch (err: any) {
-      setError(err.message || 'Error al enviar el enlace mágico.');
+      setError(translateAuthError(err?.message || 'Error al enviar el enlace mágico.'));
     } finally {
       setLoading(false);
     }

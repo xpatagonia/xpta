@@ -38,9 +38,16 @@ export default function Navbar() {
     if (
       typeof window !== 'undefined' &&
       (window.location.hash.includes('type=recovery') ||
-        window.location.search.includes('recovery=1'))
+        window.location.search.includes('recovery=1') ||
+        window.location.hash.includes('error_description=') ||
+        window.location.search.includes('error_description='))
     ) {
-      setAuthInitialMode('update_password');
+      setAuthInitialMode(
+        window.location.hash.includes('error_description=') ||
+          window.location.search.includes('error_description=')
+          ? 'recovery'
+          : 'update_password'
+      );
       setIsAuthOpen(true);
     }
 

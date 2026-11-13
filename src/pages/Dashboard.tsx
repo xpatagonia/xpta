@@ -129,11 +129,18 @@ export default function Dashboard() {
     };
 
     // Wait slightly to let auth initialize
+    const isRecoveryFlow =
+      typeof window !== 'undefined' &&
+      (window.location.hash.includes('type=recovery') ||
+        window.location.hash.includes('access_token=') ||
+        window.location.search.includes('recovery=1') ||
+        window.location.search.includes('code='));
+
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         fetchRfqs();
         fetchModules(user);
-      } else {
+      } else if (!isRecoveryFlow) {
         navigate('/');
       }
     });
