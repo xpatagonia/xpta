@@ -76,3 +76,41 @@ AS $$
   ORDER BY cp.adn_embedding <=> query_embedding
   LIMIT match_count;
 $$;
+
+-- 4. Control Global del Sitio & Hero Multimedia (CMS)
+CREATE TABLE IF NOT EXISTS public.site_settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_by text,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 5. Bitácora Bidireccional n8n <-> Odoo
+CREATE TABLE IF NOT EXISTS public.automation_logs (
+  id bigserial PRIMARY KEY,
+  direction text NOT NULL CHECK (direction IN ('outbound_n8n', 'inbound_odoo')),
+  event text NOT NULL,
+  status text NOT NULL DEFAULT 'processed',
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 6. Bucket de Storage para Foto/Video del Hero y Logos
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('site-media', 'site-media', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- 7. Seguridad RLS (Público vs. Miembro / Admin)
+ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.logistics_loads ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "site_settings_public_read" ON public.site_settings;
+CREATE POLICY "site_settings_public_read"
+  ON public.site_settings FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "logistics_loads_authenticated_read" ON public.logistics_loads;
+CREATE POLICY "logistics_loads_authenticated_read"
+  ON public.logistics_loads FOR SELECT
+  USING (auth.role() = 'authenticated' OR status = 'open');
+

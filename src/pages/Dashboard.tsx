@@ -360,15 +360,27 @@ export default function Dashboard() {
             </div>
           </div>
           
-          {activeTab === 'rfqs' && (
-            <button 
-              onClick={() => setIsNewModalOpen(true)}
-              className="px-6 py-3 whitespace-nowrap bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs uppercase tracking-widest font-bold rounded-lg hover:bg-slate-800 dark:hover:bg-slate-200 transition flex items-center shadow-lg shadow-purple-500/10"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Nueva Solicitud
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {(auth.currentUser?.email === 'xpatagonia.com@gmail.com' ||
+              auth.currentUser?.email === 'admin@xpatagonia.com') && (
+              <button
+                onClick={() => navigate('/admin?tab=sitio')}
+                className="px-4 py-3 whitespace-nowrap bg-purple-600/10 border border-purple-500/30 text-purple-600 dark:text-purple-300 text-xs uppercase tracking-widest font-bold rounded-lg hover:bg-purple-600/20 transition flex items-center gap-2"
+              >
+                <Shield className="w-4 h-4" />
+                Control CMS &amp; Hero
+              </button>
+            )}
+            {activeTab === 'rfqs' && (
+              <button 
+                onClick={() => setIsNewModalOpen(true)}
+                className="px-6 py-3 whitespace-nowrap bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs uppercase tracking-widest font-bold rounded-lg hover:bg-slate-800 dark:hover:bg-slate-200 transition flex items-center shadow-lg shadow-purple-500/10"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Nueva Solicitud
+              </button>
+            )}
+          </div>
         </div>
 
         {activeTab === 'rfqs' ? (

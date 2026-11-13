@@ -1,13 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X, Search, Mail, Calendar, AlertCircle } from 'lucide-react';
+import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X, Search, Mail, Calendar, AlertCircle, Layout, Activity } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { db, auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
 import {  collection, getDocs, updateDoc, doc, query, orderBy, setDoc, getDoc, addDoc, serverTimestamp, deleteDoc, onAuthStateChanged  } from '../lib/db';
 import ReactMarkdown from 'react-markdown';
+import AdminSiteEditor from '../components/admin/AdminSiteEditor';
+import AdminAutomationPanel from '../components/admin/AdminAutomationPanel';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'empresas' | 'solicitudes' | 'insights' | 'membresias'>('solicitudes');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  const resolvedInitialTab: 'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo' =
+    initialTab === 'sitio' || initialTab === 'empresas' || initialTab === 'insights' || initialTab === 'membresias' || initialTab === 'odoo'
+      ? initialTab
+      : 'sitio';
+
+  const [activeTab, setActiveTab] = useState<'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo'>(resolvedInitialTab);
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
@@ -34,30 +44,81 @@ export default function AdminDashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (
+      tabParam === 'sitio' ||
+      tabParam === 'empresas' ||
+      tabParam === 'insights' ||
+      tabParam === 'membresias' ||
+      tabParam === 'solicitudes' ||
+      tabParam === 'odoo'
+    ) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams]);
+
+  const handleSelectTab = (tab: 'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo') => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user && (user.email === 'xpatagonia.com@gmail.com' || user.email === 'admin@xpatagonia.com')) {
+      if (!user) {
+        setIsAdmin(false);
+        setIsLoading(false);
+        return;
+      }
+
+      let hasAdminAccess =
+        user.email === 'xpatagonia.com@gmail.com' || user.email === 'admin@xpatagonia.com';
+      let token = '';
+
+      try {
+        token = (await user.getIdToken?.()) || '';
+        if (token) {
+          const accessRes = await fetch(`${getApiUrl()}/api/me/access`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (accessRes.ok) {
+            const access = await accessRes.json();
+            if (typeof access.isAdmin === 'boolean') {
+              hasAdminAccess = access.isAdmin || hasAdminAccess;
+            }
+          }
+        }
+      } catch {
+        // Fallback when backend /api/me/access is unreachable in preview
+      }
+
+      if (hasAdminAccess) {
         setIsAdmin(true);
         try {
-          const token = await user.getIdToken();
-          const response = await fetch(`${getApiUrl()}/api/admin/users`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (response.ok) {
-            const data = await response.json();
-            setEmpresas(data.map((d: any) => ({ id: d.uid, ...d })));
+          if (token) {
+            const response = await fetch(`${getApiUrl()}/api/admin/users`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+              const data = await response.json();
+              setEmpresas(data.map((d: any) => ({ id: d.uid, ...d })));
+            }
           }
 
           const reqsSnap = await getDocs(query(collection(db, 'module_requests')));
-          setRequests(reqsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]);
-          
+          setRequests(reqsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[]);
+
           try {
             const insightsSnap = await getDocs(query(collection(db, 'insights')));
-            setInsights(insightsSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+            setInsights(
+              insightsSnap.docs
+                .map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            );
           } catch (e) {
-            console.error('Error fetching firestore insights', e);
+            console.warn('Admin insights fallback:', e);
           }
         } catch (error) {
-          console.error("Error fetching admin data:", error);
+          console.warn('Error fetching admin data:', error);
         } finally {
           setIsLoading(false);
         }
@@ -272,30 +333,42 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="flex flex-wrap bg-white dark:bg-[#1A1625] p-1 rounded-xl mb-8 w-max max-w-full border border-slate-200 dark:border-white/10">
+        <div className="flex flex-wrap bg-white dark:bg-[#1A1625] p-1 rounded-xl mb-8 w-max max-w-full border border-slate-200 dark:border-white/10 gap-1">
           <button
-            onClick={() => setActiveTab('solicitudes')}
-            className={`px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'solicitudes' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            onClick={() => handleSelectTab('sitio')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'sitio' ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+          >
+            <Layout className="w-4 h-4" /> Sitio &amp; Hero (CMS)
+          </button>
+          <button
+            onClick={() => handleSelectTab('solicitudes')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'solicitudes' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
           >
             <Package className="w-4 h-4" /> Módulos
           </button>
           <button
-            onClick={() => setActiveTab('empresas')}
-            className={`px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'empresas' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            onClick={() => handleSelectTab('empresas')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'empresas' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
           >
             <Building2 className="w-4 h-4" /> Empresas
           </button>
           <button
-            onClick={() => setActiveTab('insights')}
-            className={`px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'insights' ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            onClick={() => handleSelectTab('insights')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'insights' ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
           >
             <Newspaper className="w-4 h-4" /> Insights (Blog)
           </button>
           <button
-            onClick={() => setActiveTab('membresias')}
-            className={`px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'membresias' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            onClick={() => handleSelectTab('membresias')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'membresias' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
           >
-            <Shield className="w-4 h-4" /> Roles & Membresías
+            <Shield className="w-4 h-4" /> Roles &amp; Membresías
+          </button>
+          <button
+            onClick={() => handleSelectTab('odoo')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'odoo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+          >
+            <Activity className="w-4 h-4" /> Odoo / n8n
           </button>
         </div>
 
@@ -303,6 +376,8 @@ export default function AdminDashboard() {
           <div className="text-center py-12"><p className="text-slate-500">Cargando datos...</p></div>
         ) : (
           <div className="space-y-6">
+            {activeTab === 'sitio' && <AdminSiteEditor />}
+            {activeTab === 'odoo' && <AdminAutomationPanel />}
             {activeTab === 'insights' && (
               <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">

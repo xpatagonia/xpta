@@ -202,3 +202,24 @@ export const userMemberships = pgTable('user_memberships', {
   autoRenew: boolean('auto_renew').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// ==========================================
+// GLOBAL CMS & AUTOMATION LOGS (FASES 1 & 4)
+// ==========================================
+
+export const siteSettings = pgTable('site_settings', {
+  key: text('key').primaryKey(), // e.g., 'global_site_config'
+  value: jsonb('value').notNull(),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const automationLogs = pgTable('automation_logs', {
+  id: serial('id').primaryKey(),
+  direction: text('direction').notNull(), // 'outbound_n8n' | 'inbound_odoo'
+  event: text('event').notNull(),
+  status: text('status').notNull().default('processed'),
+  payload: jsonb('payload').default('{}'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

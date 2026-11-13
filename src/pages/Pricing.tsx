@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SiteSettings, fetchSiteSettings, getCachedSiteSettings, SITE_SETTINGS_EVENT } from '../lib/siteSettings';
 
 const tiers = [
   {
@@ -81,6 +83,24 @@ const tiers = [
 ];
 
 export default function Pricing() {
+  const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
+
+  useEffect(() => {
+    fetchSiteSettings().then(setSettings);
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<SiteSettings>;
+      setSettings(custom.detail || getCachedSiteSettings());
+    };
+    window.addEventListener(SITE_SETTINGS_EVENT, handler);
+    return () => window.removeEventListener(SITE_SETTINGS_EVENT, handler);
+  }, []);
+
+  const dynamicPrices: Record<string, string> = {
+    'tier-basic': settings.platform.basicPrice || '$25.000',
+    'tier-pro': settings.platform.proPrice || '$65.000',
+    'tier-corp': settings.platform.corpPrice || '$140.000',
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -163,7 +183,7 @@ export default function Pricing() {
                 <div className="mb-6 pb-6 border-b border-slate-100 dark:border-white/5">
                   <div className="flex items-baseline gap-1.5 font-mono">
                     <span className="text-3xl font-bold text-slate-900 dark:text-white">
-                      {tier.priceMonthly}
+                      {dynamicPrices[tier.id] || tier.priceMonthly}
                     </span>
                     <span className="text-xs font-bold text-slate-500 uppercase">
                       {tier.currency}

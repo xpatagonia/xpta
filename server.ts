@@ -1,15 +1,17 @@
 import "dotenv/config";
+import fs from "fs";
 import express from "express";
 import path from "path";
 import crypto from "crypto";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
-import { requireAuth, type AuthRequest } from "./src/middleware/auth.ts";
+import { requireAuth, requireRoles, type AuthRequest } from "./src/middleware/auth.ts";
 import { getOrCreateUser } from "./src/db/users.ts";
 import { getUserRfqs, createRfq } from "./src/db/rfqs.ts";
 import { notifyProvidersForRfq } from "./src/services/notificationService.ts";
 import { db } from "./src/db/index.ts";
-import { insights } from "./src/db/schema.ts";
+import { insights, siteSettings, automationLogs } from "./src/db/schema.ts";
+import { eq, desc } from "drizzle-orm";
 
 
 
@@ -36,7 +38,44 @@ async function startServer() {
     console.log(`Starting server on port ${PORT}...`);
     console.log(`Environment: NODE_ENV=${process.env.NODE_ENV}, K_SERVICE=${process.env.K_SERVICE}`);
   
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' }));
+
+  const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads');
+  const SITE_SETTINGS_CACHE_FILE = path.join('/tmp', 'xpatagonia-site-settings.json');
+  try {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  } catch {
+    // ignore read-only dir edge cases
+  }
+  app.use('/uploads', express.static(UPLOADS_DIR));
+
+  let inMemorySiteSettings: any = null;
+  const inMemoryAutomationLogs: any[] = [];
+
+  async function recordAutomationEvent(
+    direction: 'outbound_n8n' | 'inbound_odoo',
+    event: string,
+    status: string,
+    payload: any
+  ) {
+    const entry = {
+      id: Date.now(),
+      direction,
+      event,
+      status,
+      payload,
+      createdAt: new Date().toISOString(),
+    };
+    inMemoryAutomationLogs.unshift(entry);
+    if (inMemoryAutomationLogs.length > 50) inMemoryAutomationLogs.pop();
+
+    try {
+      await db.insert(automationLogs).values({ direction, event, status, payload });
+    } catch {
+      // Optional DB persistence
+    }
+    return entry;
+  }
 
   // Allow cross-origin requests from custom domains, Cloudflare Pages, and Supermicro tunnels
   const allowedOrigins = [
@@ -93,12 +132,19 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/users", requireAuth as any, async (req: AuthRequest, res) => {
+  app.get("/api/me/access", requireAuth as any, (req: AuthRequest, res) => {
+    const roleName = req.user?.roleName || "vendor";
+    res.json({
+      uid: req.user?.uid,
+      email: req.user?.email,
+      roleName,
+      membershipName: req.user?.membershipName || "Basic",
+      isAdmin: ["system_admin", "content_editor"].includes(roleName),
+    });
+  });
+
+  app.get("/api/admin/users", requireAuth as any, requireRoles(["system_admin", "support_operator"]) as any, async (req: AuthRequest, res) => {
     try {
-      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
-         res.status(403).json({ error: "Forbidden" });
-         return;
-      }
       const { getAllUsersWithRoles } = await import("./src/db/users.ts");
       const users = await getAllUsersWithRoles();
       res.json(users);
@@ -108,12 +154,8 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/users/:uid/role", requireAuth as any, async (req: AuthRequest, res) => {
+  app.post("/api/admin/users/:uid/role", requireAuth as any, requireRoles(["system_admin"]) as any, async (req: AuthRequest, res) => {
     try {
-      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
-         res.status(403).json({ error: "Forbidden" });
-         return;
-      }
       const { updateUserRole } = await import("./src/db/users.ts");
       await updateUserRole(req.params.uid, req.body.role);
       res.json({ success: true });
@@ -123,12 +165,8 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/users/:uid/membership", requireAuth as any, async (req: AuthRequest, res) => {
+  app.post("/api/admin/users/:uid/membership", requireAuth as any, requireRoles(["system_admin", "support_operator"]) as any, async (req: AuthRequest, res) => {
     try {
-      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
-         res.status(403).json({ error: "Forbidden" });
-         return;
-      }
       const { updateUserMembership } = await import("./src/db/users.ts");
       await updateUserMembership(req.params.uid, req.body.membership);
       res.json({ success: true });
@@ -139,13 +177,8 @@ async function startServer() {
   });
 
 
-  app.post("/api/admin/users/create", requireAuth as any, async (req: AuthRequest, res) => {
+  app.post("/api/admin/users/create", requireAuth as any, requireRoles(["system_admin"]) as any, async (req: AuthRequest, res) => {
     try {
-      if (req.user.email !== 'xpatagonia.com@gmail.com' && req.user.email !== 'admin@xpatagonia.com') {
-         res.status(403).json({ error: "Forbidden" });
-         return;
-      }
-      
       const { email, password, roleName, membershipName, companyName } = req.body;
       
       if (!email || !password) {
@@ -683,9 +716,17 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
         }
       }
 
+      const auctionId = `LIC-${Date.now().toString().slice(-6)}`;
+      await recordAutomationEvent(
+        "outbound_n8n",
+        "logistics.reverse_auction.created",
+        forwardedToN8n ? "delivered" : "queued_local",
+        { auctionId, ...payload }
+      );
+
       res.json({
         success: true,
-        auctionId: `LIC-${Date.now().toString().slice(-6)}`,
+        auctionId,
         forwardedToN8n,
         payload,
       });
@@ -717,6 +758,13 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
         }
       }
 
+      await recordAutomationEvent(
+        "outbound_n8n",
+        "crm.company.sync_odoo",
+        forwardedToN8n ? "delivered" : "queued_local",
+        payload
+      );
+
       res.json({
         success: true,
         forwardedToN8n,
@@ -726,6 +774,182 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
       res.status(500).json({ error: error.message || "Error syncing to Odoo" });
     }
   });
+
+  // ==========================================
+  // FASE 1: CMS GLOBAL DEL SITIO & MEDIA HERO
+  // ==========================================
+  app.get("/api/site-settings", async (req, res) => {
+    try {
+      if (inMemorySiteSettings) {
+        return res.json({ settings: inMemorySiteSettings, source: "memory" });
+      }
+      try {
+        const rows = await db
+          .select()
+          .from(siteSettings)
+          .where(eq(siteSettings.key, "global_site_config"));
+        if (rows[0]?.value) {
+          inMemorySiteSettings = rows[0].value;
+          return res.json({ settings: inMemorySiteSettings, source: "postgres" });
+        }
+      } catch {
+        // Fallback to local file cache if Postgres isn't connected
+      }
+      if (fs.existsSync(SITE_SETTINGS_CACHE_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(SITE_SETTINGS_CACHE_FILE, "utf-8"));
+        inMemorySiteSettings = parsed;
+        return res.json({ settings: parsed, source: "file" });
+      }
+      res.json({ settings: null, source: "defaults" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to read site settings" });
+    }
+  });
+
+  app.put(
+    "/api/site-settings",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const updatedSettings = {
+          ...(req.body || {}),
+          updatedAt: new Date().toISOString(),
+        };
+        inMemorySiteSettings = updatedSettings;
+
+        try {
+          fs.writeFileSync(
+            SITE_SETTINGS_CACHE_FILE,
+            JSON.stringify(updatedSettings, null, 2),
+            "utf-8"
+          );
+        } catch {
+          // ignore write failures in ephemeral FS
+        }
+
+        try {
+          await db
+            .insert(siteSettings)
+            .values({
+              key: "global_site_config",
+              value: updatedSettings,
+              updatedBy: req.user?.email || req.user?.uid || "admin",
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: siteSettings.key,
+              set: {
+                value: updatedSettings,
+                updatedBy: req.user?.email || req.user?.uid || "admin",
+                updatedAt: new Date(),
+              },
+            });
+        } catch {
+          // Non-fatal if Postgres is optional
+        }
+
+        res.json({ success: true, settings: updatedSettings });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to update site settings" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/upload-media",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { filename, mimeType, base64Data } = req.body || {};
+        if (!filename || !base64Data || typeof base64Data !== "string") {
+          return res.status(400).json({ error: "Missing filename or base64Data" });
+        }
+
+        const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
+        const safeName = `hero-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${cleanExt}`;
+        const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
+        const buffer = Buffer.from(rawBase64, "base64");
+
+        const targetPath = path.join(UPLOADS_DIR, safeName);
+        fs.writeFileSync(targetPath, buffer);
+
+        res.json({
+          success: true,
+          url: `/uploads/${safeName}`,
+          mimeType: mimeType || "application/octet-stream",
+          sizeBytes: buffer.length,
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Upload failed" });
+      }
+    }
+  );
+
+  // ==========================================
+  // FASE 4: WEBHOOK BIDIRECCIONAL ODOO <-> N8N
+  // ==========================================
+  app.post("/api/webhooks/odoo", async (req, res) => {
+    try {
+      const configuredSecret = process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET;
+      if (configuredSecret) {
+        const incomingSecret = req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"];
+        if (incomingSecret !== configuredSecret) {
+          return res.status(403).json({ error: "Invalid webhook signature" });
+        }
+      }
+
+      const { event = "odoo.event", uid, membership, verificationStatus, invoiceRef } = req.body || {};
+
+      if (uid && membership) {
+        try {
+          const { updateUserMembership } = await import("./src/db/users.ts");
+          await updateUserMembership(String(uid), String(membership));
+        } catch (err) {
+          console.warn("Odoo webhook membership DB skip:", err);
+        }
+      }
+
+      const logEntry = await recordAutomationEvent("inbound_odoo", event, "processed", {
+        uid,
+        membership,
+        verificationStatus,
+        invoiceRef,
+        raw: req.body,
+      });
+
+      res.json({ success: true, received: logEntry });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Webhook error" });
+    }
+  });
+
+  app.get(
+    "/api/admin/automation-logs",
+    requireAuth as any,
+    requireRoles(["system_admin", "support_operator"]) as any,
+    async (req, res) => {
+      try {
+        let dbLogs: any[] = [];
+        try {
+          dbLogs = await db
+            .select()
+            .from(automationLogs)
+            .orderBy(desc(automationLogs.createdAt))
+            .limit(30);
+        } catch {
+          // Optional DB fallback
+        }
+        res.json({
+          logs: dbLogs.length > 0 ? dbLogs : inMemoryAutomationLogs,
+          n8nConfigured: Boolean(process.env.N8N_WEBHOOK_URL),
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to fetch automation logs" });
+      }
+    }
+  );
 
   app.get("/api/maps-key", (req, res) => {
     res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });

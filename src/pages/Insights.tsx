@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { db, getDocs, collection, query, orderBy, limit } from "../lib/db";
+import { getCachedSiteSettings } from "../lib/siteSettings";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -138,7 +139,10 @@ export default function Insights() {
   // WordPress Headless Subdomain Layer State
   const [showWpModal, setShowWpModal] = useState(false);
   const [wpSubdomainUrl, setWpSubdomainUrl] = useState<string>(
-    () => localStorage.getItem("xpatagonia_wp_url") || "https://insights.xpatagonia.online"
+    () =>
+      localStorage.getItem("xpatagonia_wp_url") ||
+      getCachedSiteSettings().platform.wpSubdomainUrl ||
+      "https://insights.xpatagonia.online"
   );
   const [wpSyncEnabled, setWpSyncEnabled] = useState<boolean>(
     () => localStorage.getItem("xpatagonia_wp_enabled") === "true"
