@@ -1,6 +1,17 @@
 import { db, auth, collection, addDoc, serverTimestamp } from './db';
+import { haversineKm } from './patagoniaRouting';
 
 export type SubscriptionTier = 'corporativo' | 'pro' | 'inicial';
+
+export interface AdnComercial {
+  ofrece: string[];
+  demanda: string[];
+  corredorLogistico: string;
+  ciudadBase: string;
+  lat: number;
+  lng: number;
+  isExtraRegional?: boolean;
+}
 
 export interface B2BCompanyRecord {
   id: string;
@@ -26,6 +37,7 @@ export interface B2BCompanyRecord {
   certifications: string[];
   paymentTerms: string;
   creditRating: string;
+  adnComercial: AdnComercial;
 }
 
 export const TIER_CONFIG: Record<
@@ -86,6 +98,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['ISO 9001', 'ISO 14001', 'API Spec Q1'],
     paymentTerms: 'Cuenta Corriente 30/60 días • Factura A / MiPyME',
     creditRating: 'AAA+ (Riesgo Corporativo Auditado)',
+    adnComercial: {
+      ofrece: ['Válvulas API 6D', 'Montaje de Ductos', 'Telemetría'],
+      demanda: ['Mecanizado CNC', 'Bridas Forjadas', 'Flete Pesado desde Rosario'],
+      corredorLogistico: 'RN 22 / Añelo (Vaca Muerta)',
+      ciudadBase: 'Añelo (Hub Vaca Muerta)',
+      lat: -38.3522,
+      lng: -68.7897,
+    },
   },
   {
     id: 'comp-logistica-austral',
@@ -111,6 +131,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['ISO 9001', 'SENASA Hab. Frío', 'Cargas Peligrosas IMO'],
     paymentTerms: 'Transferencia / Echeq 30 días • Convenio Flota',
     creditRating: 'AA+ (Cumplimiento Verificado)',
+    adnComercial: {
+      ofrece: ['Flete LTL Consolidado', 'Retorno Vacío RN 3', 'Cadena de Frío -25°C'],
+      demanda: ['Cargas Norte → Sur', 'Insumos de Flota', 'Paletizado Isotérmico'],
+      corredorLogistico: 'Ruta Nacional 3 (Buenos Aires ↔ Ushuaia)',
+      ciudadBase: 'Comodoro Rivadavia (Golfo San Jorge)',
+      lat: -45.8641,
+      lng: -67.4966,
+    },
   },
   {
     id: 'comp-eolica-sur',
@@ -136,6 +164,48 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['ISO 45001', 'IRAM', 'CAMMESA Homologado'],
     paymentTerms: 'Certificación por Avance de Obra • 15/45 días',
     creditRating: 'AAA (Proveedor Homologado)',
+    adnComercial: {
+      ofrece: ['Subestaciones MT/AT', 'Tableros SCADA', 'Montaje Eólico'],
+      demanda: ['Transformadores desde Córdoba', 'Carretones Especiales', 'EPP Altura'],
+      corredorLogistico: 'RN 3 / Pico Truncado - Río Gallegos',
+      ciudadBase: 'Río Gallegos',
+      lat: -51.6226,
+      lng: -69.2181,
+    },
+  },
+  {
+    id: 'comp-rosario-forja',
+    name: 'Forja & Válvulas del Paraná S.A. (Proveedor Extra-Regional)',
+    cuit: '30-70841299-8',
+    tier: 'corporativo',
+    tierPriority: 1,
+    tierLabel: 'Plan Corporativo',
+    verified: true,
+    category: 'Metalúrgica',
+    subcategories: ['Bridas Forjadas ANSI', 'Mecanizado CNC Pesado', 'Válvulas de Proceso'],
+    province: 'Santa Fe (Envío Patagonia)',
+    city: 'Rosario, Santa Fe → Corredor Sur',
+    employeeCount: '51-200',
+    publicSummary:
+      'Fabricante santafesino de bridas forjadas, cuerpos de válvulas API y repuestos mecanizados CNC con despacho consolidado LTL hacia Cuenca Neuquina y Golfo San Jorge.',
+    contactName: 'Ing. Federico Brizuela',
+    contactRole: 'Gerente de Cuentas Patagónicas',
+    email: 'fbrizuela@forjaparana.com.ar',
+    phone: '+54 9 341 590-4410',
+    whatsapp: '+5493415904410',
+    website: 'https://forjaparana.com.ar',
+    certifications: ['ISO 9001', 'API 6A / 6D', 'ASME VIII'],
+    paymentTerms: 'Cuenta Corriente 45 días • Flete Consolidado LTL',
+    creditRating: 'AA+ (Exportador / Proveedor Industrial)',
+    adnComercial: {
+      ofrece: ['Bridas Forjadas', 'Mecanizado CNC', 'Cuerpos API 6D'],
+      demanda: ['Flete Consolidado Rosario → Añelo', 'Depósito Cross-Docking Neuquén'],
+      corredorLogistico: 'Rosario → RN 152 → Neuquén / Añelo',
+      ciudadBase: 'Rosario (Polo Industrial)',
+      lat: -32.9442,
+      lng: -60.6505,
+      isExtraRegional: true,
+    },
   },
   {
     id: 'comp-metalurgica-andina',
@@ -161,6 +231,48 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['ISO 9001', 'Soldadura Calificada ASME IX'],
     paymentTerms: '50% Anticipo / 50% Contra Entrega (Echeq 30 días)',
     creditRating: 'AA (Verificado en Red)',
+    adnComercial: {
+      ofrece: ['Mecanizado CNC', 'Skids de Bombeo', 'Tanques API'],
+      demanda: ['Chapa Naval / Acero F24', 'Electrodos Especiales', 'Flete LTL'],
+      corredorLogistico: 'RN 3 / Cuenca Golfo San Jorge',
+      ciudadBase: 'Comodoro Rivadavia (Golfo San Jorge)',
+      lat: -45.8641,
+      lng: -67.4966,
+    },
+  },
+  {
+    id: 'comp-cordoba-electromec',
+    name: 'Potencia & Transformadores Córdoba S.A. (Proveedor Extra-Regional)',
+    cuit: '30-69441822-3',
+    tier: 'pro',
+    tierPriority: 2,
+    tierLabel: 'Plan Pro Industrial',
+    verified: true,
+    category: 'Equipamiento Industrial',
+    subcategories: ['Transformadores MT', 'Celdas de Media Tensión', 'Grupos Electrógenos'],
+    province: 'Córdoba (Envío Patagonia)',
+    city: 'Córdoba Capital → Corredor Patagónico',
+    employeeCount: '51-200',
+    publicSummary:
+      'Ingeniería eléctrica industrial desde Córdoba para parques eólicos, yacimientos y plantas pesqueras en Patagonia con despacho por carga consolidada.',
+    contactName: 'Ing. Marcos Villagra',
+    contactRole: 'Director Comercial Regional',
+    email: 'mvillagra@potenciacba.com.ar',
+    phone: '+54 9 351 478-9200',
+    whatsapp: '+5493514789200',
+    website: 'https://potenciacba.com.ar',
+    certifications: ['ISO 9001', 'IRAM 2250'],
+    paymentTerms: 'Anticipo 30% + Echeq 30/60 días',
+    creditRating: 'AA (Verificado en Red)',
+    adnComercial: {
+      ofrece: ['Transformadores MT', 'Grupos Electrógenos', 'Celdas Eléctricas'],
+      demanda: ['Carretón Córdoba → Santa Cruz', 'Flete Retorno Vacío RN 40/RN 3'],
+      corredorLogistico: 'Córdoba → RN 158 / RN 35 → Patagonia',
+      ciudadBase: 'Córdoba Capital (Parque Industrial)',
+      lat: -31.4201,
+      lng: -64.1888,
+      isExtraRegional: true,
+    },
   },
   {
     id: 'comp-austral-naval',
@@ -186,6 +298,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['Prefectura Naval Reg.', 'SENASA'],
     paymentTerms: 'Cuenta Corriente 30 días • USD Oficial',
     creditRating: 'AA (Verificado en Red)',
+    adnComercial: {
+      ofrece: ['Refrigeración Industrial', 'Packaging Isotérmico', 'Repuestos Navales'],
+      demanda: ['Cadena de Frío -25°C hacia Buenos Aires', 'Gases Refrigerantes'],
+      corredorLogistico: 'RN 3 / Canal Beagle → Puerto Madryn / CABA',
+      ciudadBase: 'Ushuaia (Puerto Austral)',
+      lat: -54.8019,
+      lng: -68.303,
+    },
   },
   {
     id: 'comp-constructora-valle',
@@ -211,6 +331,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['Registro Nacional de Constructores', 'ISO 9001'],
     paymentTerms: 'Certificación Quincenal / Mensual',
     creditRating: 'AA (Verificado en Red)',
+    adnComercial: {
+      ofrece: ['Locaciones Petroleras', 'Naves Industriales', 'Hormigón Elaborado'],
+      demanda: ['Estructuras Metálicas', 'Indumentaria Ignífuga', 'Alquiler de Maquinaria'],
+      corredorLogistico: 'RN 22 / Alto Valle → Vaca Muerta',
+      ciudadBase: 'Cipolletti / General Roca (Alto Valle)',
+      lat: -38.9339,
+      lng: -67.9903,
+    },
   },
   {
     id: 'comp-seguridad-epp',
@@ -236,6 +364,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['Sello IRAM'],
     paymentTerms: 'Contado / Transferencia / Echeq 15 días',
     creditRating: 'A (Inicial)',
+    adnComercial: {
+      ofrece: ['Indumentaria Ignífuga', 'EPP Altura', 'Detectores de Gases'],
+      demanda: ['Logística Última Milla Vaca Muerta', 'Stock Térmico'],
+      corredorLogistico: 'RN 22 / Neuquén - Añelo',
+      ciudadBase: 'Neuquén Capital (Parque Industrial)',
+      lat: -38.9516,
+      lng: -68.0591,
+    },
   },
   {
     id: 'comp-agro-patagonia',
@@ -261,6 +397,14 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
     certifications: ['INTI'],
     paymentTerms: 'Canje Cereal / Tarjetas Agro / 30 días',
     creditRating: 'A (Inicial)',
+    adnComercial: {
+      ofrece: ['Bombas Solares', 'Riego Automatizado', 'Telemetría Rural'],
+      demanda: ['Retorno Vacío Viedma → Buenos Aires', 'Tableros Solares'],
+      corredorLogistico: 'RN 3 / Viedma - Bahía Blanca',
+      ciudadBase: 'Viedma (Valle Inferior)',
+      lat: -40.8135,
+      lng: -62.9967,
+    },
   },
 ];
 
@@ -276,6 +420,75 @@ export function sortCompaniesBySubscriptionTier<
     }
     return (a.name || '').localeCompare(b.name || '');
   });
+}
+
+export interface AdnMatchResult {
+  company: B2BCompanyRecord;
+  compatibilityPercent: number;
+  matchReason: string;
+  estimatedRoadKm: number;
+  corridorSynergy: string;
+}
+
+/**
+ * Simula localmente el cruce vectorial (pgvector) entre oferta, demanda y corredor vial
+ * para recomendar oportunidades comerciales + consolidación de flete en Patagonia.
+ */
+export function computeAdnMatches(params: {
+  myOffers: string[];
+  myDemands: string[];
+  myLat?: number;
+  myLng?: number;
+}): AdnMatchResult[] {
+  const offersNorm = params.myOffers.map((s) => s.toLowerCase());
+  const demandsNorm = params.myDemands.map((s) => s.toLowerCase());
+  const originLat = params.myLat ?? -45.8641; // Comodoro default
+  const originLng = params.myLng ?? -67.4966;
+
+  return B2B_COMPANIES.map((comp) => {
+    let score = 52;
+    const reasons: string[] = [];
+
+    // Cruzamos lo que la otra empresa OFRECE contra lo que YO DEMANDO
+    for (const off of comp.adnComercial.ofrece) {
+      const lowOff = off.toLowerCase();
+      if (demandsNorm.some((d) => lowOff.includes(d) || d.includes(lowOff.split(' ')[0]))) {
+        score += 24;
+        reasons.push(`Provee "${off}"`);
+      }
+    }
+
+    // Cruzamos lo que la otra empresa DEMANDA contra lo que YO OFREZCO
+    for (const dem of comp.adnComercial.demanda) {
+      const lowDem = dem.toLowerCase();
+      if (offersNorm.some((o) => lowDem.includes(o) || o.includes(lowDem.split(' ')[0]))) {
+        score += 20;
+        reasons.push(`Demanda "${dem}"`);
+      }
+    }
+
+    if (comp.tier === 'corporativo') score += 6;
+    if (comp.adnComercial.isExtraRegional) score += 5;
+
+    const airKm = haversineKm(originLat, originLng, comp.adnComercial.lat, comp.adnComercial.lng);
+    const estimatedRoadKm = Math.max(25, Math.round(airKm * 1.21));
+
+    const cappedScore = Math.min(98, Math.max(58, score));
+    const matchReason =
+      reasons.length > 0
+        ? reasons.slice(0, 2).join(' · ')
+        : `Sinergia sectorial en ${comp.category}`;
+
+    return {
+      company: comp,
+      compatibilityPercent: cappedScore,
+      matchReason,
+      estimatedRoadKm,
+      corridorSynergy: comp.adnComercial.corredorLogistico,
+    };
+  })
+    .sort((a, b) => b.compatibilityPercent - a.compatibilityPercent)
+    .slice(0, 5);
 }
 
 export async function syncCompanyToUserCRM(company: B2BCompanyRecord): Promise<{
@@ -297,7 +510,7 @@ export async function syncCompanyToUserCRM(company: B2BCompanyRecord): Promise<{
       status: 'active',
       website: company.website,
       cuitRut: company.cuit,
-      socialMedia: `Plan: ${company.tierLabel} • Rating: ${company.creditRating}`,
+      socialMedia: `Plan: ${company.tierLabel} • Rating: ${company.creditRating} • Corredor: ${company.adnComercial.corredorLogistico}`,
       industry: company.category,
       location: `${company.city}, ${company.province}`,
       userId: uid,
@@ -305,7 +518,7 @@ export async function syncCompanyToUserCRM(company: B2BCompanyRecord): Promise<{
     });
     return {
       success: true,
-      message: `${company.name} sincronizada en tu CRM con todos sus datos fiscales y comerciales.`,
+      message: `${company.name} sincronizada en tu CRM con legajo fiscal y corredor logístico.`,
     };
   } catch (error) {
     console.error('Error syncing company to CRM:', error);

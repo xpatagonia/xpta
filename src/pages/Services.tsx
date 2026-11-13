@@ -17,6 +17,8 @@ import {
   Crown,
   Zap,
   Filter,
+  Route,
+  Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -37,6 +39,8 @@ const PROVINCES = [
   'Río Negro',
   'Santa Cruz',
   'Tierra del Fuego',
+  'Santa Fe (Envío Patagonia)',
+  'Córdoba (Envío Patagonia)',
 ];
 
 export default function Services() {
@@ -325,7 +329,7 @@ export default function Services() {
                       {company.publicSummary}
                     </p>
 
-                    <div className="flex flex-wrap gap-1.5 mb-4">
+                    <div className="flex flex-wrap gap-1.5 mb-3">
                       {company.subcategories.map((sub) => (
                         <span
                           key={sub}
@@ -334,6 +338,24 @@ export default function Services() {
                           {sub}
                         </span>
                       ))}
+                    </div>
+
+                    {/* ADN Empresarial & Corredor Logístico */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400 mb-3">
+                      <span className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+                        <Route className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                        {company.adnComercial.corredorLogistico}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        <strong className="text-slate-700 dark:text-slate-300">Ofrece:</strong>{' '}
+                        {company.adnComercial.ofrece.slice(0, 2).join(', ')}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        <strong className="text-slate-700 dark:text-slate-300">Demanda:</strong>{' '}
+                        {company.adnComercial.demanda.slice(0, 2).join(', ')}
+                      </span>
                     </div>
 
                     {/* Commercial & CRM Data Strip: Gated for Public vs Unlocked for Subscribed Members */}
@@ -436,6 +458,16 @@ export default function Services() {
                           <MessageSquare className="w-4 h-4" /> Conectar (Chat B2B)
                         </Link>
 
+                        <Link
+                          to={`/logistica?tab=rutas&origin=${encodeURIComponent(
+                            company.adnComercial.ciudadBase
+                          )}&dest=${encodeURIComponent('Añelo (Hub Vaca Muerta)')}`}
+                          className="w-full py-2 px-4 rounded-xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 text-slate-700 dark:text-slate-300 text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <Route className="w-3.5 h-3.5 text-orange-500" />
+                          Calcular Flete OSRM
+                        </Link>
+
                         <button
                           onClick={() => setSelectedCompanyModal(company)}
                           className="w-full py-2 px-4 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 text-xs font-bold transition-colors"
@@ -451,6 +483,15 @@ export default function Services() {
                         >
                           <Lock className="w-3.5 h-3.5 text-orange-500" />
                           Conectar & CRM
+                        </Link>
+                        <Link
+                          to={`/logistica?tab=rutas&origin=${encodeURIComponent(
+                            company.adnComercial.ciudadBase
+                          )}&dest=${encodeURIComponent('Añelo (Hub Vaca Muerta)')}`}
+                          className="w-full py-2 px-3 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Route className="w-3.5 h-3.5 text-orange-500" />
+                          Simular Distancia (OSRM)
                         </Link>
                         <button
                           onClick={() => setIsSubscribedMember(true)}

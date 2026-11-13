@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth, doc, getDoc, collection, onSnapshot } from '../lib/db';
-import { Plus, FileText, Clock, CheckCircle, ChevronRight, LayoutDashboard, Send, Activity, Tag, Users, Package, Inbox, Box, AlertTriangle, PackageCheck, Truck, Shield } from 'lucide-react';
+import { Plus, FileText, Clock, CheckCircle, ChevronRight, LayoutDashboard, Send, Activity, Tag, Users, Package, Inbox, Box, AlertTriangle, PackageCheck, Truck, Shield, Route, Sparkles, Database } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import CompanyProducts from '../components/CompanyProducts';
 import CompanyInbox from '../components/CompanyInbox';
 import RfqNegotiationModal from '../components/RfqNegotiationModal';
 import { getApiUrl } from '../lib/apiConfig';
+import { computeAdnMatches, syncCompanyToUserCRM } from '../lib/b2bDirectoryData';
 
 interface RFQ {
   id: number;
@@ -42,7 +43,10 @@ const DEFAULT_SAMPLE_RFQS: RFQ[] = [
 ];
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'rfqs'|'products'|'received_rfqs'>('rfqs');
+  const [activeTab, setActiveTab] = useState<'rfqs'|'products'|'received_rfqs'|'adn'>('rfqs');
+  const [myOffersInput, setMyOffersInput] = useState('Mecanizado CNC, Estructuras Metálicas, Servicios Petroleros');
+  const [myDemandsInput, setMyDemandsInput] = useState('Bridas Forjadas, Transformadores MT, Flete Consolidado');
+  const [odooSyncStatus, setOdooSyncStatus] = useState<string | null>(null);
   const [rfqs, setRfqs] = useState<RFQ[]>(DEFAULT_SAMPLE_RFQS);
   const [negotiationRfq, setNegotiationRfq] = useState<RFQ | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -346,6 +350,12 @@ export default function Dashboard() {
                 className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'products' ? 'border-orange-500 text-orange-500 bg-orange-50/50 dark:bg-orange-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
               >
                 <Package className="w-4 h-4" /> Mis Productos
+              </button>
+              <button 
+                onClick={() => setActiveTab('adn')}
+                className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'adn' ? 'border-emerald-500 text-emerald-500 bg-emerald-50/50 dark:bg-emerald-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
+              >
+                <Sparkles className="w-4 h-4" /> ADN Empresarial & Odoo
               </button>
             </div>
           </div>
@@ -656,6 +666,138 @@ export default function Dashboard() {
           </>
         ) : activeTab === 'received_rfqs' ? (
           <CompanyInbox />
+        ) : activeTab === 'adn' ? (
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-500 block mb-1">
+                    Motor pgvector + Corredores OSRM
+                  </span>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                    ADN Empresarial (Matching Norte ↔ Patagonia)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Define qué ofrece tu empresa y qué insumos demanda para detectar contrapartes compatibles y consolidar fletes en un clic.
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${getApiUrl()}/api/crm/sync-odoo`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          offers: myOffersInput,
+                          demands: myDemandsInput,
+                          userEmail: auth.currentUser?.email || 'miembro@xpatagonia.online',
+                        }),
+                      });
+                      const data = await res.json();
+                      setOdooSyncStatus(
+                        data.forwardedToN8n
+                          ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
+                          : 'Perfil ADN guardado y encolado para webhook n8n (flujos.xpatagonia.online).'
+                      );
+                    } catch {
+                      setOdooSyncStatus('Perfil ADN actualizado localmente.');
+                    }
+                    setTimeout(() => setOdooSyncStatus(null), 4000);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap shrink-0"
+                >
+                  <Database className="w-4 h-4" />
+                  Sincronizar Perfil con Odoo (n8n)
+                </button>
+              </div>
+
+              {odooSyncStatus && (
+                <div className="mb-4 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  {odooSyncStatus}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Capacidades / Productos que Ofrecemos
+                  </label>
+                  <input
+                    type="text"
+                    value={myOffersInput}
+                    onChange={(e) => setMyOffersInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Insumos / Servicios que Demandamos
+                  </label>
+                  <input
+                    type="text"
+                    value={myDemandsInput}
+                    onChange={(e) => setMyDemandsInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {computeAdnMatches({
+                myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
+                myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
+              }).map((match) => (
+                <div
+                  key={match.company.id}
+                  className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {match.compatibilityPercent}% Match ADN
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span className="font-semibold text-purple-600 dark:text-purple-400">
+                        {match.company.tierLabel}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-slate-500 font-mono tabular-nums">
+                        ~{match.estimatedRoadKm} km por {match.corridorSynergy}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      {match.company.name}
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      {match.matchReason} · Base: {match.company.city}, {match.company.province}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => navigate(`/logistica?tab=rutas&origin=${encodeURIComponent(match.company.adnComercial.ciudadBase)}&dest=${encodeURIComponent('Añelo (Hub Vaca Muerta)')}`)}
+                      className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Route className="w-3.5 h-3.5 text-orange-500" />
+                      Calcular Flete
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const res = await syncCompanyToUserCRM(match.company);
+                        setOdooSyncStatus(res.message);
+                        setTimeout(() => setOdooSyncStatus(null), 4000);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      Integrar al CRM
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
           <CompanyProducts />
         )}

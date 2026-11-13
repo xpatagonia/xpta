@@ -12,6 +12,7 @@ import {
   Newspaper,
   Database,
   Lock,
+  Route,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -102,6 +103,18 @@ export default function Navbar() {
               }`}
             >
               Catálogo RFQ
+            </Link>
+
+            <Link
+              to="/logistica"
+              className={`transition-colors flex items-center gap-1.5 ${
+                isActive('/logistica')
+                  ? 'text-orange-500'
+                  : 'hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Route className="w-3.5 h-3.5 text-orange-500" />
+              <span>Logística</span>
             </Link>
 
             <Link
@@ -263,6 +276,13 @@ export default function Navbar() {
                 className="hover:text-orange-500 transition-colors"
               >
                 Catálogo & Suministros RFQ
+              </Link>
+              <Link
+                to="/logistica"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center gap-2 hover:text-orange-500 transition-colors"
+              >
+                <Route className="w-4 h-4 text-orange-500" /> Logística & Rutas OSRM
               </Link>
               <Link
                 to="/chat"

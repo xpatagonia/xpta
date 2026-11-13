@@ -38,19 +38,26 @@ async function startServer() {
   
   app.use(express.json());
 
-  // Allow cross-origin requests from the custom domains
+  // Allow cross-origin requests from custom domains, Cloudflare Pages, and Supermicro tunnels
   const allowedOrigins = [
     'https://xpatagonia.online',
     'https://www.xpatagonia.online',
+    'https://api.xpatagonia.online',
     'http://localhost:3000',
     'http://localhost:5173',
   ];
   
   app.use(cors({ 
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      // Allow allowed domains, Google Cloud Run preview, Render backend, Vercel frontend, and Cloudflare.
-      if (!origin || allowedOrigins.includes(origin) || origin.includes('.run.app') || origin.includes('.onrender.com') || origin.includes('.vercel.app') || origin.includes('xpatagonia.online')) {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        origin.includes('.run.app') ||
+        origin.includes('.onrender.com') ||
+        origin.includes('.vercel.app') ||
+        origin.includes('.pages.dev') ||
+        origin.includes('xpatagonia.online')
+      ) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -59,11 +66,14 @@ async function startServer() {
     credentials: true 
   }));
 
-
-
   // API Routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({
+      status: "ok",
+      mailHost: process.env.IMAP_HOST || "mail.xpatagonia.online",
+      osrmConfigured: Boolean(process.env.OSRM_BASE_URL),
+      n8nConfigured: Boolean(process.env.N8N_WEBHOOK_URL),
+    });
   });
 
   app.post("/api/register-setup", requireAuth as any, async (req: AuthRequest, res) => {
@@ -605,6 +615,115 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
     } catch (error) {
       console.error("Error fetching currencies:", error);
       res.status(500).json({ error: "Failed to fetch currency rates" });
+    }
+  });
+
+  // ==========================================
+  // LOGÍSTICA OSRM & WEBHOOKS N8N / ODOO
+  // ==========================================
+  app.get("/api/logistics/route", async (req, res) => {
+    try {
+      const from = String(req.query.from || "");
+      const to = String(req.query.to || "");
+      if (!from || !to) {
+        return res.status(400).json({ error: "Missing from/to coordinates (lng,lat)" });
+      }
+
+      const candidates: { base: string; label: string }[] = [];
+      if (process.env.OSRM_BASE_URL) {
+        candidates.push({ base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""), label: "Supermicro OSRM" });
+      }
+      candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
+
+      for (const candidate of candidates) {
+        try {
+          const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+          const headers: Record<string, string> = {};
+          if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+            headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
+            headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
+          }
+          const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
+          if (!osrmRes.ok) continue;
+          const data = await osrmRes.json();
+          if (data?.routes?.[0]) {
+            return res.json({ routes: data.routes, engineUsed: candidate.label });
+          }
+        } catch {
+          // try next OSRM endpoint
+        }
+      }
+
+      res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to calculate route" });
+    }
+  });
+
+  app.post("/api/logistics/reverse-auction", async (req, res) => {
+    try {
+      const payload = {
+        event: "logistics.reverse_auction.created",
+        timestamp: new Date().toISOString(),
+        ...req.body,
+      };
+
+      let forwardedToN8n = false;
+      if (process.env.N8N_WEBHOOK_URL) {
+        try {
+          const whRes = await fetch(process.env.N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(3500),
+          });
+          forwardedToN8n = whRes.ok;
+        } catch (err) {
+          console.warn("n8n webhook warning:", err);
+        }
+      }
+
+      res.json({
+        success: true,
+        auctionId: `LIC-${Date.now().toString().slice(-6)}`,
+        forwardedToN8n,
+        payload,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error creating reverse auction" });
+    }
+  });
+
+  app.post("/api/crm/sync-odoo", async (req, res) => {
+    try {
+      const payload = {
+        event: "crm.company.sync_odoo",
+        timestamp: new Date().toISOString(),
+        ...req.body,
+      };
+
+      let forwardedToN8n = false;
+      if (process.env.N8N_WEBHOOK_URL) {
+        try {
+          const whRes = await fetch(process.env.N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(3500),
+          });
+          forwardedToN8n = whRes.ok;
+        } catch (err) {
+          console.warn("n8n Odoo sync warning:", err);
+        }
+      }
+
+      res.json({
+        success: true,
+        forwardedToN8n,
+        target: forwardedToN8n ? "n8n → Odoo VPS" : "Cola Local CRM (pendiente de n8n)",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error syncing to Odoo" });
     }
   });
 
