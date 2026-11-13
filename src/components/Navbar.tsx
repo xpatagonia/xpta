@@ -28,15 +28,30 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register' | 'recovery' | 'update_password'>('login');
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
     });
 
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hash.includes('type=recovery') ||
+        window.location.search.includes('recovery=1'))
+    ) {
+      setAuthInitialMode('update_password');
+      setIsAuthOpen(true);
+    }
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthInitialMode('update_password');
+        setIsAuthOpen(true);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -359,7 +374,14 @@ export default function Navbar() {
           </motion.div>
         )}
       </AnimatePresence>
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <AuthModal
+        isOpen={isAuthOpen}
+        initialMode={authInitialMode}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setAuthInitialMode('login');
+        }}
+      />
     </nav>
   );
 }

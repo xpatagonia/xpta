@@ -55,8 +55,18 @@ function createResilientFallbackClient(): SupabaseClient {
       signInWithPassword: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
       signUp: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
       signOut: async () => ({ error: null }),
-      resetPasswordForEmail: async () => ({ data: null, error: null }),
-      signInWithOtp: async () => ({ data: null, error: null }),
+      resetPasswordForEmail: async () => ({
+        data: null,
+        error: new Error('Supabase Auth no está configurado en este entorno (faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).'),
+      }),
+      signInWithOtp: async () => ({
+        data: null,
+        error: new Error('Supabase Auth no está configurado en este entorno (faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).'),
+      }),
+      updateUser: async () => ({
+        data: { user: null },
+        error: new Error('Supabase Auth no está configurado en este entorno.'),
+      }),
     },
     from: () => ({
       select: () => createQueryBuilder(false),

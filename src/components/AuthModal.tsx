@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { X, Mail, Lock, Loader2, Building2, Briefcase, Zap, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
@@ -10,13 +10,15 @@ import { getApiUrl } from '../lib/apiConfig';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialMode?: 'login' | 'register' | 'recovery' | 'update_password';
 }
 
-export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalProps) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'login' | 'register' | 'recovery'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'recovery' | 'update_password'>(initialMode || 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [cuit, setCuit] = useState('');
   const [category, setCategory] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,16 +32,23 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   }, []);
 
   useEffect(() => {
+    if (initialMode) {
+      setMode(initialMode);
+    }
+  }, [initialMode]);
+
+  useEffect(() => {
     if (!isOpen) {
       setEmail('');
       setPassword('');
+      setNewPassword('');
       setCuit('');
       setCategory('');
       setError(null);
       setSuccess(null);
-      setMode('login');
+      setMode(initialMode || 'login');
     }
-  }, [isOpen]);
+  }, [isOpen, initialMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,12 +57,23 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setSuccess(null);
 
     try {
-      if (mode === 'recovery') {
+      if (mode === 'update_password') {
+        if (!newPassword || newPassword.length < 6) {
+          throw new Error('La nueva contraseña debe tener al menos 6 caracteres.');
+        }
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) throw error;
+        setSuccess('¡Contraseña actualizada con éxito! Ya podés operar con tu cuenta.');
+        setTimeout(() => {
+          onClose();
+          navigate('/dashboard');
+        }, 1200);
+      } else if (mode === 'recovery') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + '/dashboard',
+          redirectTo: window.location.origin + '/dashboard?recovery=1',
         });
         if (error) throw error;
-        setSuccess('Te hemos enviado un enlace para recuperar tu contraseña.');
+        setSuccess('Te hemos enviado un enlace a tu correo para restablecer tu contraseña.');
       } else if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -144,14 +164,33 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
               <div className="mb-8">
                 <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-white mb-2">
-                  {mode === 'login' ? 'Ingresar a x.patagonia' : mode === 'register' ? 'Crear cuenta' : 'Recuperar acceso'}
+                  {mode === 'login'
+                    ? 'Ingresar a x.patagonia'
+                    : mode === 'register'
+                    ? 'Crear cuenta'
+                    : mode === 'update_password'
+                    ? 'Nueva Contraseña'
+                    : 'Recuperar acceso'}
                 </h2>
                 <p className="text-sm font-medium text-slate-500">
                   {mode === 'login'
                     ? 'Accede a la red de proveedores más grande de la Patagonia'
-                    : mode === 'register' ? 'Únete para conectar con empresas B2B' : 'Te enviaremos un enlace seguro a tu email'}
+                    : mode === 'register'
+                    ? 'Únete para conectar con empresas B2B'
+                    : mode === 'update_password'
+                    ? 'Ingresá tu nueva clave para completar la recuperación de acceso'
+                    : 'Te enviaremos un enlace seguro a tu email'}
                 </p>
               </div>
+
+              {!isSupabaseConfigured && (
+                <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-medium flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 shrink-0 text-amber-500" />
+                  <p>
+                    <strong>Falta configurar Supabase en este entorno:</strong> cargá <code className="font-mono">VITE_SUPABASE_URL</code> y <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> en Vercel/Cloudflare y redeployá para habilitar el envío de mails de recuperación.
+                  </p>
+                </div>
+              )}
 
               {error && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 text-sm font-medium flex items-start gap-3">
@@ -168,24 +207,44 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
-                    Email Público
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-500 text-base font-medium text-slate-900 dark:text-white"
-                      placeholder="hola@empresa.com"
-                    />
+                {mode !== 'update_password' ? (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
+                      Email Público
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-500 text-base font-medium text-slate-900 dark:text-white"
+                        placeholder="hola@empresa.com"
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
+                      Nueva Contraseña (mínimo 6 caracteres)
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-500 text-base font-medium text-slate-900 dark:text-white"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  </div>
+                )}
 
-                {mode !== 'recovery' && (
+                {mode !== 'recovery' && mode !== 'update_password' && (
                   <div>
                     <div className="flex justify-between items-center mb-2">
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
@@ -270,7 +329,15 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    <span>{mode === 'login' ? 'Ingresar con contraseña' : mode === 'register' ? 'Completar Registro' : 'Enviar instrucciones'}</span>
+                    <span>
+                      {mode === 'login'
+                        ? 'Ingresar con contraseña'
+                        : mode === 'register'
+                        ? 'Completar Registro'
+                        : mode === 'update_password'
+                        ? 'Guardar Nueva Contraseña'
+                        : 'Enviar instrucciones'}
+                    </span>
                   )}
                 </button>
                 
