@@ -175,7 +175,7 @@ export default function Insights() {
       }));
       combinedPosts = [...firestoreData];
     } catch (err) {
-      console.error("Error fetching Firestore insights:", err);
+      console.warn("[Insights] Remote fetch skipped, using curated editorial feed:", err);
     }
 
     // 2. Optional Headless WordPress Subdomain Fetch (WP REST API v2)

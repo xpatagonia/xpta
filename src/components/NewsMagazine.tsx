@@ -31,7 +31,7 @@ export default function NewsMagazine() {
           setNews(merged);
         }
       })
-      .catch(console.error);
+      .catch((err) => console.warn('[NewsMagazine] Usando insights curados:', err?.message || err));
   }, []);
 
   return (

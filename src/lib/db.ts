@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 export const db = { type: 'firestore_mock' };
 export const auth = {
@@ -125,44 +125,90 @@ function mapDataFromDb(data: any) {
   return mapped;
 }
 
+function isNetworkFetchError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('Load failed') ||
+    msg.includes('fetch')
+  );
+}
+
 export const getDocs = async (qOrColl) => {
   const isQuery = qOrColl.type === 'query';
   const path = mapTableName(isQuery ? qOrColl.coll.path : qOrColl.path);
+
+  if (!isSupabaseConfigured) {
+    return {
+      forEach: () => {},
+      docs: [],
+      empty: true,
+      size: 0
+    };
+  }
+
   let builder = supabase.from(path).select('*');
   
   if (isQuery) {
     builder = buildSupabaseQuery(builder, qOrColl.constraints);
   }
   
-  const { data, error } = await builder;
-  if (error) {
-    console.error(`Error in getDocs (${path}):`, error);
-    throw error;
+  try {
+    const { data, error } = await builder;
+    if (error) {
+      if (isNetworkFetchError(error)) {
+        console.warn(`[XPATAGONIA] Supabase offline/unreachable for ${path}; using local fallback.`);
+        return { forEach: () => {}, docs: [], empty: true, size: 0 };
+      }
+      console.warn(`Supabase warning in getDocs (${path}):`, error.message || error);
+      return { forEach: () => {}, docs: [], empty: true, size: 0 };
+    }
+    
+    return {
+      forEach: (cb) => (data || []).forEach(item => cb({ id: item.id || item.uid, data: () => mapDataFromDb(item) })),
+      docs: (data || []).map(item => ({ id: item.id || item.uid, data: () => mapDataFromDb(item), exists: () => true })),
+      empty: !data || data.length === 0,
+      size: data?.length || 0
+    };
+  } catch (err) {
+    if (isNetworkFetchError(err)) {
+      console.warn(`[XPATAGONIA] Network error in getDocs (${path}); using local fallback.`);
+    } else {
+      console.warn(`Warning in getDocs (${path}):`, err);
+    }
+    return { forEach: () => {}, docs: [], empty: true, size: 0 };
   }
-  
-  return {
-    forEach: (cb) => (data || []).forEach(item => cb({ id: item.id || item.uid, data: () => mapDataFromDb(item) })),
-    docs: (data || []).map(item => ({ id: item.id || item.uid, data: () => mapDataFromDb(item), exists: () => true })),
-    empty: !data || data.length === 0,
-    size: data?.length || 0
-  };
 };
 
 export const getDoc = async (docRef) => {
+  if (!isSupabaseConfigured) {
+    return { exists: () => false, data: () => null, id: docRef.id };
+  }
+
   const path = mapTableName(docRef.path);
   const field = (path === 'company_profiles' || path === 'module_settings') ? 'user_uid' : 'id';
   
   let val = docRef.id;
   if (!isNaN(val) && field === 'id') val = Number(val);
   
-  const { data, error } = await supabase.from(path).select('*').eq(field, val).single();
-  
-  if (error && error.code !== 'PGRST116') {
-    console.error(`Error in getDoc (${path}/${docRef.id}):`, error);
+  try {
+    const { data, error } = await supabase.from(path).select('*').eq(field, val).single();
+    
+    if (error && error.code !== 'PGRST116') {
+      if (!isNetworkFetchError(error)) {
+        console.warn(`Warning in getDoc (${path}/${docRef.id}):`, error.message || error);
+      }
+    }
+    
+    if (!data) return { exists: () => false, data: () => null, id: docRef.id };
+    return { exists: () => true, data: () => mapDataFromDb(data), id: docRef.id };
+  } catch (err) {
+    if (!isNetworkFetchError(err)) {
+      console.warn(`Warning in getDoc (${path}/${docRef.id}):`, err);
+    }
+    return { exists: () => false, data: () => null, id: docRef.id };
   }
-  
-  if (!data) return { exists: () => false, data: () => null, id: docRef.id };
-  return { exists: () => true, data: () => mapDataFromDb(data), id: docRef.id };
 };
 
 export const addDoc = async (coll, data) => {

@@ -1,31 +1,80 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Safe project URL fallback from the provisioned Supabase instance
-const FALLBACK_SUPABASE_URL = 'https://cjbafuclfgdexapfmyzd.supabase.co';
-const FALLBACK_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-// Validate that the URL is a valid http(s) URL
-function getValidUrl(url: string): string {
+function isValidHttpUrl(url: string): boolean {
   try {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       new URL(url);
-      return url;
+      return true;
     }
   } catch {
     // invalid URL format
   }
-  return FALLBACK_SUPABASE_URL;
+  return false;
 }
 
-const supabaseUrl = getValidUrl(rawUrl);
-const supabaseAnonKey = rawKey && rawKey.length > 10 ? rawKey : FALLBACK_ANON_KEY;
+export const isSupabaseConfigured: boolean =
+  isValidHttpUrl(rawUrl) &&
+  rawKey.length > 20 &&
+  !rawKey.includes('placeholder');
+
+function createResilientFallbackClient(): SupabaseClient {
+  const emptyListResult = { data: [] as any[], error: null };
+  const emptySingleResult = { data: null, error: null };
+
+  const createQueryBuilder = (isSingle = false): any => {
+    const promise = Promise.resolve(isSingle ? emptySingleResult : emptyListResult);
+    const builder: any = {
+      select: () => builder,
+      eq: () => builder,
+      neq: () => builder,
+      lt: () => builder,
+      lte: () => builder,
+      gt: () => builder,
+      gte: () => builder,
+      in: () => builder,
+      contains: () => builder,
+      order: () => builder,
+      limit: () => builder,
+      single: () => createQueryBuilder(true),
+      maybeSingle: () => createQueryBuilder(true),
+      then: (onfulfilled?: any, onrejected?: any) => promise.then(onfulfilled, onrejected),
+      catch: (onrejected?: any) => promise.catch(onrejected),
+      finally: (onfinally?: any) => promise.finally(onfinally),
+    };
+    return builder;
+  };
+
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      signInWithPassword: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
+      signUp: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
+      signOut: async () => ({ error: null }),
+      resetPasswordForEmail: async () => ({ data: null, error: null }),
+      signInWithOtp: async () => ({ data: null, error: null }),
+    },
+    from: () => ({
+      select: () => createQueryBuilder(false),
+      insert: () => createQueryBuilder(true),
+      update: () => createQueryBuilder(false),
+      delete: () => createQueryBuilder(false),
+      upsert: () => createQueryBuilder(false),
+    }),
+  } as unknown as SupabaseClient;
+}
 
 function initSupabase(): SupabaseClient {
+  if (!isSupabaseConfigured) {
+    return createResilientFallbackClient();
+  }
+
   try {
-    return createClient(supabaseUrl, supabaseAnonKey, {
+    return createClient(rawUrl, rawKey, {
       auth: {
         persistSession: typeof window !== 'undefined',
         autoRefreshToken: typeof window !== 'undefined',
@@ -33,28 +82,8 @@ function initSupabase(): SupabaseClient {
     });
   } catch (err) {
     console.warn('[XPATAGONIA] Could not initialize standard Supabase client, using resilient fallback client:', err);
-    // Return a safe mock object to avoid crashing any component that imports supabase
-    return {
-      auth: {
-        getSession: async () => ({ data: { session: null }, error: null }),
-        getUser: async () => ({ data: { user: null }, error: null }),
-        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-        signInWithPassword: async () => ({ data: null, error: new Error('Supabase no configurado en este entorno') }),
-        signUp: async () => ({ data: null, error: new Error('Supabase no configurado en este entorno') }),
-        signOut: async () => ({ error: null }),
-        resetPasswordForEmail: async () => ({ data: null, error: null }),
-        signInWithOtp: async () => ({ data: null, error: null }),
-      },
-      from: () => ({
-        select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }),
-        insert: () => ({ select: () => ({ single: async () => ({ data: null, error: null }) }) }),
-        update: () => ({ eq: async () => ({ data: null, error: null }) }),
-        delete: () => ({ eq: async () => ({ data: null, error: null }) }),
-        upsert: async () => ({ data: null, error: null }),
-      }),
-    } as unknown as SupabaseClient;
+    return createResilientFallbackClient();
   }
 }
 
 export const supabase = initSupabase();
-
