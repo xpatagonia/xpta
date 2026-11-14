@@ -223,3 +223,69 @@ export const automationLogs = pgTable('automation_logs', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ==========================================
+// ARN IA (AUTONOMOUS RELATIONSHIP & NETWORK) + B2B CHAT
+// ==========================================
+
+export const arnRules = pgTable('arn_rules', {
+  userId: text('user_uid').primaryKey(),
+  mode: text('mode').notNull().default('hybrid'), // 'hybrid' | 'manual' | 'auto'
+  autoApproveMaxUsd: integer('auto_approve_max_usd').notNull().default(1500),
+  minConfidenceScore: integer('min_confidence_score').notNull().default(82),
+  autoSendEmails: boolean('auto_send_emails').notNull().default(false),
+  autoCreateLogistics: boolean('auto_create_logistics').notNull().default(true),
+  autoReserveInventory: boolean('auto_reserve_inventory').notNull().default(true),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const arnOpportunities = pgTable('arn_opportunities', {
+  id: serial('id').primaryKey(),
+  ownerUid: text('owner_uid').notNull(),
+  companyName: text('company_name').notNull(),
+  contactName: text('contact_name'),
+  contactEmail: text('contact_email'),
+  cuit: text('cuit'),
+  category: text('category').default('General'),
+  corridor: text('corridor'),
+  source: text('source').notNull().default('manual'), // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger'
+  stage: text('stage').notNull().default('detected'), // 'detected' | 'qualified' | 'quoted' | 'negotiating' | 'awarded' | 'archived'
+  aiScore: integer('ai_score').notNull().default(70),
+  estimatedAmountUsd: integer('estimated_amount_usd').notNull().default(0),
+  urgency: text('urgency').notNull().default('medium'),
+  summary: text('summary'),
+  recommendedAction: text('recommended_action'),
+  rawContext: jsonb('raw_context').default('{}'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const arnActionsQueue = pgTable('arn_actions_queue', {
+  id: serial('id').primaryKey(),
+  ownerUid: text('owner_uid').notNull(),
+  opportunityId: integer('opportunity_id'),
+  actionType: text('action_type').notNull(), // 'send_quote_email' | 'send_followup_email' | 'create_logistics_load' | 'reserve_inventory' | 'notify_providers'
+  title: text('title').notNull(),
+  targetEmail: text('target_email'),
+  draftSubject: text('draft_subject'),
+  draftBody: text('draft_body'),
+  estimatedAmountUsd: integer('estimated_amount_usd').notNull().default(0),
+  confidenceScore: integer('confidence_score').notNull().default(75),
+  executionMode: text('execution_mode').notNull().default('manual_approval'), // 'auto_approved' | 'manual_approval'
+  status: text('status').notNull().default('pending_approval'), // 'pending_approval' | 'approved' | 'executed' | 'dismissed' | 'failed'
+  metadata: jsonb('metadata').default('{}'),
+  executedAt: timestamp('executed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const chatMessages = pgTable('chat_messages', {
+  id: serial('id').primaryKey(),
+  channelId: text('channel_id').notNull(),
+  senderUid: text('sender_uid').notNull(),
+  senderName: text('sender_name').notNull(),
+  senderCompany: text('sender_company'),
+  text: text('text').notNull(),
+  msgType: text('msg_type').notNull().default('text'),
+  metadata: jsonb('metadata').default('{}'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

@@ -22,7 +22,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { auth } from '../lib/db';
+import { getApiUrl } from '../lib/apiConfig';
 import {
   B2B_COMPANIES,
   B2BCompanyRecord,
@@ -48,6 +49,9 @@ export default function Services() {
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [selectedProvince, setSelectedProvince] = useState('Todas');
   const [selectedTier, setSelectedTier] = useState<'all' | SubscriptionTier>('all');
+  const [companies, setCompanies] = useState<B2BCompanyRecord[]>(() =>
+    sortCompaniesBySubscriptionTier(B2B_COMPANIES)
+  );
   const [isSubscribedMember, setIsSubscribedMember] = useState(false);
   const [syncedIds, setSyncedIds] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -55,28 +59,44 @@ export default function Services() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setIsSubscribedMember(true);
+    let active = true;
+    const loadDirectory = async () => {
+      try {
+        const token = await auth.getToken();
+        const res = await fetch(`${getApiUrl()}/api/directory`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          cache: 'no-store',
+        });
+        if (!res.ok || !active) return;
+        const data = await res.json();
+        if (Array.isArray(data.companies) && active) {
+          setCompanies(data.companies);
+          setIsSubscribedMember(Boolean(data.isMemberAuthorized));
+        }
+      } catch {
+        // Fallback already populated safely without privileged client toggle
       }
+    };
+
+    loadDirectory();
+    const unsubscribe = auth.onAuthStateChanged((user: any) => {
+      if (!active) return;
+      setIsSubscribedMember(Boolean(user));
+      loadDirectory();
     });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setIsSubscribedMember(true);
-      }
-    });
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const categories = [
     'Todas',
-    ...Array.from(new Set(B2B_COMPANIES.map((c) => c.category))),
+    ...Array.from(new Set(companies.map((c) => c.category))),
   ];
 
   // Strictly order companies by Subscription Plan Tier (Corporativo -> Pro Industrial -> Inicial)
-  const orderedCompanies = sortCompaniesBySubscriptionTier(B2B_COMPANIES).filter(
+  const orderedCompanies = sortCompaniesBySubscriptionTier(companies).filter(
     (company) => {
       const matchesCat =
         selectedCategory === 'Todas' || company.category === selectedCategory;
@@ -105,9 +125,9 @@ export default function Services() {
       setSyncedIds((prev) =>
         prev.includes(company.id) ? prev : [...prev, company.id]
       );
-      setToastMessage(res.message);
-      setTimeout(() => setToastMessage(null), 4000);
     }
+    setToastMessage(res.message);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   return (
@@ -133,8 +153,8 @@ export default function Services() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-white">
                   {isSubscribedMember
-                    ? 'Acceso Miembro Suscripto Activo (Datos Completos + Sincronización CRM)'
-                    : 'Vista Pública Limitada (Solo Información General)'}
+                    ? 'Acceso Miembro Suscripto Activo (Datos Completos + Ingesta ARN IA)'
+                    : 'Vista Pública Limitada (Validación Servidor Activa)'}
                 </span>
                 <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-white/10 text-slate-300">
                   Ordenado por Plan de Suscripción
@@ -142,37 +162,19 @@ export default function Services() {
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
                 {isSubscribedMember
-                  ? 'Visualizando CUIT, decisores de compra, contacto directo y botón de inyección directa de empresas a tu CRM.'
-                  : 'Los datos fiscales (CUIT), decisores comerciales, contacto directo e integración al CRM están reservados para empresas registradas con suscripción activa.'}
+                  ? 'Visualizando CUIT, decisores de compra, contacto directo y envío en 1 clic a tu motor ARN IA.'
+                  : 'Los datos fiscales (CUIT), decisores comerciales y envío directo a ARN IA están protegidos en el servidor para cuentas verificadas.'}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              onClick={() => setIsSubscribedMember(!isSubscribedMember)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all flex items-center gap-1.5 ${
-                isSubscribedMember
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
-                  : 'bg-white/10 border-white/15 text-white hover:bg-white/20'
-              }`}
-            >
-              {isSubscribedMember ? (
-                <>
-                  <Lock className="w-3.5 h-3.5" /> Cambiar a Vista Pública
-                </>
-              ) : (
-                <>
-                  <Unlock className="w-3.5 h-3.5 text-orange-400" /> Simular Vista Miembro Suscripto
-                </>
-              )}
-            </button>
             {!isSubscribedMember && (
               <Link
                 to="/planes"
                 className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition-colors"
               >
-                Ver Planes de Suscripción
+                Desbloquear con Membresía
               </Link>
             )}
           </div>
@@ -188,7 +190,7 @@ export default function Services() {
               Empresas y Proveedores de la Patagonia
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mt-2 max-w-2xl text-sm sm:text-base">
-              Las empresas se listan según su nivel de validación y plan de suscripción (Corporativo &rarr; Pro Industrial &rarr; Inicial) y se sincronizan en un clic con el módulo CRM.
+              Las empresas se listan según su nivel de validación y plan de suscripción (Corporativo &rarr; Pro Industrial &rarr; Inicial) e ingresan automáticamente al motor ARN IA.
             </p>
           </div>
 
@@ -202,7 +204,7 @@ export default function Services() {
                   : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Todos ({B2B_COMPANIES.length})
+              Todos ({companies.length})
             </button>
             <button
               onClick={() => setSelectedTier('corporativo')}
@@ -442,11 +444,11 @@ export default function Services() {
                         >
                           {isSynced ? (
                             <>
-                              <CheckCircle2 className="w-4 h-4" /> En tu CRM
+                              <CheckCircle2 className="w-4 h-4" /> En ARN IA
                             </>
                           ) : (
                             <>
-                              <Database className="w-4 h-4" /> Integrar al CRM
+                              <Sparkles className="w-4 h-4" /> Enviar a ARN IA
                             </>
                           )}
                         </button>
@@ -482,7 +484,7 @@ export default function Services() {
                           className="w-full py-3 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2"
                         >
                           <Lock className="w-3.5 h-3.5 text-orange-500" />
-                          Conectar & CRM
+                          Conectar &amp; ARN IA
                         </Link>
                         <Link
                           to={`/logistica?tab=rutas&origin=${encodeURIComponent(
@@ -493,12 +495,6 @@ export default function Services() {
                           <Route className="w-3.5 h-3.5 text-orange-500" />
                           Simular Distancia (OSRM)
                         </Link>
-                        <button
-                          onClick={() => setIsSubscribedMember(true)}
-                          className="w-full py-2 px-3 rounded-xl border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-orange-500 hover:border-orange-500/40 transition-colors"
-                        >
-                          Previsualizar como Miembro
-                        </button>
                       </>
                     )}
                   </div>
@@ -608,13 +604,13 @@ export default function Services() {
                   }}
                   className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"
                 >
-                  <Database className="w-4 h-4" /> Guardar en mi CRM
+                  <Sparkles className="w-4 h-4" /> Enviar a ARN IA
                 </button>
                 <Link
                   to="/dashboard"
                   className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider"
                 >
-                  Abrir Panel CRM
+                  Abrir Panel ARN IA
                 </Link>
               </div>
             </motion.div>
@@ -622,7 +618,7 @@ export default function Services() {
         )}
       </AnimatePresence>
 
-      {/* CRM Sync Toast Notification */}
+      {/* ARN IA Sync Toast Notification */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
@@ -633,14 +629,14 @@ export default function Services() {
           >
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             <div className="text-xs">
-              <p className="font-bold text-white mb-0.5">Sincronización CRM Completada</p>
+              <p className="font-bold text-white mb-0.5">Sincronización ARN IA</p>
               <p className="text-slate-300">{toastMessage}</p>
             </div>
             <Link
               to="/dashboard"
               className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold uppercase tracking-wider shrink-0"
             >
-              Ver CRM
+              Ver ARN IA
             </Link>
           </motion.div>
         )}

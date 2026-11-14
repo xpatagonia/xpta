@@ -11,7 +11,11 @@ var __export = (target, all) => {
 // src/db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  arnActionsQueue: () => arnActionsQueue,
+  arnOpportunities: () => arnOpportunities,
+  arnRules: () => arnRules,
   automationLogs: () => automationLogs,
+  chatMessages: () => chatMessages,
   companyProfiles: () => companyProfiles,
   contacts: () => contacts,
   insights: () => insights,
@@ -29,7 +33,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
-var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, siteSettings, automationLogs;
+var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, siteSettings, automationLogs, arnRules, arnOpportunities, arnActionsQueue, chatMessages;
 var init_schema = __esm({
   "src/db/schema.ts"() {
     users = pgTable("users", {
@@ -238,6 +242,70 @@ var init_schema = __esm({
       event: text("event").notNull(),
       status: text("status").notNull().default("processed"),
       payload: jsonb("payload").default("{}"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    arnRules = pgTable("arn_rules", {
+      userId: text("user_uid").primaryKey(),
+      mode: text("mode").notNull().default("hybrid"),
+      // 'hybrid' | 'manual' | 'auto'
+      autoApproveMaxUsd: integer("auto_approve_max_usd").notNull().default(1500),
+      minConfidenceScore: integer("min_confidence_score").notNull().default(82),
+      autoSendEmails: boolean("auto_send_emails").notNull().default(false),
+      autoCreateLogistics: boolean("auto_create_logistics").notNull().default(true),
+      autoReserveInventory: boolean("auto_reserve_inventory").notNull().default(true),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    arnOpportunities = pgTable("arn_opportunities", {
+      id: serial("id").primaryKey(),
+      ownerUid: text("owner_uid").notNull(),
+      companyName: text("company_name").notNull(),
+      contactName: text("contact_name"),
+      contactEmail: text("contact_email"),
+      cuit: text("cuit"),
+      category: text("category").default("General"),
+      corridor: text("corridor"),
+      source: text("source").notNull().default("manual"),
+      // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger'
+      stage: text("stage").notNull().default("detected"),
+      // 'detected' | 'qualified' | 'quoted' | 'negotiating' | 'awarded' | 'archived'
+      aiScore: integer("ai_score").notNull().default(70),
+      estimatedAmountUsd: integer("estimated_amount_usd").notNull().default(0),
+      urgency: text("urgency").notNull().default("medium"),
+      summary: text("summary"),
+      recommendedAction: text("recommended_action"),
+      rawContext: jsonb("raw_context").default("{}"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    arnActionsQueue = pgTable("arn_actions_queue", {
+      id: serial("id").primaryKey(),
+      ownerUid: text("owner_uid").notNull(),
+      opportunityId: integer("opportunity_id"),
+      actionType: text("action_type").notNull(),
+      // 'send_quote_email' | 'send_followup_email' | 'create_logistics_load' | 'reserve_inventory' | 'notify_providers'
+      title: text("title").notNull(),
+      targetEmail: text("target_email"),
+      draftSubject: text("draft_subject"),
+      draftBody: text("draft_body"),
+      estimatedAmountUsd: integer("estimated_amount_usd").notNull().default(0),
+      confidenceScore: integer("confidence_score").notNull().default(75),
+      executionMode: text("execution_mode").notNull().default("manual_approval"),
+      // 'auto_approved' | 'manual_approval'
+      status: text("status").notNull().default("pending_approval"),
+      // 'pending_approval' | 'approved' | 'executed' | 'dismissed' | 'failed'
+      metadata: jsonb("metadata").default("{}"),
+      executedAt: timestamp("executed_at"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    chatMessages = pgTable("chat_messages", {
+      id: serial("id").primaryKey(),
+      channelId: text("channel_id").notNull(),
+      senderUid: text("sender_uid").notNull(),
+      senderName: text("sender_name").notNull(),
+      senderCompany: text("sender_company"),
+      text: text("text").notNull(),
+      msgType: text("msg_type").notNull().default("text"),
+      metadata: jsonb("metadata").default("{}"),
       createdAt: timestamp("created_at").defaultNow()
     });
   }
@@ -595,7 +663,7 @@ import express from "express";
 import path from "path";
 import crypto from "crypto";
 import cors from "cors";
-import { createClient as createClient2 } from "@supabase/supabase-js";
+import { createClient as createClient4 } from "@supabase/supabase-js";
 
 // src/middleware/auth.ts
 import { createClient } from "@supabase/supabase-js";
@@ -608,15 +676,15 @@ async function resolveUserRoleAndMembership(uid, email) {
   let roleName = "vendor";
   let membershipName = "Basic";
   try {
-    const { db: db2, hasDatabaseConfig: hasDatabaseConfig2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+    const { db: db3, hasDatabaseConfig: hasDatabaseConfig2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     if (hasDatabaseConfig2()) {
       const { userRoles: userRoles2, roles: roles2, userMemberships: userMemberships2, memberships: memberships2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const { eq: eq5 } = await import("drizzle-orm");
-      const roleRows = await db2.select().from(userRoles2).leftJoin(roles2, eq5(userRoles2.roleId, roles2.id)).where(eq5(userRoles2.userId, uid));
+      const roleRows = await db3.select().from(userRoles2).leftJoin(roles2, eq5(userRoles2.roleId, roles2.id)).where(eq5(userRoles2.userId, uid));
       if (roleRows[0]?.roles?.name) {
         roleName = roleRows[0].roles.name;
       }
-      const memRows = await db2.select().from(userMemberships2).leftJoin(memberships2, eq5(userMemberships2.membershipId, memberships2.id)).where(eq5(userMemberships2.userId, uid));
+      const memRows = await db3.select().from(userMemberships2).leftJoin(memberships2, eq5(userMemberships2.membershipId, memberships2.id)).where(eq5(userMemberships2.userId, uid));
       if (memRows[0]?.memberships?.name) {
         membershipName = memRows[0].memberships.name;
       }
@@ -821,13 +889,1883 @@ Ingresa a https://xpatagonia.online/dashboard para revisar especificaciones y en
 init_db();
 init_schema();
 import { eq as eq4, desc as desc2 } from "drizzle-orm";
+
+// src/server/arnRoutes.ts
+init_db();
+import { createClient as createClient3 } from "@supabase/supabase-js";
+
+// src/services/arnSchema.ts
+init_db();
+var arnTablesEnsured = false;
+async function ensureProductionTables() {
+  if (arnTablesEnsured || !hasDatabaseConfig()) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.arn_rules (
+        user_uid text PRIMARY KEY,
+        mode text NOT NULL DEFAULT 'hybrid',
+        auto_approve_max_usd integer NOT NULL DEFAULT 1500,
+        min_confidence_score integer NOT NULL DEFAULT 82,
+        auto_send_emails boolean NOT NULL DEFAULT false,
+        auto_create_logistics boolean NOT NULL DEFAULT true,
+        auto_reserve_inventory boolean NOT NULL DEFAULT true,
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.arn_opportunities (
+        id serial PRIMARY KEY,
+        owner_uid text NOT NULL,
+        company_name text NOT NULL,
+        contact_name text,
+        contact_email text,
+        cuit text,
+        category text DEFAULT 'General',
+        corridor text,
+        source text NOT NULL DEFAULT 'manual',
+        stage text NOT NULL DEFAULT 'detected',
+        ai_score integer NOT NULL DEFAULT 70,
+        estimated_amount_usd integer NOT NULL DEFAULT 0,
+        urgency text NOT NULL DEFAULT 'medium',
+        summary text,
+        recommended_action text,
+        raw_context jsonb DEFAULT '{}'::jsonb,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.arn_actions_queue (
+        id serial PRIMARY KEY,
+        owner_uid text NOT NULL,
+        opportunity_id integer,
+        action_type text NOT NULL,
+        title text NOT NULL,
+        target_email text,
+        draft_subject text,
+        draft_body text,
+        estimated_amount_usd integer NOT NULL DEFAULT 0,
+        confidence_score integer NOT NULL DEFAULT 75,
+        execution_mode text NOT NULL DEFAULT 'manual_approval',
+        status text NOT NULL DEFAULT 'pending_approval',
+        metadata jsonb DEFAULT '{}'::jsonb,
+        executed_at timestamptz,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.chat_messages (
+        id serial PRIMARY KEY,
+        channel_id text NOT NULL,
+        sender_uid text NOT NULL,
+        sender_name text NOT NULL,
+        sender_company text,
+        text text NOT NULL,
+        msg_type text NOT NULL DEFAULT 'text',
+        metadata jsonb DEFAULT '{}'::jsonb,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.products (
+        id serial PRIMARY KEY,
+        user_uid text,
+        sku text,
+        name text NOT NULL,
+        category text NOT NULL,
+        subcategory text,
+        brand text,
+        model text,
+        condition text,
+        year text,
+        usage_hours text,
+        warranty text,
+        price_base text,
+        price_wholesale text,
+        stock text,
+        moq text,
+        description text,
+        certifications jsonb DEFAULT '[]'::jsonb,
+        payment_methods jsonb DEFAULT '[]'::jsonb,
+        shipping_conditions jsonb DEFAULT '[]'::jsonb,
+        lead_time text,
+        location text,
+        supplier text,
+        video_url text,
+        tax_rate text,
+        image text,
+        status text DEFAULT 'active',
+        company_id text,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.inventory_items (
+        id serial PRIMARY KEY,
+        user_uid text,
+        sku text,
+        name text,
+        category text,
+        quantity integer DEFAULT 0,
+        location text,
+        status text,
+        last_updated timestamptz DEFAULT now(),
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.logistics_loads (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_uid text NOT NULL,
+        load_type text NOT NULL CHECK (load_type IN ('empty_return', 'cargo_tender')),
+        origin_name text NOT NULL,
+        origin_lat double precision,
+        origin_lng double precision,
+        destination_name text NOT NULL,
+        destination_lat double precision,
+        destination_lng double precision,
+        corridor text,
+        distance_km integer,
+        weight_kg integer,
+        truck_type text,
+        discount_percent integer DEFAULT 35,
+        target_price_ars bigint,
+        status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'bidding', 'assigned', 'completed')),
+        created_at timestamptz DEFAULT now()
+      );
+    `);
+    arnTablesEnsured = true;
+  } catch (err) {
+    console.warn("[ARN_SCHEMA] Table bootstrap skipped or deferred:", err);
+  }
+}
+
+// src/services/arnAiService.ts
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
+var DEFAULT_ARN_POLICY = {
+  mode: "hybrid",
+  autoApproveMaxUsd: 1500,
+  minConfidenceScore: 82,
+  autoSendEmails: false,
+  autoCreateLogistics: true,
+  autoReserveInventory: true
+};
+function evaluateHybridDecision(rule, actionType, estimatedAmountUsd, confidenceScore) {
+  if (rule.mode === "manual") {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: "Modo manual activo: todas las acciones requieren aprobaci\xF3n humana."
+    };
+  }
+  const isEmailAction = actionType === "send_quote_email" || actionType === "send_followup_email" || actionType === "notify_providers";
+  if (isEmailAction && !rule.autoSendEmails && rule.mode !== "auto") {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: "Env\xEDo autom\xE1tico de correos desactivado en tu regla h\xEDbrida (requiere 1 clic de aprobaci\xF3n)."
+    };
+  }
+  if (actionType === "create_logistics_load" && !rule.autoCreateLogistics) {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: "Creaci\xF3n autom\xE1tica de cargas desactivada en tu pol\xEDtica ARN."
+    };
+  }
+  if (actionType === "reserve_inventory" && !rule.autoReserveInventory) {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: "Reserva autom\xE1tica de stock desactivada en tu pol\xEDtica ARN."
+    };
+  }
+  if (confidenceScore < rule.minConfidenceScore) {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: `Confianza IA (${confidenceScore}%) por debajo del m\xEDnimo configurado (${rule.minConfidenceScore}%).`
+    };
+  }
+  if (estimatedAmountUsd > rule.autoApproveMaxUsd) {
+    return {
+      shouldAutoExecute: false,
+      executionMode: "manual_approval",
+      reason: `Monto estimado (USD ${estimatedAmountUsd}) supera el tope autom\xE1tico (USD ${rule.autoApproveMaxUsd}).`
+    };
+  }
+  return {
+    shouldAutoExecute: true,
+    executionMode: "auto_approved",
+    reason: `Aprobado autom\xE1ticamente por regla h\xEDbrida (USD ${estimatedAmountUsd} <= USD ${rule.autoApproveMaxUsd}, confianza ${confidenceScore}%).`
+  };
+}
+function getGeminiClient() {
+  const apiKey = (process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey || apiKey.length < 10 || apiKey.includes("MY_GEMINI_API_KEY")) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+  });
+}
+function buildDeterministicFallback(input) {
+  const text2 = input.rawText || "";
+  const lower = text2.toLowerCase();
+  const urgent = /urgente|inmediato|paro|parada|critico|crítico|hoy/i.test(lower);
+  const amountMatch = text2.match(/(?:usd|u\$s|us\$|\$)\s*([0-9][0-9.,]{1,9})/i);
+  const parsedAmount = amountMatch ? Math.min(5e5, Math.max(250, Number(amountMatch[1].replace(/[.,]/g, "")) || 1200)) : 1200;
+  const corridor = /añelo|vaca muerta|neuqu/i.test(lower) ? "RN 22 / A\xF1elo (Vaca Muerta)" : /comodoro|golfo|chubut/i.test(lower) ? "RN 3 / Golfo San Jorge" : /madryn|pesca|puerto/i.test(lower) ? "Puerto Madryn / Corredor Atl\xE1ntico" : "Corredor Patag\xF3nico RN 3 / RN 22";
+  const company = input.companyName?.trim() || "Cliente B2B Detectado";
+  const contactEmail = input.contactEmail?.trim() || "";
+  const category = input.category?.trim() || "Servicios Industriales";
+  return {
+    companyName: company,
+    contactName: input.contactName?.trim() || "Responsable de Compras",
+    contactEmail,
+    cuit: "",
+    category,
+    corridor,
+    urgency: urgent ? "high" : "medium",
+    estimatedAmountUsd: parsedAmount,
+    aiScore: contactEmail ? urgent ? 88 : 79 : 65,
+    summary: `Oportunidad detectada desde ${input.source}: ${text2.slice(0, 180)}`,
+    recommendedAction: contactEmail ? "Enviar cotizaci\xF3n t\xE9cnica inicial y validar disponibilidad log\xEDstica." : "Calificar empresa y solicitar email de contacto comercial.",
+    actionType: contactEmail ? "send_quote_email" : "send_followup_email",
+    actionTitle: `Responder oportunidad comercial \u2014 ${company}`,
+    draftSubject: `Propuesta T\xE9cnica & Cotizaci\xF3n xPatagonia \u2014 ${category}`,
+    draftBody: `Estimados ${company},
+
+Recibimos su requerimiento en ${category} (${corridor}). Contamos con capacidad operativa y disponibilidad para avanzar con la cotizaci\xF3n formal.${input.catalogSummary ? `
+
+Referencia de cat\xE1logo disponible:
+${input.catalogSummary}` : ""}
+
+Quedamos atentos a confirmar plazos de entrega y especificaciones finales.
+
+Saludos cordiales,
+Equipo Comercial xPatagonia`
+  };
+}
+async function analyzeOpportunityWithArn(input) {
+  const ai = getGeminiClient();
+  if (!ai) {
+    return buildDeterministicFallback(input);
+  }
+  try {
+    const prompt = `Analiza el siguiente evento comercial B2B en Patagonia (Argentina) y extrae una oportunidad estructurada para ARN IA.
+Fuente: ${input.source}
+Empresa informada: ${input.companyName || "No especificada"}
+Contacto informado: ${input.contactName || "No especificado"}
+Email informado: ${input.contactEmail || "No especificado"}
+Categor\xEDa informada: ${input.category || "General"}
+Cat\xE1logo propio disponible de nuestra empresa:
+${input.catalogSummary || "Sin productos cargados a\xFAn"}
+
+Contenido / Requerimiento:
+"""
+${input.rawText.slice(0, 3500)}
+"""
+
+Instrucciones:
+- Calcula aiScore (0-100) seg\xFAn claridad t\xE9cnica, fit comercial y presencia de contacto real.
+- Estima estimatedAmountUsd en USD enteros realistas (si no se menciona monto expl\xEDcito, estima seg\xFAn tipo de servicio B2B entre 500 y 25000).
+- Redacta un draftSubject y draftBody profesional en espa\xF1ol rioplatense/corporativo listo para enviar al cliente usando nuestro cat\xE1logo si coincide.
+- Define actionType entre: send_quote_email, send_followup_email, create_logistics_load, reserve_inventory, notify_providers.`;
+    const response = await ai.models.generateContent({
+      model: "gemini-4-hydrogen",
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            companyName: { type: Type.STRING },
+            contactName: { type: Type.STRING },
+            contactEmail: { type: Type.STRING },
+            cuit: { type: Type.STRING },
+            category: { type: Type.STRING },
+            corridor: { type: Type.STRING },
+            urgency: { type: Type.STRING },
+            estimatedAmountUsd: { type: Type.INTEGER },
+            aiScore: { type: Type.INTEGER },
+            summary: { type: Type.STRING },
+            recommendedAction: { type: Type.STRING },
+            actionType: { type: Type.STRING },
+            actionTitle: { type: Type.STRING },
+            draftSubject: { type: Type.STRING },
+            draftBody: { type: Type.STRING }
+          },
+          required: [
+            "companyName",
+            "category",
+            "corridor",
+            "urgency",
+            "estimatedAmountUsd",
+            "aiScore",
+            "summary",
+            "recommendedAction",
+            "actionType",
+            "actionTitle",
+            "draftSubject",
+            "draftBody"
+          ]
+        }
+      }
+    });
+    const parsed = JSON.parse((response.text || "{}").trim());
+    const allowedUrgencies = ["low", "medium", "high", "critical"];
+    const allowedActions = [
+      "send_quote_email",
+      "send_followup_email",
+      "create_logistics_load",
+      "reserve_inventory",
+      "notify_providers"
+    ];
+    return {
+      companyName: parsed.companyName || input.companyName || "Cliente B2B",
+      contactName: parsed.contactName || input.contactName || "Compras",
+      contactEmail: parsed.contactEmail || input.contactEmail || "",
+      cuit: parsed.cuit || "",
+      category: parsed.category || input.category || "General",
+      corridor: parsed.corridor || "Corredor Patag\xF3nico RN 3 / RN 22",
+      urgency: allowedUrgencies.includes(parsed.urgency) ? parsed.urgency : "medium",
+      estimatedAmountUsd: Math.max(0, Number(parsed.estimatedAmountUsd) || 1200),
+      aiScore: Math.min(100, Math.max(1, Number(parsed.aiScore) || 75)),
+      summary: parsed.summary || input.rawText.slice(0, 180),
+      recommendedAction: parsed.recommendedAction || "Enviar propuesta comercial",
+      actionType: allowedActions.includes(parsed.actionType) ? parsed.actionType : "send_quote_email",
+      actionTitle: parsed.actionTitle || `Acci\xF3n comercial \u2014 ${parsed.companyName || "Cliente"}`,
+      draftSubject: parsed.draftSubject || "Cotizaci\xF3n B2B xPatagonia",
+      draftBody: parsed.draftBody || "Estimados, adjuntamos nuestra propuesta comercial."
+    };
+  } catch (err) {
+    console.warn("[ARN_AI] Fallback heuristic used due to Gemini warning:", err);
+    return buildDeterministicFallback(input);
+  }
+}
+async function generateAdnEmbedding(text2) {
+  const ai = getGeminiClient();
+  if (!ai || !text2.trim()) return null;
+  try {
+    const res = await ai.models.embedContent({
+      model: "gemini-embedding-2",
+      contents: text2.slice(0, 2e3),
+      config: { outputDimensionality: 768 }
+    });
+    const values = res.embeddings?.[0]?.values;
+    if (Array.isArray(values) && values.length === 768) {
+      return values;
+    }
+    return null;
+  } catch (err) {
+    console.warn("[ARN_AI] Embedding warning:", err);
+    return null;
+  }
+}
+async function askArnCopilot(question, contextSnapshot) {
+  const ai = getGeminiClient();
+  if (!ai) {
+    return `Resumen ARN (sin clave Gemini activa): Ten\xE9s ${contextSnapshot.opportunitiesCount} oportunidades activas, ${contextSnapshot.pendingActionsCount} acciones esperando aprobaci\xF3n y ${contextSnapshot.openRfqsCount} RFQs abiertas bajo modo ${contextSnapshot.policy.mode}.`;
+  }
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-4-hydrogen",
+      contents: `Consulta del operador B2B: "${question}"
+
+Estado real de su operaci\xF3n en xPatagonia:
+${JSON.stringify(contextSnapshot, null, 2)}`,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: "Eres ARN IA, el director de operaciones y negocios aut\xF3nomo de xPatagonia B2B. Responde en espa\xF1ol, de forma ejecutiva, accionable y directa en 3 a 6 l\xEDneas basadas \xFAnicamente en los datos reales provistos."
+      }
+    });
+    return (response.text || "").trim() || "No se pudo generar respuesta.";
+  } catch (err) {
+    return `No se pudo consultar al Copiloto ARN en este momento (${err?.message || "error temporal"}).`;
+  }
+}
+
+// src/lib/supabase.ts
+import { createClient as createClient2 } from "@supabase/supabase-js";
+
+// src/lib/apiConfig.ts
+function sanitizeApiBaseUrl(rawUrl2) {
+  const cleaned = (rawUrl2 || "").trim().replace(/\/+$/, "");
+  if (!cleaned) return "";
+  if (/onrender\.com/i.test(cleaned)) return "";
+  if (typeof window !== "undefined" && window.location?.protocol === "https:" && /^http:\/\/(localhost|127\.0\.0\.1)/i.test(cleaned)) {
+    return "";
+  }
+  return cleaned;
+}
+function readDefineApiUrl() {
+  try {
+    if (typeof __XPATAGONIA_API_URL__ !== "undefined" && __XPATAGONIA_API_URL__) {
+      return __XPATAGONIA_API_URL__;
+    }
+  } catch {
+  }
+  try {
+    return (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "").trim();
+  } catch {
+    return "";
+  }
+}
+var getApiUrl = () => {
+  return sanitizeApiBaseUrl(readDefineApiUrl());
+};
+
+// src/lib/supabase.ts
+function readBuildSupabaseUrl() {
+  try {
+    if (typeof __XPATAGONIA_SUPABASE_URL__ !== "undefined" && __XPATAGONIA_SUPABASE_URL__) {
+      return __XPATAGONIA_SUPABASE_URL__.trim();
+    }
+  } catch {
+  }
+  try {
+    return (import.meta.env.VITE_SUPABASE_URL || "").trim();
+  } catch {
+    return "";
+  }
+}
+function readBuildSupabaseAnonKey() {
+  try {
+    if (typeof __XPATAGONIA_SUPABASE_ANON_KEY__ !== "undefined" && __XPATAGONIA_SUPABASE_ANON_KEY__) {
+      return __XPATAGONIA_SUPABASE_ANON_KEY__.trim();
+    }
+  } catch {
+  }
+  try {
+    return (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+  } catch {
+    return "";
+  }
+}
+function isValidSupabaseConfig(url, key) {
+  try {
+    if (url && (url.startsWith("http://") || url.startsWith("https://")) && key.length > 20 && !key.includes("placeholder")) {
+      new URL(url);
+      return true;
+    }
+  } catch {
+  }
+  return false;
+}
+function createResilientFallbackClient() {
+  const emptyListResult = { data: [], error: null };
+  const emptySingleResult = { data: null, error: null };
+  const createQueryBuilder = (isSingle = false) => {
+    const promise = Promise.resolve(isSingle ? emptySingleResult : emptyListResult);
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      neq: () => builder,
+      lt: () => builder,
+      lte: () => builder,
+      gt: () => builder,
+      gte: () => builder,
+      in: () => builder,
+      contains: () => builder,
+      order: () => builder,
+      limit: () => builder,
+      single: () => createQueryBuilder(true),
+      maybeSingle: () => createQueryBuilder(true),
+      then: (onfulfilled, onrejected) => promise.then(onfulfilled, onrejected),
+      catch: (onrejected) => promise.catch(onrejected),
+      finally: (onfinally) => promise.finally(onfinally)
+    };
+    return builder;
+  };
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {
+      } } } }),
+      signInWithPassword: async () => ({
+        data: { user: null, session: null },
+        error: new Error("Supabase no configurado en este entorno")
+      }),
+      signUp: async () => ({
+        data: { user: null, session: null },
+        error: new Error("Supabase no configurado en este entorno")
+      }),
+      signOut: async () => ({ error: null }),
+      resetPasswordForEmail: async () => ({
+        data: null,
+        error: new Error(
+          "Supabase Auth no est\xE1 configurado en este entorno (faltan SUPABASE_URL/VITE_SUPABASE_URL y SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY)."
+        )
+      }),
+      signInWithOtp: async () => ({
+        data: null,
+        error: new Error(
+          "Supabase Auth no est\xE1 configurado en este entorno (faltan SUPABASE_URL/VITE_SUPABASE_URL y SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY)."
+        )
+      }),
+      updateUser: async () => ({
+        data: { user: null },
+        error: new Error("Supabase Auth no est\xE1 configurado en este entorno.")
+      }),
+      setSession: async () => ({ data: { user: null, session: null }, error: null }),
+      exchangeCodeForSession: async () => ({ data: { user: null, session: null }, error: null })
+    },
+    from: () => ({
+      select: () => createQueryBuilder(false),
+      insert: () => createQueryBuilder(true),
+      update: () => createQueryBuilder(false),
+      delete: () => createQueryBuilder(false),
+      upsert: () => createQueryBuilder(false)
+    })
+  };
+}
+function buildClient(url, key) {
+  if (!isValidSupabaseConfig(url, key)) return null;
+  try {
+    return createClient2(url, key, {
+      auth: {
+        persistSession: typeof window !== "undefined",
+        autoRefreshToken: typeof window !== "undefined"
+      }
+    });
+  } catch (err) {
+    console.warn("[XPATAGONIA] Could not initialize standard Supabase client:", err);
+    return null;
+  }
+}
+var initialUrl = readBuildSupabaseUrl();
+var initialKey = readBuildSupabaseAnonKey();
+var isSupabaseConfigured2 = isValidSupabaseConfig(initialUrl, initialKey);
+var activeClient = buildClient(initialUrl, initialKey) || createResilientFallbackClient();
+var SUPABASE_READY_EVENT = "xpatagonia:supabase-ready";
+var runtimeBootstrapPromise = null;
+async function ensureSupabaseConfigured() {
+  if (isSupabaseConfigured2) return true;
+  if (typeof window === "undefined") return false;
+  if (runtimeBootstrapPromise) return runtimeBootstrapPromise;
+  runtimeBootstrapPromise = (async () => {
+    try {
+      const res = await fetch(`${getApiUrl()}/api/public-config`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(4e3)
+      });
+      if (!res.ok) return false;
+      const cfg = await res.json().catch(() => null);
+      const runtimeUrl = String(cfg?.supabaseUrl || "").trim();
+      const runtimeKey = String(cfg?.supabaseAnonKey || "").trim();
+      const nextClient = buildClient(runtimeUrl, runtimeKey);
+      if (nextClient) {
+        activeClient = nextClient;
+        isSupabaseConfigured2 = true;
+        window.dispatchEvent(new CustomEvent(SUPABASE_READY_EVENT, { detail: true }));
+        return true;
+      }
+    } catch {
+    } finally {
+      if (!isSupabaseConfigured2) {
+        runtimeBootstrapPromise = null;
+      }
+    }
+    return false;
+  })();
+  return runtimeBootstrapPromise;
+}
+if (typeof window !== "undefined" && !isSupabaseConfigured2) {
+  void ensureSupabaseConfigured();
+}
+var supabase2 = new Proxy({}, {
+  get(_target, prop) {
+    const value = activeClient[prop];
+    return typeof value === "function" ? value.bind(activeClient) : value;
+  }
+});
+
+// src/lib/patagoniaRouting.ts
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => deg * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// src/lib/b2bDirectoryData.ts
+var B2B_COMPANIES = [
+  {
+    id: "comp-petrosur",
+    name: "PetroSur Ingenier\xEDa & Fluidos S.A.",
+    cuit: "30-71489210-9",
+    tier: "corporativo",
+    tierPriority: 1,
+    tierLabel: "Plan Corporativo",
+    verified: true,
+    category: "Hidrocarburos (Oil & Gas)",
+    subcategories: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa de Pozos"],
+    province: "Neuqu\xE9n",
+    city: "A\xF1elo / Neuqu\xE9n Capital",
+    employeeCount: "201-500",
+    publicSummary: "Ingenier\xEDa de superficie, provisi\xF3n de v\xE1lvulas de alta presi\xF3n y mantenimiento integral para yacimientos en Cuenca Neuquina y Golfo San Jorge.",
+    contactName: "Ing. Carlos Mendoza",
+    contactRole: "Director Comercial & Licitaciones",
+    email: "cmendoza@petrosur-b2b.com.ar",
+    phone: "+54 9 299 482-9100",
+    whatsapp: "+5492994829100",
+    website: "https://petrosur-b2b.com.ar",
+    certifications: ["ISO 9001", "ISO 14001", "API Spec Q1"],
+    paymentTerms: "Cuenta Corriente 30/60 d\xEDas \u2022 Factura A / MiPyME",
+    creditRating: "AAA+ (Riesgo Corporativo Auditado)",
+    adnComercial: {
+      ofrece: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa"],
+      demanda: ["Mecanizado CNC", "Bridas Forjadas", "Flete Pesado desde Rosario"],
+      corredorLogistico: "RN 22 / A\xF1elo (Vaca Muerta)",
+      ciudadBase: "A\xF1elo (Hub Vaca Muerta)",
+      lat: -38.3522,
+      lng: -68.7897
+    }
+  },
+  {
+    id: "comp-logistica-austral",
+    name: "Log\xEDstica Austral Multimodal S.R.L.",
+    cuit: "30-68923415-4",
+    tier: "corporativo",
+    tierPriority: 1,
+    tierLabel: "Plan Corporativo",
+    verified: true,
+    category: "Log\xEDstica",
+    subcategories: ["Cargas Especiales", "Cadena de Fr\xEDo -25\xB0C", "Dep\xF3sito Fiscal"],
+    province: "Chubut",
+    city: "Comodoro Rivadavia / Puerto Madryn",
+    employeeCount: "51-200",
+    publicSummary: "Operador log\xEDstico patag\xF3nico con flota propia de carretones, transporte refrigerado para exportaci\xF3n pesquera y bases operativas en Ruta 3 y Ruta 40.",
+    contactName: "Lic. Valeria Albornoz",
+    contactRole: "Gerente de Operaciones B2B",
+    email: "valbornoz@logisticaaustral.com.ar",
+    phone: "+54 9 297 431-8820",
+    whatsapp: "+5492974318820",
+    website: "https://logisticaaustral.com.ar",
+    certifications: ["ISO 9001", "SENASA Hab. Fr\xEDo", "Cargas Peligrosas IMO"],
+    paymentTerms: "Transferencia / Echeq 30 d\xEDas \u2022 Convenio Flota",
+    creditRating: "AA+ (Cumplimiento Verificado)",
+    adnComercial: {
+      ofrece: ["Flete LTL Consolidado", "Retorno Vac\xEDo RN 3", "Cadena de Fr\xEDo -25\xB0C"],
+      demanda: ["Cargas Norte \u2192 Sur", "Insumos de Flota", "Paletizado Isot\xE9rmico"],
+      corredorLogistico: "Ruta Nacional 3 (Buenos Aires \u2194 Ushuaia)",
+      ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
+      lat: -45.8641,
+      lng: -67.4966
+    }
+  },
+  {
+    id: "comp-eolica-sur",
+    name: "RenovaPatagonia Electromec\xE1nica S.A.",
+    cuit: "30-71550932-1",
+    tier: "corporativo",
+    tierPriority: 1,
+    tierLabel: "Plan Corporativo",
+    verified: true,
+    category: "Energ\xEDas Renovables",
+    subcategories: ["Subestaciones", "Mantenimiento Aerogeneradores", "Paneles Industriales"],
+    province: "Santa Cruz",
+    city: "R\xEDo Gallegos / Pico Truncado",
+    employeeCount: "51-200",
+    publicSummary: "Montaje electromec\xE1nico de parques e\xF3licos, tendido de l\xEDneas de media y alta tensi\xF3n e integraci\xF3n de sistemas h\xEDbridos industriales.",
+    contactName: "Ing. Mart\xEDn Echeverr\xEDa",
+    contactRole: "Jefe de Desarrollo de Negocios",
+    email: "mecheverria@renovapatagonia.com.ar",
+    phone: "+54 9 2966 55-1490",
+    whatsapp: "+5492966551490",
+    website: "https://renovapatagonia.com.ar",
+    certifications: ["ISO 45001", "IRAM", "CAMMESA Homologado"],
+    paymentTerms: "Certificaci\xF3n por Avance de Obra \u2022 15/45 d\xEDas",
+    creditRating: "AAA (Proveedor Homologado)",
+    adnComercial: {
+      ofrece: ["Subestaciones MT/AT", "Tableros SCADA", "Montaje E\xF3lico"],
+      demanda: ["Transformadores desde C\xF3rdoba", "Carretones Especiales", "EPP Altura"],
+      corredorLogistico: "RN 3 / Pico Truncado - R\xEDo Gallegos",
+      ciudadBase: "R\xEDo Gallegos",
+      lat: -51.6226,
+      lng: -69.2181
+    }
+  },
+  {
+    id: "comp-rosario-forja",
+    name: "Forja & V\xE1lvulas del Paran\xE1 S.A. (Proveedor Extra-Regional)",
+    cuit: "30-70841299-8",
+    tier: "corporativo",
+    tierPriority: 1,
+    tierLabel: "Plan Corporativo",
+    verified: true,
+    category: "Metal\xFArgica",
+    subcategories: ["Bridas Forjadas ANSI", "Mecanizado CNC Pesado", "V\xE1lvulas de Proceso"],
+    province: "Santa Fe (Env\xEDo Patagonia)",
+    city: "Rosario, Santa Fe \u2192 Corredor Sur",
+    employeeCount: "51-200",
+    publicSummary: "Fabricante santafesino de bridas forjadas, cuerpos de v\xE1lvulas API y repuestos mecanizados CNC con despacho consolidado LTL hacia Cuenca Neuquina y Golfo San Jorge.",
+    contactName: "Ing. Federico Brizuela",
+    contactRole: "Gerente de Cuentas Patag\xF3nicas",
+    email: "fbrizuela@forjaparana.com.ar",
+    phone: "+54 9 341 590-4410",
+    whatsapp: "+5493415904410",
+    website: "https://forjaparana.com.ar",
+    certifications: ["ISO 9001", "API 6A / 6D", "ASME VIII"],
+    paymentTerms: "Cuenta Corriente 45 d\xEDas \u2022 Flete Consolidado LTL",
+    creditRating: "AA+ (Exportador / Proveedor Industrial)",
+    adnComercial: {
+      ofrece: ["Bridas Forjadas", "Mecanizado CNC", "Cuerpos API 6D"],
+      demanda: ["Flete Consolidado Rosario \u2192 A\xF1elo", "Dep\xF3sito Cross-Docking Neuqu\xE9n"],
+      corredorLogistico: "Rosario \u2192 RN 152 \u2192 Neuqu\xE9n / A\xF1elo",
+      ciudadBase: "Rosario (Polo Industrial)",
+      lat: -32.9442,
+      lng: -60.6505,
+      isExtraRegional: true
+    }
+  },
+  {
+    id: "comp-metalurgica-andina",
+    name: "Metal\xFArgica Golfo San Jorge S.A.",
+    cuit: "30-70112984-7",
+    tier: "pro",
+    tierPriority: 2,
+    tierLabel: "Plan Pro Industrial",
+    verified: true,
+    category: "Metal\xFArgica",
+    subcategories: ["Mecanizado CNC", "Estructuras Met\xE1licas", "Tanques API"],
+    province: "Chubut",
+    city: "Parque Industrial Comodoro Rivadavia",
+    employeeCount: "11-50",
+    publicSummary: "Fabricaci\xF3n de estructuras met\xE1licas pesadas, skids de bombeo, recipientes sometidos a presi\xF3n y torner\xEDa CNC de precisi\xF3n.",
+    contactName: "T\xE9c. Roberto Mansilla",
+    contactRole: "Responsable de Presupuestos",
+    email: "cotizaciones@metalgolfo.com.ar",
+    phone: "+54 9 297 492-3310",
+    whatsapp: "+5492974923310",
+    website: "https://metalgolfo.com.ar",
+    certifications: ["ISO 9001", "Soldadura Calificada ASME IX"],
+    paymentTerms: "50% Anticipo / 50% Contra Entrega (Echeq 30 d\xEDas)",
+    creditRating: "AA (Verificado en Red)",
+    adnComercial: {
+      ofrece: ["Mecanizado CNC", "Skids de Bombeo", "Tanques API"],
+      demanda: ["Chapa Naval / Acero F24", "Electrodos Especiales", "Flete LTL"],
+      corredorLogistico: "RN 3 / Cuenca Golfo San Jorge",
+      ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
+      lat: -45.8641,
+      lng: -67.4966
+    }
+  },
+  {
+    id: "comp-cordoba-electromec",
+    name: "Potencia & Transformadores C\xF3rdoba S.A. (Proveedor Extra-Regional)",
+    cuit: "30-69441822-3",
+    tier: "pro",
+    tierPriority: 2,
+    tierLabel: "Plan Pro Industrial",
+    verified: true,
+    category: "Equipamiento Industrial",
+    subcategories: ["Transformadores MT", "Celdas de Media Tensi\xF3n", "Grupos Electr\xF3genos"],
+    province: "C\xF3rdoba (Env\xEDo Patagonia)",
+    city: "C\xF3rdoba Capital \u2192 Corredor Patag\xF3nico",
+    employeeCount: "51-200",
+    publicSummary: "Ingenier\xEDa el\xE9ctrica industrial desde C\xF3rdoba para parques e\xF3licos, yacimientos y plantas pesqueras en Patagonia con despacho por carga consolidada.",
+    contactName: "Ing. Marcos Villagra",
+    contactRole: "Director Comercial Regional",
+    email: "mvillagra@potenciacba.com.ar",
+    phone: "+54 9 351 478-9200",
+    whatsapp: "+5493514789200",
+    website: "https://potenciacba.com.ar",
+    certifications: ["ISO 9001", "IRAM 2250"],
+    paymentTerms: "Anticipo 30% + Echeq 30/60 d\xEDas",
+    creditRating: "AA (Verificado en Red)",
+    adnComercial: {
+      ofrece: ["Transformadores MT", "Grupos Electr\xF3genos", "Celdas El\xE9ctricas"],
+      demanda: ["Carret\xF3n C\xF3rdoba \u2192 Santa Cruz", "Flete Retorno Vac\xEDo RN 40/RN 3"],
+      corredorLogistico: "C\xF3rdoba \u2192 RN 158 / RN 35 \u2192 Patagonia",
+      ciudadBase: "C\xF3rdoba Capital (Parque Industrial)",
+      lat: -31.4201,
+      lng: -64.1888,
+      isExtraRegional: true
+    }
+  },
+  {
+    id: "comp-austral-naval",
+    name: "Servicios Navales & Pesqueros Australes S.R.L.",
+    cuit: "30-71204918-3",
+    tier: "pro",
+    tierPriority: 2,
+    tierLabel: "Plan Pro Industrial",
+    verified: true,
+    category: "Industria Pesquera",
+    subcategories: ["Refrigeraci\xF3n Naval", "Insumos de Planta", "Envases Exportaci\xF3n"],
+    province: "Tierra del Fuego",
+    city: "Ushuaia / R\xEDo Grande",
+    employeeCount: "11-50",
+    publicSummary: "Provisi\xF3n de equipamiento frigor\xEDfico para buques factor\xEDa, repuestos navales y packaging isot\xE9rmico para plantas procesadoras.",
+    contactName: "Hern\xE1n Giordano",
+    contactRole: "Socio Gerente Comercial",
+    email: "hgiordano@navalesaustrales.com.ar",
+    phone: "+54 9 2901 61-2040",
+    whatsapp: "+5492901612040",
+    website: "https://navalesaustrales.com.ar",
+    certifications: ["Prefectura Naval Reg.", "SENASA"],
+    paymentTerms: "Cuenta Corriente 30 d\xEDas \u2022 USD Oficial",
+    creditRating: "AA (Verificado en Red)",
+    adnComercial: {
+      ofrece: ["Refrigeraci\xF3n Industrial", "Packaging Isot\xE9rmico", "Repuestos Navales"],
+      demanda: ["Cadena de Fr\xEDo -25\xB0C hacia Buenos Aires", "Gases Refrigerantes"],
+      corredorLogistico: "RN 3 / Canal Beagle \u2192 Puerto Madryn / CABA",
+      ciudadBase: "Ushuaia (Puerto Austral)",
+      lat: -54.8019,
+      lng: -68.303
+    }
+  },
+  {
+    id: "comp-constructora-valle",
+    name: "Obras Civiles & Movimiento de Suelos Alto Valle S.A.",
+    cuit: "30-69884120-2",
+    tier: "pro",
+    tierPriority: 2,
+    tierLabel: "Plan Pro Industrial",
+    verified: true,
+    category: "Construcci\xF3n",
+    subcategories: ["Locaciones Petroleras", "Hormig\xF3n Elaborado", "Naves Industriales"],
+    province: "R\xEDo Negro",
+    city: "Cipolletti / General Roca",
+    employeeCount: "51-200",
+    publicSummary: "Construcci\xF3n de plateas industriales, apertura de trazas, movimiento de suelos con flota Caterpillar y montaje de galpones llave en mano.",
+    contactName: "Arq. Luc\xEDa Ferreyra",
+    contactRole: "Gerencia T\xE9cnica & Licitaciones",
+    email: "lferreyra@obrasaltovalle.com.ar",
+    phone: "+54 9 299 512-7740",
+    whatsapp: "+5492995127740",
+    website: "https://obrasaltovalle.com.ar",
+    certifications: ["Registro Nacional de Constructores", "ISO 9001"],
+    paymentTerms: "Certificaci\xF3n Quincenal / Mensual",
+    creditRating: "AA (Verificado en Red)",
+    adnComercial: {
+      ofrece: ["Locaciones Petroleras", "Naves Industriales", "Hormig\xF3n Elaborado"],
+      demanda: ["Estructuras Met\xE1licas", "Indumentaria Ign\xEDfuga", "Alquiler de Maquinaria"],
+      corredorLogistico: "RN 22 / Alto Valle \u2192 Vaca Muerta",
+      ciudadBase: "Cipolletti / General Roca (Alto Valle)",
+      lat: -38.9339,
+      lng: -67.9903
+    }
+  },
+  {
+    id: "comp-seguridad-epp",
+    name: "Seguridad Industrial Sur & EPP S.R.L.",
+    cuit: "30-71609211-5",
+    tier: "inicial",
+    tierPriority: 3,
+    tierLabel: "Plan Inicial",
+    verified: false,
+    category: "Seguridad e Higiene (EPP)",
+    subcategories: ["Indumentaria Ign\xEDfuga", "Detectores de Gases", "Calzado Dielectrico"],
+    province: "Neuqu\xE9n",
+    city: "Neuqu\xE9n Capital",
+    employeeCount: "1-10",
+    publicSummary: "Distribuci\xF3n mayorista de indumentaria ign\xEDfuga certificada, protecci\xF3n respiratoria y elementos de seguridad en altura.",
+    contactName: "Diego Quiroga",
+    contactRole: "Ventas Corporativas",
+    email: "ventas@eppsur.com.ar",
+    phone: "+54 9 299 419-0023",
+    whatsapp: "+5492994190023",
+    website: "https://eppsur.com.ar",
+    certifications: ["Sello IRAM"],
+    paymentTerms: "Contado / Transferencia / Echeq 15 d\xEDas",
+    creditRating: "A (Inicial)",
+    adnComercial: {
+      ofrece: ["Indumentaria Ign\xEDfuga", "EPP Altura", "Detectores de Gases"],
+      demanda: ["Log\xEDstica \xDAltima Milla Vaca Muerta", "Stock T\xE9rmico"],
+      corredorLogistico: "RN 22 / Neuqu\xE9n - A\xF1elo",
+      ciudadBase: "Neuqu\xE9n Capital (Parque Industrial)",
+      lat: -38.9516,
+      lng: -68.0591
+    }
+  },
+  {
+    id: "comp-agro-patagonia",
+    name: "AgroTecnolog\xEDa Valle Inferior S.A.",
+    cuit: "30-70991823-6",
+    tier: "inicial",
+    tierPriority: 3,
+    tierLabel: "Plan Inicial",
+    verified: false,
+    category: "Agroindustria",
+    subcategories: ["Riego Automatizado", "Insumos Ganaderos", "Telemetr\xEDa Rural"],
+    province: "R\xEDo Negro",
+    city: "Viedma",
+    employeeCount: "11-50",
+    publicSummary: "Sistemas de riego por pivote central, bombas solares sumergibles e insumos para establecimientos ovinos y bovinos.",
+    contactName: "Ing. Agr. Sof\xEDa Peralta",
+    contactRole: "Asesora T\xE9cnica Comercial",
+    email: "speralta@agrovalle.com.ar",
+    phone: "+54 9 2920 44-8910",
+    whatsapp: "+5492920448910",
+    website: "https://agrovalle.com.ar",
+    certifications: ["INTI"],
+    paymentTerms: "Canje Cereal / Tarjetas Agro / 30 d\xEDas",
+    creditRating: "A (Inicial)",
+    adnComercial: {
+      ofrece: ["Bombas Solares", "Riego Automatizado", "Telemetr\xEDa Rural"],
+      demanda: ["Retorno Vac\xEDo Viedma \u2192 Buenos Aires", "Tableros Solares"],
+      corredorLogistico: "RN 3 / Viedma - Bah\xEDa Blanca",
+      ciudadBase: "Viedma (Valle Inferior)",
+      lat: -40.8135,
+      lng: -62.9967
+    }
+  }
+];
+function sortCompaniesBySubscriptionTier(items) {
+  return [...items].sort((a, b) => {
+    const prioA = a.tierPriority ?? 3;
+    const prioB = b.tierPriority ?? 3;
+    if (prioA !== prioB) return prioA - prioB;
+    if (Boolean(a.verified) !== Boolean(b.verified)) {
+      return a.verified ? -1 : 1;
+    }
+    return (a.name || "").localeCompare(b.name || "");
+  });
+}
+
+// src/server/arnRoutes.ts
+function validateArgentineCuit(cuit) {
+  const clean = String(cuit || "").replace(/\D/g, "");
+  if (clean.length !== 11) return false;
+  const digits = clean.slice(0, 10).split("").map(Number);
+  const verifier = Number(clean[10]);
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const sum = digits.reduce((acc, d, idx) => acc + d * weights[idx], 0);
+  const mod = sum % 11;
+  const expected = mod === 0 ? 0 : mod === 1 ? 9 : 11 - mod;
+  return expected === verifier;
+}
+async function resolveOptionalMember(req) {
+  const authHeader = req.headers?.authorization || "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return { authenticated: false };
+  }
+  const token = authHeader.slice("Bearer ".length).trim();
+  const rawUrl2 = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+  const rawKey2 = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
+  if (!rawUrl2 || !rawKey2 || !token) return { authenticated: false };
+  try {
+    const sb = createClient3(rawUrl2, rawKey2, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    const {
+      data: { user },
+      error
+    } = await sb.auth.getUser(token);
+    if (error || !user) return { authenticated: false };
+    const { roleName, membershipName } = await resolveUserRoleAndMembership(user.id, user.email);
+    return {
+      authenticated: true,
+      uid: user.id,
+      email: user.email,
+      roleName,
+      membershipName
+    };
+  } catch {
+    return { authenticated: false };
+  }
+}
+async function getUserArnRule(uid) {
+  if (!hasDatabaseConfig()) return { ...DEFAULT_ARN_POLICY };
+  await ensureProductionTables();
+  const res = await pool.query(`SELECT * FROM public.arn_rules WHERE user_uid = $1`, [uid]);
+  const row = res.rows?.[0];
+  if (!row) return { ...DEFAULT_ARN_POLICY };
+  return {
+    mode: row.mode || "hybrid",
+    autoApproveMaxUsd: Number(row.auto_approve_max_usd ?? 1500),
+    minConfidenceScore: Number(row.min_confidence_score ?? 82),
+    autoSendEmails: Boolean(row.auto_send_emails),
+    autoCreateLogistics: Boolean(row.auto_create_logistics),
+    autoReserveInventory: Boolean(row.auto_reserve_inventory)
+  };
+}
+async function executeArnAction(actionRow) {
+  const actionType = String(actionRow.action_type || "");
+  if ((actionType === "send_quote_email" || actionType === "send_followup_email" || actionType === "notify_providers") && actionRow.target_email) {
+    try {
+      const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+      const mailResult = await sendEmail2(
+        String(actionRow.target_email),
+        String(actionRow.draft_subject || "Propuesta Comercial xPatagonia"),
+        String(actionRow.draft_body || "")
+      );
+      return {
+        executed: true,
+        note: `Correo enviado v\xEDa ${mailResult?.provider || "Resend"} a ${actionRow.target_email}`
+      };
+    } catch (mailErr) {
+      return {
+        executed: false,
+        note: `Env\xEDo diferido: ${mailErr?.message || "credenciales de correo no disponibles"}`
+      };
+    }
+  }
+  if (actionType === "create_logistics_load" && hasDatabaseConfig()) {
+    await ensureProductionTables();
+    const meta = actionRow.metadata || {};
+    await pool.query(
+      `INSERT INTO public.logistics_loads (
+        company_uid, load_type, origin_name, destination_name, corridor, truck_type, status
+      ) VALUES ($1, 'cargo_tender', $2, $3, $4, $5, 'open')`,
+      [
+        actionRow.owner_uid,
+        meta.originName || "Hub Origen",
+        meta.destinationName || "Patagonia Destino",
+        meta.corridor || "RN 22 / A\xF1elo",
+        meta.truckType || "Semirremolque 28t"
+      ]
+    );
+    return { executed: true, note: "Licitaci\xF3n de carga generada autom\xE1ticamente en Bolsa de Cargas." };
+  }
+  if (actionType === "reserve_inventory" && hasDatabaseConfig()) {
+    await ensureProductionTables();
+    const meta = actionRow.metadata || {};
+    if (meta.sku) {
+      await pool.query(
+        `UPDATE public.inventory_items
+         SET quantity = GREATEST(0, quantity - $1), last_updated = now()
+         WHERE user_uid = $2 AND sku = $3`,
+        [Math.max(1, Number(meta.qty) || 1), actionRow.owner_uid, String(meta.sku)]
+      );
+      return { executed: true, note: `Stock reservado para SKU ${meta.sku}.` };
+    }
+    return { executed: true, note: "Reserva de inventario registrada en bit\xE1cora ARN." };
+  }
+  return { executed: true, note: "Acci\xF3n registrada en flujo aut\xF3nomo ARN." };
+}
+async function runArnPipelineForEvent(params) {
+  const rule = await getUserArnRule(params.ownerUid);
+  let catalogSummary = "";
+  if (hasDatabaseConfig()) {
+    await ensureProductionTables();
+    const prodRes = await pool.query(
+      `SELECT name, sku, category, price_base FROM public.products WHERE user_uid = $1 LIMIT 8`,
+      [params.ownerUid]
+    );
+    if (prodRes.rows.length > 0) {
+      catalogSummary = prodRes.rows.map((p) => `- ${p.name} (${p.sku || "S/SKU"}) \xB7 ${p.category} \xB7 Base: ${p.price_base || "Consultar"}`).join("\n");
+    }
+  }
+  const analysis = await analyzeOpportunityWithArn({
+    source: params.source,
+    companyName: params.companyName,
+    contactName: params.contactName,
+    contactEmail: params.contactEmail,
+    category: params.category,
+    rawText: params.rawText,
+    catalogSummary
+  });
+  const decision = evaluateHybridDecision(
+    rule,
+    analysis.actionType,
+    analysis.estimatedAmountUsd,
+    analysis.aiScore
+  );
+  if (!hasDatabaseConfig()) {
+    return { opportunity: null, action: null, analysis, decision };
+  }
+  await ensureProductionTables();
+  const oppRes = await pool.query(
+    `INSERT INTO public.arn_opportunities (
+      owner_uid, company_name, contact_name, contact_email, cuit, category, corridor,
+      source, stage, ai_score, estimated_amount_usd, urgency, summary, recommended_action, raw_context
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+    RETURNING *`,
+    [
+      params.ownerUid,
+      analysis.companyName,
+      analysis.contactName,
+      analysis.contactEmail || null,
+      analysis.cuit || null,
+      analysis.category,
+      analysis.corridor,
+      params.source,
+      decision.shouldAutoExecute ? "quoted" : "qualified",
+      analysis.aiScore,
+      analysis.estimatedAmountUsd,
+      analysis.urgency,
+      analysis.summary,
+      analysis.recommendedAction,
+      JSON.stringify({ rawText: params.rawText.slice(0, 1200), ...params.metadata || {} })
+    ]
+  );
+  const opp = oppRes.rows[0];
+  let status = decision.shouldAutoExecute ? "approved" : "pending_approval";
+  let executedAt = null;
+  let execNote = decision.reason;
+  const actRes = await pool.query(
+    `INSERT INTO public.arn_actions_queue (
+      owner_uid, opportunity_id, action_type, title, target_email,
+      draft_subject, draft_body, estimated_amount_usd, confidence_score,
+      execution_mode, status, metadata
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+    RETURNING *`,
+    [
+      params.ownerUid,
+      opp.id,
+      analysis.actionType,
+      analysis.actionTitle,
+      analysis.contactEmail || null,
+      analysis.draftSubject,
+      analysis.draftBody,
+      analysis.estimatedAmountUsd,
+      analysis.aiScore,
+      decision.executionMode,
+      status,
+      JSON.stringify({ reason: decision.reason, corridor: analysis.corridor, ...params.metadata || {} })
+    ]
+  );
+  let action = actRes.rows[0];
+  if (decision.shouldAutoExecute) {
+    try {
+      const exec = await executeArnAction(action);
+      status = exec.executed ? "executed" : "pending_approval";
+      execNote = exec.note;
+      executedAt = exec.executed ? /* @__PURE__ */ new Date() : null;
+      const upd = await pool.query(
+        `UPDATE public.arn_actions_queue
+         SET status = $1, executed_at = $2,
+             metadata = metadata || $3::jsonb
+         WHERE id = $4 RETURNING *`,
+        [status, executedAt, JSON.stringify({ executionNote: execNote }), action.id]
+      );
+      action = upd.rows[0];
+    } catch (execErr) {
+      await pool.query(
+        `UPDATE public.arn_actions_queue SET status = 'failed', metadata = metadata || $1::jsonb WHERE id = $2`,
+        [JSON.stringify({ error: execErr?.message || "Execution error" }), action.id]
+      );
+    }
+  }
+  return { opportunity: opp, action, analysis, decision };
+}
+function registerArnAndModuleRoutes(app, recordAutomationEvent) {
+  app.get("/api/arn/overview", requireAuth, async (req, res) => {
+    try {
+      const uid = req.user.uid;
+      if (!hasDatabaseConfig()) {
+        return res.json({
+          rules: DEFAULT_ARN_POLICY,
+          opportunities: [],
+          actions: [],
+          metrics: { totalOpportunities: 0, pendingApprovals: 0, autoExecuted: 0, pipelineUsd: 0 }
+        });
+      }
+      await ensureProductionTables();
+      const [rules, oppRes, actRes] = await Promise.all([
+        getUserArnRule(uid),
+        pool.query(
+          `SELECT * FROM public.arn_opportunities WHERE owner_uid = $1 ORDER BY updated_at DESC LIMIT 60`,
+          [uid]
+        ),
+        pool.query(
+          `SELECT * FROM public.arn_actions_queue WHERE owner_uid = $1 ORDER BY created_at DESC LIMIT 60`,
+          [uid]
+        )
+      ]);
+      const opportunities = oppRes.rows || [];
+      const actions = actRes.rows || [];
+      const pendingApprovals = actions.filter((a) => a.status === "pending_approval").length;
+      const autoExecuted = actions.filter(
+        (a) => a.execution_mode === "auto_approved" && a.status === "executed"
+      ).length;
+      const pipelineUsd = opportunities.filter((o) => o.stage !== "archived").reduce((sum, o) => sum + (Number(o.estimated_amount_usd) || 0), 0);
+      res.json({
+        rules,
+        opportunities,
+        actions,
+        metrics: {
+          totalOpportunities: opportunities.length,
+          pendingApprovals,
+          autoExecuted,
+          pipelineUsd
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.put("/api/arn/rules", requireAuth, async (req, res) => {
+    try {
+      const uid = req.user.uid;
+      const body = req.body || {};
+      const mode = ["hybrid", "manual", "auto"].includes(body.mode) ? body.mode : "hybrid";
+      const autoApproveMaxUsd = Math.max(0, Math.min(1e6, Number(body.autoApproveMaxUsd) || 1500));
+      const minConfidenceScore = Math.max(50, Math.min(100, Number(body.minConfidenceScore) || 82));
+      const autoSendEmails = Boolean(body.autoSendEmails);
+      const autoCreateLogistics = body.autoCreateLogistics !== false;
+      const autoReserveInventory = body.autoReserveInventory !== false;
+      if (!hasDatabaseConfig()) {
+        return res.status(500).json({ error: "Base de datos no configurada" });
+      }
+      await ensureProductionTables();
+      await pool.query(
+        `INSERT INTO public.arn_rules (
+          user_uid, mode, auto_approve_max_usd, min_confidence_score,
+          auto_send_emails, auto_create_logistics, auto_reserve_inventory, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+        ON CONFLICT (user_uid) DO UPDATE SET
+          mode = EXCLUDED.mode,
+          auto_approve_max_usd = EXCLUDED.auto_approve_max_usd,
+          min_confidence_score = EXCLUDED.min_confidence_score,
+          auto_send_emails = EXCLUDED.auto_send_emails,
+          auto_create_logistics = EXCLUDED.auto_create_logistics,
+          auto_reserve_inventory = EXCLUDED.auto_reserve_inventory,
+          updated_at = now()`,
+        [
+          uid,
+          mode,
+          autoApproveMaxUsd,
+          minConfidenceScore,
+          autoSendEmails,
+          autoCreateLogistics,
+          autoReserveInventory
+        ]
+      );
+      res.json({
+        success: true,
+        rules: {
+          mode,
+          autoApproveMaxUsd,
+          minConfidenceScore,
+          autoSendEmails,
+          autoCreateLogistics,
+          autoReserveInventory
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/arn/ingest", requireAuth, async (req, res) => {
+    try {
+      const { source = "manual", companyName, contactName, contactEmail, category, rawText, metadata } = req.body || {};
+      if (!rawText || String(rawText).trim().length < 5) {
+        return res.status(400).json({ error: "Describe el requerimiento o texto comercial a analizar." });
+      }
+      const result = await runArnPipelineForEvent({
+        ownerUid: req.user.uid,
+        source: String(source),
+        companyName,
+        contactName,
+        contactEmail,
+        category,
+        rawText: String(rawText),
+        metadata
+      });
+      await recordAutomationEvent("outbound_n8n", "arn.opportunity.ingested", "processed", {
+        uid: req.user.uid,
+        source,
+        companyName: result.analysis.companyName,
+        autoExecuted: result.decision.shouldAutoExecute
+      });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Error procesando ingesta ARN IA" });
+    }
+  });
+  app.post("/api/arn/triage-inbox", requireAuth, async (req, res) => {
+    try {
+      const { fetchEmails: fetchEmails2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+      const emails = await fetchEmails2();
+      const recent = Array.isArray(emails) ? emails.slice(0, 5) : [];
+      const created = [];
+      for (const mail of recent) {
+        const senderRaw = String(mail.from || "");
+        const emailMatch = senderRaw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        const senderEmail = emailMatch ? emailMatch[0] : "";
+        const senderName = senderRaw.replace(/<[^>]+>/g, "").trim() || senderEmail;
+        const out = await runArnPipelineForEvent({
+          ownerUid: req.user.uid,
+          source: "email_imap",
+          companyName: senderName,
+          contactName: senderName,
+          contactEmail: senderEmail,
+          rawText: `Asunto: ${mail.subject}
+
+${mail.text || mail.snippet || ""}`,
+          metadata: { emailId: mail.id, emailDate: mail.date }
+        });
+        created.push(out.opportunity);
+      }
+      res.json({
+        success: true,
+        analyzedCount: recent.length,
+        opportunitiesCreated: created.filter(Boolean).length
+      });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "No se pudo analizar la bandeja IMAP" });
+    }
+  });
+  app.post("/api/arn/actions/:id/approve", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const actionId = Number(req.params.id);
+      const { draftSubject, draftBody } = req.body || {};
+      const existing = await pool.query(
+        `SELECT * FROM public.arn_actions_queue WHERE id = $1 AND owner_uid = $2`,
+        [actionId, req.user.uid]
+      );
+      const row = existing.rows?.[0];
+      if (!row) return res.status(404).json({ error: "Acci\xF3n no encontrada" });
+      const updatedRow = {
+        ...row,
+        draft_subject: draftSubject !== void 0 ? String(draftSubject) : row.draft_subject,
+        draft_body: draftBody !== void 0 ? String(draftBody) : row.draft_body
+      };
+      const execResult = await executeArnAction(updatedRow);
+      const nextStatus = execResult.executed ? "executed" : "approved";
+      const upd = await pool.query(
+        `UPDATE public.arn_actions_queue
+         SET status = $1,
+             draft_subject = $2,
+             draft_body = $3,
+             executed_at = now(),
+             metadata = metadata || $4::jsonb
+         WHERE id = $5 AND owner_uid = $6
+         RETURNING *`,
+        [
+          nextStatus,
+          updatedRow.draft_subject,
+          updatedRow.draft_body,
+          JSON.stringify({ executionNote: execResult.note }),
+          actionId,
+          req.user.uid
+        ]
+      );
+      if (row.opportunity_id && execResult.executed) {
+        await pool.query(
+          `UPDATE public.arn_opportunities SET stage = 'quoted', updated_at = now() WHERE id = $1 AND owner_uid = $2`,
+          [row.opportunity_id, req.user.uid]
+        );
+      }
+      await recordAutomationEvent("outbound_n8n", "arn.action.approved", nextStatus, {
+        actionId,
+        actionType: row.action_type,
+        note: execResult.note
+      });
+      res.json({ success: true, action: upd.rows[0], note: execResult.note });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Error ejecutando acci\xF3n ARN" });
+    }
+  });
+  app.post("/api/arn/actions/:id/dismiss", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const actionId = Number(req.params.id);
+      await pool.query(
+        `UPDATE public.arn_actions_queue SET status = 'dismissed' WHERE id = $1 AND owner_uid = $2`,
+        [actionId, req.user.uid]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/arn/opportunities/:id/stage", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const id = Number(req.params.id);
+      const stage = String(req.body?.stage || "qualified");
+      const allowed = ["detected", "qualified", "quoted", "negotiating", "awarded", "archived"];
+      if (!allowed.includes(stage)) {
+        return res.status(400).json({ error: "Etapa inv\xE1lida" });
+      }
+      const upd = await pool.query(
+        `UPDATE public.arn_opportunities SET stage = $1, updated_at = now() WHERE id = $2 AND owner_uid = $3 RETURNING *`,
+        [stage, id, req.user.uid]
+      );
+      res.json({ success: true, opportunity: upd.rows?.[0] || null });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/arn/copilot", requireAuth, async (req, res) => {
+    try {
+      const uid = req.user.uid;
+      const question = String(req.body?.question || "").trim();
+      if (!question) return res.status(400).json({ error: "Escrib\xED tu consulta para ARN IA." });
+      let snapshot = {
+        opportunitiesCount: 0,
+        pendingActionsCount: 0,
+        topOpportunities: [],
+        inventoryLowStock: [],
+        openRfqsCount: 0,
+        policy: DEFAULT_ARN_POLICY
+      };
+      if (hasDatabaseConfig()) {
+        await ensureProductionTables();
+        const [policy, oppRes, actRes, invRes, rfqRes] = await Promise.all([
+          getUserArnRule(uid),
+          pool.query(
+            `SELECT company_name, stage, ai_score, estimated_amount_usd, summary FROM public.arn_opportunities WHERE owner_uid = $1 ORDER BY ai_score DESC LIMIT 5`,
+            [uid]
+          ),
+          pool.query(
+            `SELECT count(*)::int AS cnt FROM public.arn_actions_queue WHERE owner_uid = $1 AND status = 'pending_approval'`,
+            [uid]
+          ),
+          pool.query(
+            `SELECT name, sku, quantity, location FROM public.inventory_items WHERE user_uid = $1 AND quantity <= 15 LIMIT 5`,
+            [uid]
+          ),
+          pool.query(
+            `SELECT count(*)::int AS cnt FROM public.rfqs WHERE user_uid = $1 AND status != 'awarded'`,
+            [uid]
+          )
+        ]);
+        snapshot = {
+          opportunitiesCount: oppRes.rows.length,
+          pendingActionsCount: actRes.rows?.[0]?.cnt || 0,
+          topOpportunities: oppRes.rows.map((r) => ({
+            companyName: r.company_name,
+            stage: r.stage,
+            aiScore: r.ai_score,
+            estimatedAmountUsd: r.estimated_amount_usd,
+            summary: r.summary
+          })),
+          inventoryLowStock: invRes.rows,
+          openRfqsCount: rfqRes.rows?.[0]?.cnt || 0,
+          policy
+        };
+      }
+      const answer = await askArnCopilot(question, snapshot);
+      res.json({ success: true, answer });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Error consultando Copiloto ARN" });
+    }
+  });
+  app.get("/api/directory", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const member = await resolveOptionalMember(req);
+      const revealProtected = Boolean(member.authenticated);
+      let dbCompanies = [];
+      if (hasDatabaseConfig()) {
+        try {
+          const rows = await pool.query(`
+            SELECT cp.*, u.email AS user_email
+            FROM public.company_profiles cp
+            LEFT JOIN public.users u ON u.uid = cp.user_uid
+            WHERE cp.company_name IS NOT NULL AND cp.company_name != ''
+            ORDER BY cp.trust_score DESC, cp.updated_at DESC
+            LIMIT 80
+          `);
+          dbCompanies = rows.rows.map((r) => ({
+            id: `db-${r.id}`,
+            name: r.company_name,
+            cuit: r.cuit || "",
+            tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
+            tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
+            tierLabel: (r.trust_score || 50) >= 85 ? "Plan Corporativo" : (r.trust_score || 50) >= 65 ? "Plan Pro Industrial" : "Plan Inicial",
+            verified: r.verification_status === "verified",
+            category: r.industry || "Servicios Industriales",
+            subcategories: Array.isArray(r.services) ? r.services : [],
+            province: r.province || "Chubut",
+            city: r.city || "Comodoro Rivadavia",
+            employeeCount: r.employee_count || "11-50",
+            publicSummary: r.description || "Empresa registrada en la red B2B xPatagonia.",
+            contactName: r.contact_name || "",
+            contactRole: r.contact_role || "",
+            email: r.email || r.user_email || "",
+            phone: r.phone || "",
+            whatsapp: r.whatsapp || "",
+            website: r.website || "",
+            certifications: Array.isArray(r.certifications) ? r.certifications : [],
+            paymentTerms: r.payment_terms || "A convenir",
+            creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
+            adnComercial: {
+              ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
+              demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
+              corredorLogistico: Array.isArray(r.corredores_logisticos) ? r.corredores_logisticos[0] || "Patagonia Sur" : "Patagonia Sur",
+              ciudadBase: r.city || "Patagonia",
+              lat: Number(r.base_lat) || -45.8641,
+              lng: Number(r.base_lng) || -67.4965
+            }
+          }));
+        } catch {
+        }
+      }
+      const merged = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]).map((c) => {
+        if (revealProtected) return { ...c, protectedMasked: false };
+        return {
+          ...c,
+          cuit: "\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022-\u2022",
+          contactName: "Reservado para Miembros",
+          contactRole: "Suscripci\xF3n Activa",
+          email: "",
+          phone: "",
+          whatsapp: "",
+          paymentTerms: "Visible con membres\xEDa",
+          creditRating: "Acceso Miembro",
+          protectedMasked: true
+        };
+      });
+      res.json({
+        companies: merged,
+        isMemberAuthorized: revealProtected,
+        membershipName: member.membershipName || null
+      });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Failed to load directory" });
+    }
+  });
+  app.get("/api/company/profile", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.json({ profile: null });
+      const result = await pool.query(
+        `SELECT * FROM public.company_profiles WHERE user_uid = $1`,
+        [req.user.uid]
+      );
+      res.json({ profile: result.rows?.[0] || null });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.put("/api/company/profile", requireAuth, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (b.cuit && !validateArgentineCuit(String(b.cuit))) {
+        return res.status(400).json({ error: "El CUIT ingresado no supera la validaci\xF3n de d\xEDgito verificador ARCA." });
+      }
+      if (!hasDatabaseConfig()) {
+        return res.status(500).json({ error: "Base de datos no configurada" });
+      }
+      await ensureProductionTables();
+      const { getOrCreateUser: getOrCreateUser2 } = await Promise.resolve().then(() => (init_users(), users_exports));
+      await getOrCreateUser2(req.user.uid, req.user.email || "");
+      const offers = Array.isArray(b.adnOfrece) ? b.adnOfrece : [];
+      const demands = Array.isArray(b.adnDemanda) ? b.adnDemanda : [];
+      const adnText = `${b.companyName || ""} ${b.industry || ""} ${b.description || ""} Ofrece: ${offers.join(", ")} Demanda: ${demands.join(", ")}`;
+      const embedding = await generateAdnEmbedding(adnText);
+      const upsertParams = [
+        req.user.uid,
+        b.companyName || "",
+        b.description || "",
+        b.address || "",
+        b.province || "Chubut",
+        b.city || "Comodoro Rivadavia",
+        b.cuit || "",
+        b.employeeCount || "1-10",
+        b.contactEmail || req.user.email || "",
+        b.contactPhone || "",
+        b.whatsapp || "",
+        b.website || "",
+        b.industry || (Array.isArray(b.categories) ? b.categories[0] : "") || "Servicios Industriales",
+        JSON.stringify(Array.isArray(b.categories) ? b.categories : []),
+        offers,
+        demands,
+        Number(b.lat) || -45.8641,
+        Number(b.lng) || -67.4965
+      ];
+      await pool.query(
+        `INSERT INTO public.company_profiles (
+          user_uid, company_name, description, address, province, city, cuit,
+          employee_count, email, phone, whatsapp, website, industry, services,
+          adn_ofrece, adn_demanda, base_lat, base_lng, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,now())
+        ON CONFLICT (user_uid) DO UPDATE SET
+          company_name = EXCLUDED.company_name,
+          description = EXCLUDED.description,
+          address = EXCLUDED.address,
+          province = EXCLUDED.province,
+          city = EXCLUDED.city,
+          cuit = EXCLUDED.cuit,
+          employee_count = EXCLUDED.employee_count,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone,
+          whatsapp = EXCLUDED.whatsapp,
+          website = EXCLUDED.website,
+          industry = EXCLUDED.industry,
+          services = EXCLUDED.services,
+          adn_ofrece = EXCLUDED.adn_ofrece,
+          adn_demanda = EXCLUDED.adn_demanda,
+          base_lat = EXCLUDED.base_lat,
+          base_lng = EXCLUDED.base_lng,
+          updated_at = now()`,
+        upsertParams
+      );
+      if (embedding) {
+        try {
+          await pool.query(
+            `UPDATE public.company_profiles SET adn_embedding = $1::vector WHERE user_uid = $2`,
+            [`[${embedding.join(",")}]`, req.user.uid]
+          );
+        } catch {
+        }
+      }
+      res.json({ success: true, embeddingGenerated: Boolean(embedding) });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/adn/match", requireAuth, async (req, res) => {
+    try {
+      const offers = Array.isArray(req.body?.offers) ? req.body.offers : String(req.body?.offers || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const demands = Array.isArray(req.body?.demands) ? req.body.demands : String(req.body?.demands || "").split(",").map((s) => s.trim()).filter(Boolean);
+      let vectorMatches = [];
+      if (hasDatabaseConfig()) {
+        const embedding = await generateAdnEmbedding(
+          `Ofrece: ${offers.join(", ")}. Demanda: ${demands.join(", ")}.`
+        );
+        if (embedding) {
+          try {
+            const vecRes = await pool.query(
+              `SELECT * FROM public.match_adn_empresas($1::vector, 0.35, 8)`,
+              [`[${embedding.join(",")}]`]
+            );
+            vectorMatches = vecRes.rows || [];
+          } catch {
+          }
+        }
+      }
+      const offerLower = offers.map((o) => o.toLowerCase());
+      const demandLower = demands.map((d) => d.toLowerCase());
+      const matches = sortCompaniesBySubscriptionTier(B2B_COMPANIES).map((comp) => {
+        const vecRow = vectorMatches.find((v) => v.company_name === comp.name);
+        let score = vecRow ? Math.round(Number(vecRow.similarity) * 100) : 52;
+        const reasons = [];
+        comp.adnComercial.ofrece.forEach((o) => {
+          if (demandLower.some((d) => o.toLowerCase().includes(d) || d.includes(o.toLowerCase()))) {
+            score += 24;
+            reasons.push(`Provee "${o}" que demandas`);
+          }
+        });
+        comp.adnComercial.demanda.forEach((d) => {
+          if (offerLower.some((o) => d.toLowerCase().includes(o) || o.includes(d.toLowerCase()))) {
+            score += 22;
+            reasons.push(`Demanda "${d}" que ofreces`);
+          }
+        });
+        if (comp.tier === "corporativo") score += 6;
+        const roadKm = Math.round(
+          haversineKm(comp.adnComercial.lat, comp.adnComercial.lng, -38.3522, -68.7897) * 1.28
+        );
+        return {
+          company: comp,
+          compatibilityPercent: Math.min(99, score),
+          matchReason: reasons.length > 0 ? reasons.join(" \xB7 ") : `Sinergia estrat\xE9gica en ${comp.adnComercial.corredorLogistico}`,
+          corridorSynergy: comp.adnComercial.corredorLogistico,
+          estimatedRoadKm: Math.max(85, roadKm),
+          engine: vecRow ? "pgvector_cosine" : "semantic_corridor"
+        };
+      }).sort((a, b) => b.compatibilityPercent - a.compatibilityPercent).slice(0, 6);
+      res.json({ success: true, matches });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Error calculando ADN matches" });
+    }
+  });
+  app.get("/api/products", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      if (!hasDatabaseConfig()) return res.json({ products: [] });
+      await ensureProductionTables();
+      const member = await resolveOptionalMember(req);
+      const mineOnly = req.query.mine === "1" && member.authenticated && member.uid;
+      const result = mineOnly ? await pool.query(`SELECT * FROM public.products WHERE user_uid = $1 ORDER BY created_at DESC`, [
+        member.uid
+      ]) : await pool.query(`SELECT * FROM public.products ORDER BY created_at DESC LIMIT 100`);
+      res.json({ products: result.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/products", requireAuth, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.name || !b.category) {
+        return res.status(400).json({ error: "Nombre y categor\xEDa del producto son obligatorios." });
+      }
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const inserted = await pool.query(
+        `INSERT INTO public.products (
+          user_uid, sku, name, category, subcategory, brand, model, condition,
+          price_base, price_wholesale, stock, moq, description, certifications,
+          payment_methods, shipping_conditions, lead_time, location, supplier, image, status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18,$19,$20,'active')
+        RETURNING *`,
+        [
+          req.user.uid,
+          b.sku || `SKU-${Date.now().toString().slice(-5)}`,
+          b.name,
+          b.category,
+          b.subcategory || "",
+          b.brand || "",
+          b.model || "",
+          b.condition || "Nuevo",
+          String(b.priceBase ?? ""),
+          String(b.priceWholesale ?? ""),
+          String(b.stock ?? "0"),
+          String(b.moq ?? "1"),
+          b.description || "",
+          JSON.stringify(Array.isArray(b.certifications) ? b.certifications : []),
+          JSON.stringify(Array.isArray(b.paymentMethods) ? b.paymentMethods : []),
+          JSON.stringify(Array.isArray(b.shippingConditions) ? b.shippingConditions : []),
+          b.leadTime || "",
+          b.location || "",
+          b.supplier || req.user.email || "",
+          b.image || null
+        ]
+      );
+      res.json({ success: true, product: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/products/:id", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      await pool.query(`DELETE FROM public.products WHERE id = $1 AND user_uid = $2`, [
+        Number(req.params.id),
+        req.user.uid
+      ]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.get("/api/warehousing/inventory", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.json({ items: [] });
+      await ensureProductionTables();
+      const rows = await pool.query(
+        `SELECT * FROM public.inventory_items WHERE user_uid = $1 ORDER BY last_updated DESC`,
+        [req.user.uid]
+      );
+      res.json({ items: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/warehousing/inventory", requireAuth, async (req, res) => {
+    try {
+      const { sku, name, category, quantity, location } = req.body || {};
+      if (!name) return res.status(400).json({ error: "Nombre de \xEDtem requerido" });
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const qty = Math.max(0, Number(quantity) || 0);
+      const status = qty === 0 ? "out-of-stock" : qty < 20 ? "low-stock" : "in-stock";
+      const inserted = await pool.query(
+        `INSERT INTO public.inventory_items (user_uid, sku, name, category, quantity, location, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [
+          req.user.uid,
+          sku || `SKU-${Date.now().toString().slice(-5)}`,
+          name,
+          category || "Insumos",
+          qty,
+          location || "Parque Ind. Comodoro",
+          status
+        ]
+      );
+      res.json({ success: true, item: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.get("/api/logistics/loads", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      if (!hasDatabaseConfig()) return res.json({ loads: [] });
+      await ensureProductionTables();
+      const rows = await pool.query(
+        `SELECT * FROM public.logistics_loads ORDER BY created_at DESC LIMIT 50`
+      );
+      res.json({ loads: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/logistics/loads", requireAuth, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.originName || !b.destinationName) {
+        return res.status(400).json({ error: "Origen y destino son obligatorios." });
+      }
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const inserted = await pool.query(
+        `INSERT INTO public.logistics_loads (
+          company_uid, load_type, origin_name, destination_name, corridor,
+          distance_km, weight_kg, truck_type, discount_percent, target_price_ars, status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'open') RETURNING *`,
+        [
+          req.user.uid,
+          b.loadType === "cargo_tender" ? "cargo_tender" : "empty_return",
+          b.originName,
+          b.destinationName,
+          b.corridor || "RN 3 / Patag\xF3nica",
+          Number(b.distanceKm) || null,
+          Number(b.weightKg) || 18e3,
+          b.truckType || "Semirremolque 28t",
+          Number(b.discountPercent) || 35,
+          Number(b.targetPriceArs) || null
+        ]
+      );
+      res.json({ success: true, load: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.get("/api/chat/messages", requireAuth, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const channelId = String(req.query.channelId || "chan-logistica");
+      if (!hasDatabaseConfig()) return res.json({ messages: [] });
+      await ensureProductionTables();
+      const rows = await pool.query(
+        `SELECT * FROM public.chat_messages WHERE channel_id = $1 ORDER BY created_at ASC LIMIT 80`,
+        [channelId]
+      );
+      res.json({ messages: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/chat/messages", requireAuth, async (req, res) => {
+    try {
+      const { channelId, text: text2, senderCompany, msgType = "text", metadata = {} } = req.body || {};
+      if (!channelId || !text2 || !String(text2).trim()) {
+        return res.status(400).json({ error: "channelId y mensaje requeridos" });
+      }
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const inserted = await pool.query(
+        `INSERT INTO public.chat_messages (
+          channel_id, sender_uid, sender_name, sender_company, text, msg_type, metadata
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,
+        [
+          String(channelId),
+          req.user.uid,
+          req.user.email?.split("@")[0] || "Miembro",
+          senderCompany || "Empresa xPatagonia",
+          String(text2).trim(),
+          msgType,
+          JSON.stringify(metadata || {})
+        ]
+      );
+      res.json({ success: true, message: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+}
+
+// src/server/createApp.ts
 var cachedSupabaseAdmin = null;
 function getSupabaseAdminClient() {
   if (cachedSupabaseAdmin) return cachedSupabaseAdmin;
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim().replace(/^['"]|['"]$/g, "");
   const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || "").trim().replace(/^['"]|['"]$/g, "");
   if ((supabaseUrl.startsWith("http://") || supabaseUrl.startsWith("https://")) && serviceRoleKey.length > 20) {
-    cachedSupabaseAdmin = createClient2(supabaseUrl, serviceRoleKey, {
+    cachedSupabaseAdmin = createClient4(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false }
     });
     return cachedSupabaseAdmin;
@@ -1047,7 +2985,7 @@ function createApiApp() {
         const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
         const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
-        const sbAdmin = createClient2(supabaseUrl, serviceKey);
+        const sbAdmin = createClient4(supabaseUrl, serviceKey);
         let uid = "";
         if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
           const { data, error } = await sbAdmin.auth.admin.createUser({
@@ -1121,6 +3059,17 @@ function createApiApp() {
       notifyProvidersForRfq(newRfq.category, newRfq.title, newRfq.id).catch((err) => {
         console.error("Failed to notify providers:", err);
       });
+      runArnPipelineForEvent({
+        ownerUid: user.uid,
+        source: "rfq",
+        companyName: user.email,
+        contactEmail: user.email,
+        category: newRfq.category,
+        rawText: `RFQ #${newRfq.id}: ${newRfq.title}
+Prioridad: ${newRfq.priority}
+${newRfq.description}`,
+        metadata: { rfqId: newRfq.id }
+      }).catch((err) => console.warn("ARN RFQ ingest warning:", err));
       res.json(newRfq);
     } catch (error) {
       console.error("Error creating RFQ:", error);
@@ -1143,7 +3092,16 @@ function createApiApp() {
       if (!updated) {
         return res.status(404).json({ error: "RFQ not found for current user" });
       }
-      res.json({ success: true, rfq: updated });
+      runArnPipelineForEvent({
+        ownerUid: req.user.uid,
+        source: "rfq_award",
+        companyName: req.user.email,
+        contactEmail: req.user.email,
+        category: updated.category,
+        rawText: `RFQ #${updated.id} adjudicada (${updated.title}). Coordinar despacho log\xEDstico y reserva de inventario.`,
+        metadata: { rfqId: updated.id, originName: "Hub Origen", destinationName: "Destino Patagonia" }
+      }).catch((err) => console.warn("ARN award dispatch warning:", err));
+      res.json({ success: true, rfq: updated, crossModuleTriggered: true });
     } catch (error) {
       console.error("Error awarding RFQ:", error);
       res.status(500).json({ error: error.message || "Internal server error" });
@@ -1407,8 +3365,8 @@ ${cleanDetails}`
 - **Transici\xF3n Energ\xE9tica**: Nuevos proyectos de parques e\xF3licos demandan proveedores locales certificados bajo normas ISO 9001 e ISO 14001.`
         });
       }
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({
+      const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
+      const ai = new GoogleGenAI2({
         apiKey,
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
@@ -1438,8 +3396,8 @@ ${cleanDetails}`
           reason: "Gemini API key not configured for background cron"
         };
       }
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({
+      const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
+      const ai = new GoogleGenAI2({
         apiKey,
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
@@ -1513,7 +3471,7 @@ Selecciona una noticia relevante sobre producci\xF3n, energ\xEDa, log\xEDstica, 
         const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
         const supabaseAnon = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
         if (supabaseUrl && supabaseAnon) {
-          const sb = createClient2(supabaseUrl, supabaseAnon, {
+          const sb = createClient4(supabaseUrl, supabaseAnon, {
             auth: { persistSession: false, autoRefreshToken: false }
           });
           const {
@@ -1546,8 +3504,8 @@ Selecciona una noticia relevante sobre producci\xF3n, energ\xEDa, log\xEDstica, 
       if (!isUsableGeminiKey(apiKey)) {
         return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
       }
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({
+      const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
+      const ai = new GoogleGenAI2({
         apiKey,
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
@@ -1752,11 +3710,12 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
       res.status(500).json({ error: error.message || "Failed to calculate route" });
     }
   });
-  app.post("/api/logistics/reverse-auction", async (req, res) => {
+  app.post("/api/logistics/reverse-auction", requireAuth, async (req, res) => {
     try {
       const payload = {
         event: "logistics.reverse_auction.created",
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        uid: req.user?.uid,
         ...req.body
       };
       let forwardedToN8n = false;
@@ -1790,7 +3749,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
       res.status(500).json({ error: error.message || "Error creating reverse auction" });
     }
   });
-  app.post("/api/crm/sync-odoo", async (req, res) => {
+  app.post("/api/crm/sync-odoo", requireAuth, async (req, res) => {
     try {
       const payload = {
         event: "crm.company.sync_odoo",
@@ -2079,6 +4038,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   app.get("/api/maps-key", (req, res) => {
     res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });
   });
+  registerArnAndModuleRoutes(app, recordAutomationEvent);
   return { app, runAutoInsight };
 }
 

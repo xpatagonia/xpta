@@ -1,37 +1,21 @@
 import { getApiUrl } from '../lib/apiConfig';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Inbox, CheckCircle, Clock, ChevronRight, MessageSquare, AlertCircle, Send, Users, Plus, Mail, Phone, Building, Tag, Search, FileText, UserCircle, Globe, FileBadge, MessageCircle, Hash, MapPin } from 'lucide-react';
-import { db, auth, doc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, serverTimestamp, writeBatch } from '../lib/db';
-import {  onAuthStateChanged  } from '../lib/db';
+import { Inbox, CheckCircle, Clock, MessageSquare, AlertCircle, Send, Plus, Mail, FileText, Sparkles } from 'lucide-react';
+import { db, auth, collection, onSnapshot } from '../lib/db';
+import { onAuthStateChanged } from '../lib/db';
+import ArnAiRadar from './ArnAiRadar';
 
 export default function CompanyInbox() {
-  const [activeSection, setActiveSection] = useState<'inbox' | 'crm' | 'templates'>('inbox');
+  const [activeSection, setActiveSection] = useState<'arn' | 'inbox' | 'templates'>('arn');
+  const [statusNotice, setStatusNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const showNotice = (type: 'ok' | 'err', text: string) => {
+    setStatusNotice({ type, text });
+    setTimeout(() => setStatusNotice(null), 4500);
+  };
 
   const [rfqs, setRfqs] = useState<any[]>([]);
-
   const [selectedRfq, setSelectedRfq] = useState<any>(null);
-
-  const [contacts, setContacts] = useState<any[]>([]);
-  const [contactSearch, setContactSearch] = useState('');
-  const [showAddContact, setShowAddContact] = useState(false);
-  const [selectedContact, setSelectedContact] = useState<any>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [newContact, setNewContact] = useState({
-    entityType: 'contact',
-    name: '',
-    company: '',
-    role: '',
-    email: '',
-    phone: '',
-    type: 'external',
-    status: 'lead',
-    website: '',
-    cuitRut: '',
-    socialMedia: '',
-    industry: '',
-    location: ''
-  });
 
   const [replyText, setReplyText] = useState("");
   const [showTemplates, setShowTemplates] = useState(false);
@@ -50,36 +34,20 @@ export default function CompanyInbox() {
   const [composeData, setComposeData] = useState({ to: '', subject: '', body: '' });
   const [composeShowTemplates, setComposeShowTemplates] = useState(false);
 
-  // Extract unique companies from existing contacts
-  const uniqueCompanies = Array.from(
-    new Set(
-      contacts.map(c => c.entityType === 'company' ? c.name : c.company).filter(Boolean)
-    )
-  ).sort();
-
   useEffect(() => {
-    let unsubscribeContacts: () => void;
     let unsubscribeRfqs: () => void;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        setContacts([]);
         setRfqs([]);
         return;
       }
 
-      // Contacts listener
-      unsubscribeContacts = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setContacts(data);
-      });
-
-      // RFQs listener
       unsubscribeRfqs = onSnapshot(collection(db, 'crm_rfqs'), (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          idDisplay: doc.data().rfqId, 
-          ...doc.data() 
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          idDisplay: doc.data().rfqId,
+          ...doc.data()
         }));
         setRfqs(data);
       });
@@ -87,139 +55,34 @@ export default function CompanyInbox() {
 
     return () => {
       unsubscribeAuth();
-      if (unsubscribeContacts) unsubscribeContacts();
       if (unsubscribeRfqs) unsubscribeRfqs();
     };
   }, []);
 
-  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [editingContactId, setEditingContactId] = useState<string | null>(null);
-
-  const toggleContactSelection = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSelectedContactIds(prev =>
-      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    );
-  };
-
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedContactIds(filteredContacts.map(c => c.id));
-    } else {
-      setSelectedContactIds([]);
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (!selectedContactIds.length) return;
-    if (window.confirm(`¿Estás seguro/a de eliminar ${selectedContactIds.length} registro(s)?`)) {
-      setIsSaving(true);
-      try {
-        const batch = writeBatch();
-        selectedContactIds.forEach(id => {
-          batch.delete(doc(db, 'crm_contacts', id));
-        });
-        await batch.commit();
-        setSelectedContactIds([]);
-        if (selectedContactIds.includes(selectedContact?.id)) {
-          setSelectedContact(null);
-        }
-      } catch (err) {
-        console.error("Error bulk deleting contacts", err);
-      }
-      setIsSaving(false);
-    }
-  };
-
-  const handleDeleteIndividual = async (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (window.confirm('¿Estás seguro de eliminar este registro?')) {
-      try {
-        await deleteDoc(doc(db, 'crm_contacts', id));
-        if (selectedContact?.id === id) setSelectedContact(null);
-        setSelectedContactIds(prev => prev.filter(c => c !== id));
-      } catch (err) {
-        console.error("Error deleting contact", err);
-      }
-    }
-  };
-
-  const handleSaveContact = async () => {
-    if (!newContact.name || !auth.currentUser) return;
-    if (newContact.entityType === 'contact' && !newContact.company) return;
-    
-    setIsSaving(true);
-    try {
-      if (editingContactId) {
-        await updateDoc(doc(db, 'crm_contacts', editingContactId), {
-           ...newContact
-        });
-      } else {
-        await addDoc(collection(db, 'crm_contacts'), {
-          ...newContact,
-          userId: auth.currentUser.uid,
-          createdAt: serverTimestamp()
-        });
-      }
-      setShowAddContact(false);
-      setEditingContactId(null);
-      setNewContact({ entityType: 'contact', name: '', company: '', role: '', email: '', phone: '', type: 'external', status: 'lead', website: '', cuitRut: '', socialMedia: '', industry: '', location: '' });
-    } catch (err) {
-      console.error("Error saving contact", err);
-    }
-    setIsSaving(false);
-  };
-
-  const startEditContact = (c: any, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setEditingContactId(c.id);
-    setNewContact({
-      entityType: c.entityType || 'contact',
-      name: c.name || '',
-      company: c.company || '',
-      role: c.role || '',
-      email: c.email || '',
-      phone: c.phone || '',
-      type: c.type || 'external',
-      status: c.status || 'lead',
-      website: c.website || '',
-      cuitRut: c.cuitRut || '',
-      socialMedia: c.socialMedia || '',
-      industry: c.industry || '',
-      location: c.location || ''
-    });
-    setShowAddContact(true);
-  };
-
-  const filteredContacts = contacts.filter(c =>  
-    (c.name || '').toLowerCase().includes(contactSearch.toLowerCase()) || 
-    (c.company || '').toLowerCase().includes(contactSearch.toLowerCase())
-  );
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-[#1A1625] px-6 py-6 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-[#1A1625] px-6 py-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-purple-500" /> CRM
+            <Sparkles className="w-5 h-5 text-purple-500" /> ARN IA &amp; Bandeja Comercial
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Gestiona tus solicitudes de cotización comerciales y tu agenda de contactos.
+            Inteligencia autónoma híbrida que reemplaza al CRM manual: califica oportunidades, redacta cotizaciones y coordina despachos.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
           <div className="flex gap-2 w-full sm:w-auto bg-slate-100 dark:bg-black/20 p-1.5 rounded-xl">
             <button
+              onClick={() => setActiveSection('arn')}
+              className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'arn' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            >
+              <Sparkles className="w-4 h-4" /> ARN IA
+            </button>
+            <button
               onClick={() => setActiveSection('inbox')}
               className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'inbox' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
             >
-              <Inbox className="w-4 h-4" /> Oportunidades
-            </button>
-            <button
-              onClick={() => setActiveSection('crm')}
-              className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'crm' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
-            >
-              <UserCircle className="w-4 h-4" /> Contactos
+              <Inbox className="w-4 h-4" /> RFQs
             </button>
             <button
               onClick={() => setActiveSection('templates')}
@@ -228,7 +91,7 @@ export default function CompanyInbox() {
               <FileText className="w-4 h-4" /> Plantillas
             </button>
           </div>
-          <button 
+          <button
             onClick={() => { setComposeData({ to: '', subject: '', body: templates.find(t => t.label === 'Firma Automática')?.content || '' }); setShowCompose(true); }}
             className="w-full sm:w-auto px-4 py-2.5 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-bold transition flex justify-center items-center gap-2 shadow-lg shadow-purple-500/20"
           >
@@ -236,6 +99,20 @@ export default function CompanyInbox() {
           </button>
         </div>
       </div>
+
+      {statusNotice && (
+        <div
+          className={`px-4 py-3 rounded-xl border text-xs font-semibold ${
+            statusNotice.type === 'ok'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+          }`}
+        >
+          {statusNotice.text}
+        </div>
+      )}
+
+      {activeSection === 'arn' && <ArnAiRadar />}
 
       {activeSection === 'inbox' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -432,14 +309,14 @@ export default function CompanyInbox() {
                             if (!response.ok) throw new Error(data.error || 'Error enviando el correo');
                             
                             if (data.mocked) {
-                              const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-                              alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
+                              const missingText = data.missing ? ` (Faltan: ${data.missing.join(', ')})` : '';
+                              showNotice('err', `El servidor no tiene configuradas credenciales de correo${missingText}.`);
                             } else {
-                              alert('Respuesta enviada exitosamente.');
+                              showNotice('ok', 'Respuesta enviada exitosamente.');
                             }
                             setReplyText("");
                           } catch (err: any) {
-                            alert(err.message);
+                            showNotice('err', err.message || 'Error enviando respuesta');
                           }
                         }
                       }}
@@ -463,238 +340,7 @@ export default function CompanyInbox() {
         </motion.div>
       )}
 
-      {activeSection === 'crm' && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-          <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm">
-             <div className="p-6 border-b border-slate-200 dark:border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="flex gap-2 relative w-full sm:w-auto">
-                   <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                   <input 
-                      type="text" 
-                      placeholder="Buscar contacto..." 
-                      value={contactSearch}
-                      onChange={(e) => setContactSearch(e.target.value)}
-                      className="pl-10 pr-4 py-2.5 w-full sm:w-64 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                   />
-                </div>
-                <div className="flex items-center gap-3 w-full sm:w-auto">
-                   {selectedContactIds.length > 0 && (
-                     <button
-                       onClick={handleBulkDelete}
-                       disabled={isSaving}
-                       className="flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-transparent rounded-xl text-sm font-bold transition w-full sm:w-auto justify-center"
-                     >
-                       Eliminar ({selectedContactIds.length})
-                     </button>
-                   )}
-                   <button 
-                      onClick={() => {
-                        setEditingContactId(null);
-                        setNewContact({ entityType: 'contact', name: '', company: '', role: '', email: '', phone: '', type: 'external', status: 'lead', website: '', cuitRut: '', socialMedia: '', industry: '', location: '' });
-                        setShowAddContact(true);
-                      }}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-purple-500 hover:bg-purple-600 border border-transparent rounded-xl text-sm font-bold text-white shadow-lg shadow-purple-500/20 transition w-full sm:w-auto justify-center">
-                      <Plus className="w-4 h-4" /> Nuevo Registro
-                   </button>
-                </div>
-             </div>
-
-             <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-white/5 relative">
-                <div className="flex-1 overflow-x-auto min-h-[400px]">
-                   <table className="w-full text-left">
-                     <thead>
-                       <tr className="bg-slate-50 dark:bg-[#110E17]/50">
-                         <th className="px-6 py-4 w-12">
-                           <input 
-                             type="checkbox" 
-                             checked={filteredContacts.length > 0 && selectedContactIds.length === filteredContacts.length}
-                             onChange={handleSelectAll}
-                             className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 bg-white"
-                           />
-                         </th>
-                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Nombre y Rol</th>
-                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Empresa</th>
-                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Contacto</th>
-                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Tipo Relación</th>
-                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Estado</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-sm">
-                       {filteredContacts.map(contact => (
-                         <tr 
-                           key={contact.id} 
-                           onClick={() => setSelectedContact(contact)}
-                           className={`hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors cursor-pointer ${selectedContact?.id === contact.id ? 'bg-purple-50 dark:bg-purple-500/10' : ''}`}
-                         >
-                           <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
-                             <input 
-                               type="checkbox" 
-                               checked={selectedContactIds.includes(contact.id)}
-                               onChange={(e) => toggleContactSelection(contact.id, e as any)}
-                               className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 bg-white"
-                             />
-                           </td>
-                           <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                 <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xs shrink-0">
-                                   {contact.name.charAt(0)}
-                                 </div>
-                                 <div>
-                                   <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                     {contact.name}
-                                     {contact.entityType === 'company' && <span className="px-1.5 py-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] rounded uppercase font-bold tracking-wider">Empresa</span>}
-                                   </div>
-                                   {contact.role && <div className="text-xs text-slate-500">{contact.role}</div>}
-                                 </div>
-                              </div>
-                           </td>
-                           <td className="px-6 py-4">
-                              {contact.company && (
-                                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                                  <Building className="w-4 h-4 text-slate-400" /> {contact.company}
-                                </div>
-                              )}
-                              {!contact.company && contact.entityType === 'company' && (
-                                <span className="text-slate-400 text-xs italic">Sede Principal</span>
-                              )}
-                           </td>
-                           <td className="px-6 py-4">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-xs">
-                                  <Mail className="w-3.5 h-3.5" /> {contact.email}
-                                </div>
-                                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-xs">
-                                  <Phone className="w-3.5 h-3.5" /> {contact.phone}
-                                </div>
-                              </div>
-                           </td>
-                           <td className="px-6 py-4">
-                              {contact.type === 'internal' ? (
-                                <span className="px-2 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 text-xs rounded font-medium">
-                                  Interno (Equipo)
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs rounded font-medium">
-                                  Externo (Cliente/Lead)
-                                </span>
-                              )}
-                           </td>
-                           <td className="px-6 py-4 text-right">
-                              {contact.status === 'active' ? (
-                                <span className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs rounded-full font-bold">Activo</span>
-                              ) : (
-                                <span className="px-2.5 py-1 bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs rounded-full font-bold">Prospecto</span>
-                              )}
-                           </td>
-                         </tr>
-                       ))}
-                     </tbody>
-                   </table>
-                </div>
-
-                <AnimatePresence>
-                  {selectedContact && (
-                    <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 320, opacity: 1 }} exit={{ width: 0, opacity: 0 }} className="bg-slate-50 dark:bg-[#110E17] shrink-0 border-l border-slate-200 dark:border-white/5 hidden lg:block overflow-hidden relative">
-                       <div className="p-6 w-[320px]">
-                         <button onClick={() => setSelectedContact(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white">✕</button>
-                         <div className="flex flex-col items-center text-center mt-4">
-                            <div className="w-16 h-16 rounded-full bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xl mb-4 shrink-0">
-                              {selectedContact.name.charAt(0)}
-                            </div>
-                            <h4 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 justify-center">
-                              {selectedContact.name}
-                            </h4>
-                            {selectedContact.entityType === 'company' && <span className="mt-1 px-1.5 py-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] rounded uppercase font-bold tracking-wider inline-block">Empresa</span>}
-                            {selectedContact.role && <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{selectedContact.role}</p>}
-                            {selectedContact.company && (
-                              <div className="mt-2 px-3 py-1 bg-white dark:bg-black/20 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 inline-flex items-center gap-1.5 border border-slate-200 dark:border-white/5">
-                                <Building className="w-3.5 h-3.5" />
-                                {selectedContact.company}
-                              </div>
-                            )}
-                         </div>
-                         
-                         <div className="mt-8 space-y-4 text-sm">
-                            {(selectedContact.cuitRut || selectedContact.entityType === 'company') && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <FileBadge className="w-4 h-4 shrink-0" />
-                                 <span className="truncate">{selectedContact.cuitRut || 'Sin CUIT/RUT registrado'}</span>
-                              </div>
-                            )}
-                            {(selectedContact.industry) && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <Building className="w-4 h-4 shrink-0" />
-                                 <span className="truncate">{selectedContact.industry}</span>
-                              </div>
-                            )}
-                            {(selectedContact.location) && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <MapPin className="w-4 h-4 shrink-0" />
-                                 <span className="truncate line-clamp-2" title={selectedContact.location}>{selectedContact.location}</span>
-                              </div>
-                            )}
-                            {(selectedContact.website) && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <Globe className="w-4 h-4 shrink-0" />
-                                 <a href={selectedContact.website.startsWith('http') ? selectedContact.website : `https://${selectedContact.website}`} target="_blank" rel="noreferrer" className="hover:underline hover:text-purple-500 truncate">{selectedContact.website}</a>
-                              </div>
-                            )}
-                            {selectedContact.email && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <Mail className="w-4 h-4 shrink-0" /> 
-                                 <a href={`mailto:${selectedContact.email}`} className="hover:underline hover:text-purple-500 break-all">{selectedContact.email}</a>
-                              </div>
-                            )}
-                            {selectedContact.phone && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <Phone className="w-4 h-4 shrink-0" /> 
-                                 <a href={`tel:${selectedContact.phone}`} className="hover:underline hover:text-purple-500 break-all">{selectedContact.phone}</a>
-                              </div>
-                            )}
-                            {selectedContact.socialMedia && (
-                              <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                 <Hash className="w-4 h-4 shrink-0" /> 
-                                 <span className="truncate">{selectedContact.socialMedia}</span>
-                              </div>
-                            )}
-                         </div>
-                         
-                         <div className="mt-8 pt-6 border-t border-slate-200 dark:border-white/5 space-y-3 font-bold">
-                            <button 
-                               onClick={() => {
-                                 setComposeData({ to: selectedContact.email || selectedContact.phone || '', subject: '', body: templates.find(t => t.label === 'Firma Automática')?.content || '' });
-                                 setShowCompose(true);
-                               }}
-                               className="flex w-full items-center justify-center gap-2 px-4 py-2.5 bg-purple-500 hover:bg-purple-600 text-white rounded-xl shadow-lg shadow-purple-500/20 transition"
-                            >
-                               <MessageSquare className="w-4 h-4" /> Enviar Mensaje
-                            </button>
-                            <button className="flex w-full items-center justify-center gap-2 px-4 py-2.5 bg-slate-200 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/20 text-slate-800 dark:text-white rounded-xl transition">
-                               <FileText className="w-4 h-4" /> Crear Cotización
-                            </button>
-                         </div>
-                         <div className="mt-4 pt-4 border-t border-slate-200 dark:border-white/5 flex gap-2">
-                           <button 
-                             onClick={() => startEditContact(selectedContact)}
-                             className="flex-1 px-4 py-2 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 rounded-lg transition"
-                           >
-                             Editar
-                           </button>
-                           <button 
-                             onClick={() => handleDeleteIndividual(selectedContact.id)}
-                             className="flex-1 px-4 py-2 text-sm font-bold bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 rounded-lg transition"
-                           >
-                             Eliminar
-                           </button>
-                         </div>
-                       </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-             </div>
-          </div>
-        </motion.div>
-      )}
+      {/* Sección de Contactos CRM reemplazada por Motor ARN IA */}
 
       {activeSection === 'templates' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -739,11 +385,10 @@ export default function CompanyInbox() {
                     >
                       Editar
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
-                        if (confirm('¿Eliminar esta plantilla?')) {
-                          setTemplates(prev => prev.filter(t => t.id !== tpl.id));
-                        }
+                        setTemplates(prev => prev.filter(t => t.id !== tpl.id));
+                        showNotice('ok', 'Plantilla eliminada.');
                       }}
                       className="flex-1 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition"
                     >
@@ -766,144 +411,7 @@ export default function CompanyInbox() {
         </motion.div>
       )}
 
-      {/* Add Contact Modal */}
-      <AnimatePresence>
-        {showAddContact && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowAddContact(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="relative bg-white dark:bg-[#1A1625] rounded-3xl p-6 w-full max-w-lg shadow-xl border border-slate-200 dark:border-white/10 overflow-y-auto max-h-[90vh]">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">
-                {editingContactId ? 'Editar Registro B2B' : 'Nuevo Registro B2B'}
-              </h3>
-              
-              <div className="flex gap-2 mb-6 p-1 bg-slate-100 dark:bg-black/20 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setNewContact({ ...newContact, entityType: 'contact' })}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${newContact.entityType === 'contact' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-                >
-                  <UserCircle className="w-4 h-4" /> Contacto
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNewContact({ ...newContact, entityType: 'company', role: '', company: '' })}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${newContact.entityType === 'company' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-                >
-                  <Building className="w-4 h-4" /> Empresa
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                {newContact.entityType === 'contact' ? (
-                  <>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre Completo</label>
-                      <input type="text" value={newContact.name} onChange={e => setNewContact({...newContact, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Juan Pérez" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Empresa</label>
-                      <input type="text" list="companiesList" value={newContact.company} onChange={e => setNewContact({...newContact, company: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Nombre de la empresa" />
-                      <datalist id="companiesList">
-                        {uniqueCompanies.map(c => <option key={c} value={c} />)}
-                      </datalist>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Rol / Cargo</label>
-                        <input type="text" value={newContact.role} onChange={e => setNewContact({...newContact, role: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Comprador" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo</label>
-                        <select value={newContact.type} onChange={e => setNewContact({...newContact, type: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 text-slate-900 dark:text-white">
-                          <option value="external">Externo (Cliente)</option>
-                          <option value="internal">Interno (Equipo)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre de la Empresa</label>
-                      <input type="text" value={newContact.name} onChange={e => setNewContact({...newContact, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. PetroSur Energía S.A." />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">CUIT / RUT / Registro Fiscal</label>
-                        <input type="text" value={newContact.cuitRut} onChange={e => setNewContact({...newContact, cuitRut: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. 30-12345678-9" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Industria / Rubro</label>
-                        <input type="text" value={newContact.industry} onChange={e => setNewContact({...newContact, industry: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Petróleo y Gas" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sitio Web</label>
-                      <input type="url" value={newContact.website} onChange={e => setNewContact({...newContact, website: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="https://www.empresa.com" />
-                    </div>
-                  </>
-                )}
 
-                <div className="grid grid-cols-2 gap-4">
-                   <div>
-                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Teléfono</label>
-                     <input type="text" value={newContact.phone} onChange={e => setNewContact({...newContact, phone: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="+54 9..." />
-                   </div>
-                   {newContact.entityType !== 'company' && (
-                     <div>
-                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Estado</label>
-                       <select value={newContact.status} onChange={e => setNewContact({...newContact, status: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 text-slate-900 dark:text-white">
-                         <option value="lead">Prospecto</option>
-                         <option value="active">Activo</option>
-                       </select>
-                     </div>
-                   )}
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email</label>
-                    <input type="email" value={newContact.email} onChange={e => setNewContact({...newContact, email: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="correo@empresa.com" />
-                  </div>
-                  {newContact.entityType === 'company' && (
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Redes Sociales (LinkedIn / IG)</label>
-                      <input type="text" value={newContact.socialMedia} onChange={e => setNewContact({...newContact, socialMedia: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. linkedin.com/company/..." />
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Locación / Dirección</label>
-                  <input type="text" value={newContact.location} onChange={e => setNewContact({...newContact, location: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Calle 123, Ciudad, País" />
-                </div>
-                
-                {newContact.entityType === 'company' && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Estado</label>
-                    <select value={newContact.status} onChange={e => setNewContact({...newContact, status: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 text-slate-900 dark:text-white mb-2">
-                       <option value="lead">Prospecto</option>
-                       <option value="active">Activo</option>
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-3 justify-end mt-8">
-                <button onClick={() => setShowAddContact(false)} className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition">
-                  Cancelar
-                </button>
-                <button 
-                  onClick={handleSaveContact} 
-                  disabled={!newContact.name || (newContact.entityType === 'contact' && !newContact.company) || isSaving}
-                  className="px-5 py-2.5 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-lg shadow-purple-500/20 transition flex items-center gap-2">
-                  {isSaving ? 'Guardando...' : 'Guardar Registro'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Add Template Modal */}
       <AnimatePresence>
@@ -1068,15 +576,15 @@ export default function CompanyInbox() {
                           if (!response.ok) throw new Error(data.error || 'Error enviando el correo');
                           
                           if (data.mocked) {
-                            const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-                            alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
+                            const missingText = data.missing ? ` (Faltan: ${data.missing.join(', ')})` : '';
+                            showNotice('err', `Faltan credenciales de correo en el servidor${missingText}.`);
                           } else {
-                            alert('Correo enviado exitosamente.');
+                            showNotice('ok', 'Correo enviado exitosamente.');
                           }
                           setComposeData({ to: '', subject: '', body: '' });
                           setShowCompose(false);
                         } catch (err: any) {
-                          alert(err.message);
+                          showNotice('err', err.message || 'Error al enviar correo');
                         }
                       }
                     }}

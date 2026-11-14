@@ -172,3 +172,45 @@ test('formatPgError unwraps Drizzle cause codes into actionable messages without
     /Transaction Pooler/
   );
 });
+
+test('ARN IA and private B2B module endpoints strictly enforce Bearer authentication (401)', async () => {
+  const guardedRequests: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [
+    { method: 'GET', path: '/api/arn/overview' },
+    { method: 'PUT', path: '/api/arn/rules', body: { mode: 'hybrid' } },
+    { method: 'POST', path: '/api/arn/ingest', body: { rawText: 'Necesito grúa 50tn en Añelo' } },
+    { method: 'POST', path: '/api/arn/copilot', body: { question: 'Resumen del pipeline' } },
+    { method: 'POST', path: '/api/products', body: { name: 'Válvula 4 pulgadas', category: 'Válvulas' } },
+    { method: 'GET', path: '/api/warehousing/inventory' },
+    { method: 'POST', path: '/api/logistics/loads', body: { originName: 'Neuquén', destinationName: 'Añelo' } },
+    { method: 'GET', path: '/api/chat/messages?channelId=chan-logistica' },
+    { method: 'PUT', path: '/api/company/profile', body: { companyName: 'Test S.A.' } },
+    { method: 'POST', path: '/api/logistics/reverse-auction', body: { loadId: '1', bidPrice: 100000 } },
+    { method: 'POST', path: '/api/crm/sync-odoo', body: { companyName: 'Test S.A.' } },
+  ];
+
+  for (const reqSpec of guardedRequests) {
+    const res = await fetch(`${baseUrl}${reqSpec.path}`, {
+      method: reqSpec.method,
+      headers: reqSpec.body ? { 'Content-Type': 'application/json' } : undefined,
+      body: reqSpec.body ? JSON.stringify(reqSpec.body) : undefined,
+    });
+    assert.equal(res.status, 401, `Expected 401 for ${reqSpec.method} ${reqSpec.path}, got ${res.status}`);
+  }
+});
+
+test('GET /api/directory hides sensitive CUIT and contact fields when unauthenticated', async () => {
+  const res = await fetch(`${baseUrl}/api/directory`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.isMemberAuthorized, false);
+  assert.ok(Array.isArray(body.companies));
+  assert.ok(body.companies.length > 0);
+  for (const company of body.companies) {
+    assert.equal(company.protectedMasked, true);
+    assert.equal(company.cuit, '••-••••••••-•');
+    assert.equal(company.email, '');
+    assert.equal(company.phone, '');
+    assert.equal(company.whatsapp, '');
+  }
+});
+

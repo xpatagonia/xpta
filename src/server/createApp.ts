@@ -16,6 +16,7 @@ import { notifyProvidersForRfq } from "../services/notificationService.ts";
 import { db, pool, hasDatabaseConfig, formatPgError } from "../db/index.ts";
 import { insights, siteSettings, automationLogs, contacts } from "../db/schema.ts";
 import { eq, desc } from "drizzle-orm";
+import { registerArnAndModuleRoutes, runArnPipelineForEvent } from "./arnRoutes.ts";
 
 let cachedSupabaseAdmin: SupabaseClient | null = null;
 export function getSupabaseAdminClient(): SupabaseClient | null {
@@ -435,6 +436,16 @@ export function createApiApp() {
         console.error("Failed to notify providers:", err);
       });
 
+      runArnPipelineForEvent({
+        ownerUid: user.uid,
+        source: "rfq",
+        companyName: user.email,
+        contactEmail: user.email,
+        category: newRfq.category,
+        rawText: `RFQ #${newRfq.id}: ${newRfq.title}\nPrioridad: ${newRfq.priority}\n${newRfq.description}`,
+        metadata: { rfqId: newRfq.id },
+      }).catch((err) => console.warn("ARN RFQ ingest warning:", err));
+
       res.json(newRfq);
     } catch (error) {
       console.error("Error creating RFQ:", error);
@@ -458,7 +469,19 @@ export function createApiApp() {
       if (!updated) {
         return res.status(404).json({ error: "RFQ not found for current user" });
       }
-      res.json({ success: true, rfq: updated });
+
+      // Cross-module ARN trigger: prepare logistics dispatch & record automation
+      runArnPipelineForEvent({
+        ownerUid: req.user.uid,
+        source: "rfq_award",
+        companyName: req.user.email,
+        contactEmail: req.user.email,
+        category: updated.category,
+        rawText: `RFQ #${updated.id} adjudicada (${updated.title}). Coordinar despacho logístico y reserva de inventario.`,
+        metadata: { rfqId: updated.id, originName: "Hub Origen", destinationName: "Destino Patagonia" },
+      }).catch((err) => console.warn("ARN award dispatch warning:", err));
+
+      res.json({ success: true, rfq: updated, crossModuleTriggered: true });
     } catch (error: any) {
       console.error("Error awarding RFQ:", error);
       res.status(500).json({ error: error.message || "Internal server error" });
@@ -1142,11 +1165,12 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
     }
   });
 
-  app.post("/api/logistics/reverse-auction", async (req, res) => {
+  app.post("/api/logistics/reverse-auction", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       const payload = {
         event: "logistics.reverse_auction.created",
         timestamp: new Date().toISOString(),
+        uid: req.user?.uid,
         ...req.body,
       };
       let forwardedToN8n = false;
@@ -1181,7 +1205,7 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
     }
   });
 
-  app.post("/api/crm/sync-odoo", async (req, res) => {
+  app.post("/api/crm/sync-odoo", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       const payload = {
         event: "crm.company.sync_odoo",
@@ -1529,6 +1553,8 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   app.get("/api/maps-key", (req, res) => {
     res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });
   });
+
+  registerArnAndModuleRoutes(app, recordAutomationEvent);
 
   return { app, runAutoInsight };
 }

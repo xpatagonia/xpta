@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Mail, Send, Reply, RefreshCw, AlertCircle, Inbox as InboxIcon, MessageCircle } from 'lucide-react';
+import { Mail, Send, Reply, RefreshCw, AlertCircle, Inbox as InboxIcon, Sparkles, CheckCircle2 } from 'lucide-react';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
 
@@ -19,19 +19,25 @@ export default function Inbox() {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [statusBanner, setStatusBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [triaging, setTriaging] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
-  
+
   const [showCompose, setShowCompose] = useState(false);
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
   const [sending, setSending] = useState(false);
 
+  const notifyBanner = (type: 'ok' | 'err', text: string) => {
+    setStatusBanner({ type, text });
+    setTimeout(() => setStatusBanner(null), 5000);
+  };
+
   const fetchEmails = async (userObj?: any) => {
     setLoading(true);
     setError('');
     try {
-      // If userObj is an event or not a supabase user, fallback to auth.currentUser
       const user = (userObj && userObj.id) ? userObj : auth.currentUser;
       if (!user) {
         setError('Debes iniciar sesión para ver los correos.');
@@ -42,7 +48,7 @@ export default function Inbox() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch emails');
       }
@@ -67,17 +73,37 @@ export default function Inbox() {
     return () => unsubscribe();
   }, []);
 
+  const handleTriageInboxWithArn = async () => {
+    setTriaging(true);
+    try {
+      const token = await auth.getToken();
+      const res = await fetch(`${getApiUrl()}/api/arn/triage-inbox`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Error analizando correos con ARN IA');
+      notifyBanner(
+        'ok',
+        `ARN IA analizó ${data.analyzedCount || 0} correos y generó ${data.opportunitiesCreated || 0} oportunidades / borradores híbridos en tu panel.`
+      );
+    } catch (err: any) {
+      notifyBanner('err', err?.message || 'Error al analizar bandeja con ARN IA');
+    } finally {
+      setTriaging(false);
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     setSending(true);
     try {
-      const user = auth.currentUser;
       const token = await auth.getToken();
       const response = await fetch(`${getApiUrl()}/api/emails/send`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           to: composeTo,
@@ -87,20 +113,20 @@ export default function Inbox() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Error enviando el correo');
-      
+
       if (data.mocked) {
-        const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-        alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
+        const missingText = data.missing ? ` (Faltan: ${data.missing.join(', ')})` : '';
+        notifyBanner('err', `El servidor no tiene configuradas credenciales de correo${missingText}.`);
       } else {
-        alert('Correo enviado exitosamente.');
+        notifyBanner('ok', 'Correo enviado exitosamente vía Resend HTTPS.');
       }
-      
+
       setShowCompose(false);
       setComposeTo('');
       setComposeSubject('');
       setComposeBody('');
     } catch (err: any) {
-      alert(err.message);
+      notifyBanner('err', err.message || 'Error enviando correo');
     } finally {
       setSending(false);
     }
@@ -117,25 +143,45 @@ export default function Inbox() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12">
       <div className="max-w-7xl mx-auto px-6 h-[calc(100vh-8rem)] flex flex-col gap-4">
+        {statusBanner && (
+          <div
+            className={`px-4 py-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+              statusBanner.type === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+            }`}
+          >
+            {statusBanner.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{statusBanner.text}</span>
+          </div>
+        )}
 
         <div className="flex flex-col h-full bg-white dark:bg-[#1A1625] rounded-2xl shadow-sm border border-slate-200 dark:border-white/10 overflow-hidden">
-          
+
             <>
               {/* Toolbar */}
-              <div className="p-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50 dark:bg-[#110E17]">
+              <div className="p-4 border-b border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-[#110E17]">
                 <div className="flex items-center gap-3">
                   <InboxIcon className="w-6 h-6 text-purple-500" />
                   <h1 className="text-xl font-display font-bold text-slate-900 dark:text-white">Bandeja de Entrada</h1>
                 </div>
-                <div className="flex gap-3">
-                  <button 
+                <div className="flex flex-wrap gap-2.5">
+                  <button
+                    onClick={handleTriageInboxWithArn}
+                    disabled={triaging}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
+                  >
+                    <Sparkles className={`w-4 h-4 ${triaging ? 'animate-pulse' : ''}`} />
+                    {triaging ? 'Analizando IMAP...' : 'Analizar con ARN IA'}
+                  </button>
+                  <button
                     onClick={() => fetchEmails()}
                     className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg transition-colors flex items-center gap-2"
                     title="Actualizar"
                   >
                     <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       setComposeTo('');
                       setComposeSubject('');

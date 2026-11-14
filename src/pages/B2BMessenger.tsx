@@ -234,7 +234,8 @@ export default function B2BMessenger() {
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(INITIAL_MESSAGES);
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  
+  const [arnChatToast, setArnChatToast] = useState<string | null>(null);
+
   // Estado para llamada de Voz / Video (Etapa 2 lista)
   const [activeCall, setActiveCall] = useState<{
     type: 'voice' | 'video';
@@ -247,6 +248,51 @@ export default function B2BMessenger() {
   } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const currentChatId = selectedContact ? selectedContact.id : (selectedChannel ? selectedChannel.id : '');
+
+  useEffect(() => {
+    if (!currentChatId) return;
+    let active = true;
+    const loadServerMessages = async () => {
+      try {
+        const token = await auth.getToken();
+        if (!token) return;
+        const res = await fetch(`${getApiUrl()}/api/chat/messages?channelId=${encodeURIComponent(currentChatId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        const data = await res.json();
+        if (res.ok && active && Array.isArray(data.messages) && data.messages.length > 0) {
+          const myUid = auth.currentUser?.uid;
+          const mapped: ChatMessage[] = data.messages.map((m: any) => ({
+            id: `db-${m.id}`,
+            senderId: m.sender_uid,
+            senderName: m.sender_name,
+            senderCompany: m.sender_company,
+            recipientId: m.channel_id,
+            text: m.text,
+            timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isSelf: Boolean(myUid && m.sender_uid === myUid),
+            type: m.msg_type || 'text',
+            rfqData: m.metadata?.rfqData,
+          }));
+          setMessages((prev) => ({
+            ...prev,
+            [currentChatId]: mapped,
+          }));
+        }
+      } catch {
+        // fall back cleanly
+      }
+    };
+    loadServerMessages();
+    const timer = setInterval(loadServerMessages, 12000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [currentChatId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -269,12 +315,13 @@ export default function B2BMessenger() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
     const targetId = selectedContact ? selectedContact.id : (selectedChannel ? selectedChannel.id : '');
     if (!targetId) return;
+    const textValue = inputText.trim();
 
     const newMsg: ChatMessage = {
       id: 'msg-' + Date.now(),
@@ -282,7 +329,7 @@ export default function B2BMessenger() {
       senderName: auth.currentUser?.email?.split('@')[0] || 'Mi Empresa',
       senderCompany: 'Mi Empresa Patagónica',
       recipientId: targetId,
-      text: inputText.trim(),
+      text: textValue,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSelf: true,
       type: 'text',
@@ -296,39 +343,37 @@ export default function B2BMessenger() {
     setInputText('');
     if (soundEnabled) playTone('message');
 
-    // Simulación de respuesta automática inteligente si es un contacto 1 a 1
-    if (selectedContact && !selectedChannel) {
-      setTimeout(() => {
-        const responses = [
-          'Recibido con gusto. ¿Te parece si coordinamos una llamada rápida para fijar términos y entrega?',
-          'Perfecto, estamos revisando la disponibilidad de stock en el depósito de Comodoro.',
-          'Anotado. Te comparto el comprobante y manifiesto en cuanto lo emitamos.',
-          'De acuerdo, podemos incluirlo en la ruta logística del próximo martes.'
-        ];
-        const randomResp = responses[Math.floor(Math.random() * responses.length)];
-        const replyMsg: ChatMessage = {
-          id: 'reply-' + Date.now(),
-          senderId: selectedContact.id,
-          senderName: selectedContact.name,
-          senderCompany: selectedContact.company,
-          recipientId: 'self',
-          text: randomResp,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isSelf: false,
-          type: 'text',
-        };
-        setMessages(p => ({
-          ...p,
-          [selectedContact.id]: [...(p[selectedContact.id] || []), replyMsg]
-        }));
-        if (soundEnabled) playTone('message');
-      }, 1400);
+    try {
+      const token = await auth.getToken();
+      if (token) {
+        await fetch(`${getApiUrl()}/api/chat/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            channelId: targetId,
+            text: textValue,
+            senderCompany: 'Mi Empresa Patagónica',
+            msgType: 'text',
+          }),
+        });
+      }
+    } catch {
+      // ignore if offline
     }
   };
 
-  const handleSendQuickRfq = () => {
+  const handleSendQuickRfq = async () => {
     const targetId = selectedContact ? selectedContact.id : (selectedChannel ? selectedChannel.id : '');
     if (!targetId) return;
+
+    const rfqPayload = {
+      title: 'Suministro de Biomasa / Logística Térmica',
+      category: 'Bioeconomía & Cadena de Frío',
+      budget: 'USD 8,500 - 14,000 (Convenio Marco)',
+    };
 
     const rfqMsg: ChatMessage = {
       id: 'rfq-' + Date.now(),
@@ -340,11 +385,7 @@ export default function B2BMessenger() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSelf: true,
       type: 'rfq',
-      rfqData: {
-        title: 'Suministro de Biomasa / Logística Térmica',
-        category: 'Bioeconomía & Cadena de Frío',
-        budget: 'USD 8,500 - 14,000 (Convenio Marco)',
-      }
+      rfqData: rfqPayload,
     };
 
     setMessages(prev => ({
@@ -352,6 +393,58 @@ export default function B2BMessenger() {
       [targetId]: [...(prev[targetId] || []), rfqMsg]
     }));
     if (soundEnabled) playTone('message');
+
+    try {
+      const token = await auth.getToken();
+      if (token) {
+        await fetch(`${getApiUrl()}/api/chat/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            channelId: targetId,
+            text: rfqMsg.text,
+            senderCompany: 'Mi Empresa Patagónica',
+            msgType: 'rfq',
+            metadata: { rfqData: rfqPayload },
+          }),
+        });
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleEscalateToArn = async (msg: ChatMessage) => {
+    try {
+      const token = await auth.getToken();
+      if (!token) {
+        setArnChatToast('Inicia sesión para derivar mensajes a ARN IA.');
+        setTimeout(() => setArnChatToast(null), 3500);
+        return;
+      }
+      const res = await fetch(`${getApiUrl()}/api/arn/ingest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          source: 'b2b_messenger',
+          companyName: msg.senderCompany || msg.senderName,
+          contactName: msg.senderName,
+          rawText: msg.text,
+        }),
+      });
+      if (res.ok) {
+        setArnChatToast(`Mensaje de ${msg.senderName} enviado a ARN IA para calificación.`);
+        setTimeout(() => setArnChatToast(null), 4000);
+      }
+    } catch {
+      // ignore
+    }
   };
 
   const startCall = (type: 'voice' | 'video', contact: Contact) => {
@@ -388,7 +481,6 @@ export default function B2BMessenger() {
     c.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const currentChatId = selectedContact ? selectedContact.id : (selectedChannel ? selectedChannel.id : '');
   const currentMessages = messages[currentChatId] || [];
 
   return (
@@ -755,12 +847,26 @@ export default function B2BMessenger() {
                         </div>
                       )}
 
-                      <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-500">
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
                         {msg.isSelf && <CheckCheck className="w-3 h-3 text-orange-400" />}
+                        {!msg.isSelf && (
+                          <button
+                            type="button"
+                            onClick={() => handleEscalateToArn(msg)}
+                            className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 font-semibold"
+                          >
+                            <Sparkles className="w-3 h-3" /> Enviar a ARN IA
+                          </button>
+                        )}
                       </div>
                     </motion.div>
                   );
                 })
+              )}
+              {arnChatToast && (
+                <div className="px-3 py-2 rounded-xl bg-purple-500/20 border border-purple-500/40 text-purple-200 text-xs font-semibold">
+                  {arnChatToast}
+                </div>
               )}
               <div ref={messagesEndRef} />
             </div>

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Box, Search, PackageCheck, AlertTriangle, Building, Map as MapIcon, Layers, Package, ListFilter, ArrowDownToLine, Plus, MoreVertical, Database, Share2, Download } from 'lucide-react';
+import { MapPin, Box, Search, PackageCheck, AlertTriangle, Building, Map as MapIcon, Layers, Plus, MoreVertical, Database, Share2, Download, X } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { db, doc, collection, onSnapshot, writeBatch } from '../lib/db';
+import { auth } from '../lib/db';
+import { getApiUrl } from '../lib/apiConfig';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import WarehousingBaysColdChain from '../components/WarehousingBaysColdChain';
@@ -35,33 +36,124 @@ export default function WarehousingModule() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newItem, setNewItem] = useState({
+    sku: '',
+    name: '',
+    category: 'Componentes',
+    location: 'Parque Ind. Comodoro',
+    quantity: '50',
+  });
+
+  const notify = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const fetchInventory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = await auth.getToken();
+      if (!token) {
+        setInventory([]);
+        setLoading(false);
+        return;
+      }
+      const res = await fetch(`${getApiUrl()}/api/warehousing/inventory`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.items)) {
+        setInventory(
+          data.items.map((row: any) => ({
+            id: row.id,
+            sku: row.sku,
+            name: row.name,
+            category: row.category || 'Insumos',
+            location: row.location || 'Parque Ind. Comodoro',
+            stock: Number(row.quantity) || 0,
+            minStock: 20,
+            status: row.status || 'in-stock',
+            updated: row.last_updated ? new Date(row.last_updated).toLocaleDateString() : 'Hoy',
+          }))
+        );
+      }
+    } catch {
+      // ignore offline
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'inventory_items'), (snapshot) => {
-      const items = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setInventory(items);
-      setLoading(false);
+    const unsub = auth.onAuthStateChanged((user: any) => {
+      if (user) fetchInventory();
+      else setLoading(false);
     });
-
-    return () => unsubscribe();
-  }, []);
+    return () => unsub();
+  }, [fetchInventory]);
 
   const handleSeedTestData = async () => {
     setSeeding(true);
     try {
-      const batch = writeBatch();
-      DEFAULT_INVENTORY.forEach(item => {
-        const docRef = doc(collection(db, 'inventory_items'));
-        batch.set(docRef, item);
-      });
-      await batch.commit();
+      const token = await auth.getToken();
+      if (!token) {
+        notify('Inicia sesión para cargar inventario en producción.');
+        setSeeding(false);
+        return;
+      }
+      for (const item of DEFAULT_INVENTORY) {
+        await fetch(`${getApiUrl()}/api/warehousing/inventory`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            sku: item.sku,
+            name: item.name,
+            category: item.category,
+            quantity: item.stock,
+            location: item.location,
+          }),
+        });
+      }
+      await fetchInventory();
+      notify('Inventario inicial sincronizado en Postgres.');
     } catch (err) {
       console.error(err);
     }
     setSeeding(false);
+  };
+
+  const handleAddItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const token = await auth.getToken();
+      if (!token) {
+        notify('Inicia sesión para registrar ingresos de stock.');
+        return;
+      }
+      const res = await fetch(`${getApiUrl()}/api/warehousing/inventory`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newItem),
+      });
+      if (res.ok) {
+        setShowAddModal(false);
+        setNewItem({ sku: '', name: '', category: 'Componentes', location: 'Parque Ind. Comodoro', quantity: '50' });
+        await fetchInventory();
+        notify('Ingreso de stock registrado en Postgres.');
+      }
+    } catch {
+      notify('No se pudo guardar el ítem.');
+    }
   };
 
   const calculateChartsData = () => {
@@ -125,15 +217,16 @@ export default function WarehousingModule() {
     setIsExporting(false);
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (navigator.share) {
       navigator.share({
         title: 'Reporte de Inventario B2B',
         text: 'Revisa el estado actual de nuestro inventario consolidado.',
         url: window.location.href,
-      }).catch(console.error);
-    } else {
-      alert('La función de compartir no está disponible en este navegador. Copia la URL manualmente.');
+      }).catch(() => {});
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(window.location.href).catch(() => {});
+      notify('Enlace del inventario copiado al portapapeles.');
     }
   };
 
@@ -385,27 +478,33 @@ export default function WarehousingModule() {
                   <div className="p-6 border-b border-slate-200 dark:border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                      <div className="flex gap-2 relative w-full sm:w-auto">
                         <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                        <input type="text" placeholder="Buscar SKU, producto o categoría..." className="w-full sm:w-80 pl-12 pr-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-slate-900 dark:text-white" />
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Buscar SKU, producto o categoría..."
+                          className="w-full sm:w-80 pl-12 pr-4 py-2.5 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-slate-900 dark:text-white"
+                        />
                      </div>
                      <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-                        <button className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition">
-                           <ListFilter className="w-4 h-4" /> Filtros
-                        </button>
-                        <button 
+                        <button
                            onClick={handleExportPDF}
                            disabled={isExporting}
                            className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition disabled:opacity-50"
                         >
-                           {isExporting ? <span className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></span> : <Download className="w-4 h-4 text-orange-500" />} 
+                           {isExporting ? <span className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></span> : <Download className="w-4 h-4 text-orange-500" />}
                            {isExporting ? 'Exportando...' : 'Descargar PDF'}
                         </button>
-                        <button 
+                        <button
                            onClick={handleShare}
                            className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition"
                         >
                            <Share2 className="w-4 h-4 text-purple-500" /> Compartir
                         </button>
-                        <button className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 border border-transparent rounded-xl text-sm font-bold text-white shadow-lg shadow-orange-500/20 transition">
+                        <button
+                           onClick={() => setShowAddModal(true)}
+                           className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 border border-transparent rounded-xl text-sm font-bold text-white shadow-lg shadow-orange-500/20 transition"
+                        >
                            <Plus className="w-4 h-4" /> Nuevo Ingreso
                         </button>
                      </div>
@@ -425,7 +524,10 @@ export default function WarehousingModule() {
                          </tr>
                        </thead>
                        <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-sm">
-                         {inventory.map((item) => (
+                         {inventory.filter((it) => {
+                           const q = searchTerm.toLowerCase();
+                           return !q || (it.name || '').toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q);
+                         }).map((item) => (
                            <tr key={item.id || item.sku} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                              <td className="px-6 py-4 text-slate-900 dark:text-white">
                                <div className="font-bold">{item.name}</div>
@@ -492,6 +594,82 @@ export default function WarehousingModule() {
 
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {showAddModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm" onClick={() => setShowAddModal(false)} />
+            <motion.form
+              onSubmit={handleAddItem}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="relative w-full max-w-md bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-6 space-y-4 z-10 shadow-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Nuevo Ingreso de Inventario</h3>
+                <button type="button" onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <input
+                type="text"
+                required
+                placeholder="Nombre del producto / repuesto"
+                value={newItem.name}
+                onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  placeholder="SKU"
+                  value={newItem.sku}
+                  onChange={(e) => setNewItem((p) => ({ ...p, sku: e.target.value }))}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                />
+                <select
+                  value={newItem.category}
+                  onChange={(e) => setNewItem((p) => ({ ...p, category: e.target.value }))}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                >
+                  <option>Componentes</option>
+                  <option>Insumos</option>
+                  <option>Maquinaria</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <select
+                  value={newItem.location}
+                  onChange={(e) => setNewItem((p) => ({ ...p, location: e.target.value }))}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                >
+                  <option>Parque Ind. Comodoro</option>
+                  <option>Almacenes del Sur Neuquén</option>
+                  <option>Central CABA</option>
+                </select>
+                <input
+                  type="number"
+                  required
+                  placeholder="Cantidad"
+                  value={newItem.quantity}
+                  onChange={(e) => setNewItem((p) => ({ ...p, quantity: e.target.value }))}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                />
+              </div>
+              <button type="submit" className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold">
+                Guardar en Postgres
+              </button>
+            </motion.form>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[120] bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-white/15 text-xs font-semibold">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

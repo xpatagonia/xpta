@@ -171,6 +171,33 @@ export default function LogisticsModule() {
   }, [searchParams]);
 
   useEffect(() => {
+    const loadServerLoads = async () => {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/logistics/loads`, { cache: 'no-store' });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.loads) && data.loads.length > 0) {
+          const mapped: EmptyReturnOffer[] = data.loads.map((row: any) => ({
+            id: String(row.id),
+            carrier: row.load_type === 'cargo_tender' ? 'Licitación ARN IA / Red B2B' : 'Flota Registrada xPatagonia',
+            origin: row.origin_name,
+            destination: row.destination_name,
+            corridor: row.corridor || 'RN 3 / Patagónica',
+            truckType: row.truck_type || 'Semirremolque 28t',
+            availableTons: Math.max(1, Math.round((Number(row.weight_kg) || 20000) / 1000)),
+            distanceKm: Number(row.distance_km) || 1200,
+            departureWindow: 'Disponible en Postgres',
+            discountPercent: Number(row.discount_percent) || 35,
+            pricePerTonArs: row.target_price_ars ? Math.round(Number(row.target_price_ars) / 20) : 52000,
+            verified: true,
+          }));
+          setEmptyReturns([...mapped, ...INITIAL_EMPTY_RETURNS]);
+        }
+      } catch {
+        // fallback already loaded
+      }
+    };
+    loadServerLoads();
+
     const unsubContacts = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
       const allLocations = new Set<string>(PATAGONIA_LOGISTIC_NODES.map((n) => n.name));
       snapshot.docs.forEach((docSnap) => {
@@ -248,9 +275,13 @@ export default function LogisticsModule() {
   const handleTriggerReverseAuction = async (routeData: RouteCalculationResult | null, weightKg: number) => {
     if (!routeData) return;
     try {
-      await fetch(`${getApiUrl()}/api/logistics/reverse-auction`, {
+      const token = await auth.getToken();
+      const res = await fetch(`${getApiUrl()}/api/logistics/reverse-auction`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           origin: routeData.origin.name,
           destination: routeData.destination.name,
@@ -260,8 +291,12 @@ export default function LogisticsModule() {
           estimatedBaseArs: routeData.estimatedFreightArs,
         }),
       });
+      if (res.status === 401) {
+        notify('Inicia sesión como miembro para emitir licitaciones de flete en producción.');
+        return;
+      }
     } catch {
-      // Offline / local mode still succeeds visually
+      // ignore network error
     }
     notify(
       `Licitación inversa abierta: ${routeData.origin.shortName} → ${routeData.destination.shortName} (${routeData.distanceKm} km) enviada a transportistas del corredor ${routeData.corridor}.`
@@ -275,6 +310,27 @@ export default function LogisticsModule() {
       destQuery: newTruckDest,
       weightKg: (Number(newTruckTons) || 20) * 1000,
     });
+    const token = await auth.getToken();
+    if (token) {
+      await fetch(`${getApiUrl()}/api/logistics/loads`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          loadType: 'empty_return',
+          originName: res.origin.name,
+          destinationName: res.destination.name,
+          corridor: res.corridor,
+          distanceKm: res.distanceKm,
+          weightKg: (Number(newTruckTons) || 20) * 1000,
+          truckType: newTruckType,
+          discountPercent: Number(newTruckDiscount) || 35,
+          targetPriceArs: res.emptyReturnFreightArs,
+        }),
+      }).catch(() => {});
+    }
     const offer: EmptyReturnOffer = {
       id: `ret-${Date.now()}`,
       carrier: 'Mi Flota Registrada (xPatagonia)',
@@ -284,7 +340,7 @@ export default function LogisticsModule() {
       truckType: newTruckType,
       availableTons: Number(newTruckTons) || 20,
       distanceKm: res.distanceKm,
-      departureWindow: 'Salida Programada 24hs',
+      departureWindow: 'Publicado en Postgres',
       discountPercent: Number(newTruckDiscount) || 35,
       pricePerTonArs: Math.round(res.emptyReturnFreightArs / Math.max(1, Number(newTruckTons) || 20)),
       verified: true,

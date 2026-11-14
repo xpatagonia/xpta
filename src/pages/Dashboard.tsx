@@ -26,6 +26,13 @@ export default function Dashboard() {
   const [myOffersInput, setMyOffersInput] = useState('Mecanizado CNC, Estructuras Metálicas, Servicios Petroleros');
   const [myDemandsInput, setMyDemandsInput] = useState('Bridas Forjadas, Transformadores MT, Flete Consolidado');
   const [odooSyncStatus, setOdooSyncStatus] = useState<string | null>(null);
+  const [adnMatches, setAdnMatches] = useState<any[]>(() =>
+    computeAdnMatches({
+      myOffers: ['Mecanizado CNC', 'Estructuras Metálicas', 'Servicios Petroleros'],
+      myDemands: ['Bridas Forjadas', 'Transformadores MT', 'Flete Consolidado'],
+    })
+  );
+  const [isMatchingAdn, setIsMatchingAdn] = useState(false);
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [negotiationRfq, setNegotiationRfq] = useState<RFQ | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -320,11 +327,11 @@ export default function Dashboard() {
               >
                 Mis Cotizaciones
               </button>
-              <button 
+              <button
                 onClick={() => setActiveTab('received_rfqs')}
                 className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'received_rfqs' ? 'border-purple-500 text-purple-500 bg-purple-50/50 dark:bg-purple-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
               >
-                <Inbox className="w-4 h-4" /> CRM
+                <Sparkles className="w-4 h-4" /> ARN IA (Autónomo)
               </button>
               <button 
                 onClick={() => setActiveTab('products')}
@@ -674,35 +681,87 @@ export default function Dashboard() {
                     Define qué ofrece tu empresa y qué insumos demanda para detectar contrapartes compatibles y consolidar fletes en un clic.
                   </p>
                 </div>
-                <button
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`${getApiUrl()}/api/crm/sync-odoo`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          offers: myOffersInput,
-                          demands: myDemandsInput,
-                          userEmail: auth.currentUser?.email || 'miembro@xpatagonia.online',
-                        }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
-                      setOdooSyncStatus(
-                        data.forwardedToN8n
-                          ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
-                          : 'Perfil ADN guardado en servidor y registrado en bitácora n8n.'
-                      );
-                    } catch (err: any) {
-                      setOdooSyncStatus(`No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`);
-                    }
-                    setTimeout(() => setOdooSyncStatus(null), 4000);
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap shrink-0"
-                >
-                  <Database className="w-4 h-4" />
-                  Sincronizar Perfil con Odoo (n8n)
-                </button>
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <button
+                    onClick={async () => {
+                      setIsMatchingAdn(true);
+                      try {
+                        const token = await auth.getToken();
+                        const res = await fetch(`${getApiUrl()}/api/adn/match`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                          },
+                          body: JSON.stringify({
+                            offers: myOffersInput,
+                            demands: myDemandsInput,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (res.ok && Array.isArray(data.matches) && data.matches.length > 0) {
+                          setAdnMatches(data.matches);
+                          setOdooSyncStatus('Matching vectorial pgvector + corredores OSRM actualizado desde servidor.');
+                        } else {
+                          setAdnMatches(
+                            computeAdnMatches({
+                              myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
+                              myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
+                            })
+                          );
+                        }
+                      } catch {
+                        setAdnMatches(
+                          computeAdnMatches({
+                            myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
+                            myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
+                          })
+                        );
+                      } finally {
+                        setIsMatchingAdn(false);
+                        setTimeout(() => setOdooSyncStatus(null), 4000);
+                      }
+                    }}
+                    disabled={isMatchingAdn}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    {isMatchingAdn ? 'Calculando pgvector...' : 'Calcular Match IA'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const token = await auth.getToken();
+                        const res = await fetch(`${getApiUrl()}/api/crm/sync-odoo`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                          },
+                          body: JSON.stringify({
+                            offers: myOffersInput,
+                            demands: myDemandsInput,
+                            userEmail: auth.currentUser?.email || 'miembro@xpatagonia.online',
+                          }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
+                        setOdooSyncStatus(
+                          data.forwardedToN8n
+                            ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
+                            : 'Perfil ADN guardado en servidor y registrado en bitácora n8n.'
+                        );
+                      } catch (err: any) {
+                        setOdooSyncStatus(`No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`);
+                      }
+                      setTimeout(() => setOdooSyncStatus(null), 4000);
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap"
+                  >
+                    <Database className="w-4 h-4" />
+                    Sincronizar Odoo (n8n)
+                  </button>
+                </div>
               </div>
 
               {odooSyncStatus && (
@@ -738,10 +797,7 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-3">
-              {computeAdnMatches({
-                myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
-                myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
-              }).map((match) => (
+              {adnMatches.map((match) => (
                 <div
                   key={match.company.id}
                   className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm"
@@ -784,8 +840,8 @@ export default function Dashboard() {
                       }}
                       className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
                     >
-                      <Database className="w-3.5 h-3.5" />
-                      Integrar al CRM
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Enviar a ARN IA
                     </button>
                   </div>
                 </div>

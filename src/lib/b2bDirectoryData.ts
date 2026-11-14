@@ -1,4 +1,5 @@
 import { db, auth, collection, addDoc, serverTimestamp } from './db';
+import { getApiUrl } from './apiConfig';
 import { haversineKm } from './patagoniaRouting';
 
 export type SubscriptionTier = 'corporativo' | 'pro' | 'inicial';
@@ -495,36 +496,74 @@ export async function syncCompanyToUserCRM(company: B2BCompanyRecord): Promise<{
   success: boolean;
   message: string;
 }> {
-  const user = auth.currentUser;
-  const uid = user?.uid || 'member-demo-session';
-
   try {
-    await addDoc(collection(db, 'crm_contacts'), {
-      entityType: 'company',
-      name: company.contactName,
-      company: company.name,
-      role: company.contactRole,
-      email: company.email,
-      phone: company.phone,
-      type: 'external',
-      status: 'active',
-      website: company.website,
-      cuitRut: company.cuit,
-      socialMedia: `Plan: ${company.tierLabel} • Rating: ${company.creditRating} • Corredor: ${company.adnComercial.corredorLogistico}`,
-      industry: company.category,
-      location: `${company.city}, ${company.province}`,
-      userId: uid,
-      createdAt: serverTimestamp(),
-    });
+    const token = await auth.getToken();
+    if (token) {
+      const res = await fetch(`${getApiUrl()}/api/arn/ingest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          source: 'directory_b2b',
+          companyName: company.name,
+          contactName: company.contactName,
+          contactEmail: company.email,
+          category: company.category,
+          rawText: `Vinculación B2B desde Directorio: ${company.name} (${company.city}, ${company.province}). Ofrece: ${company.adnComercial.ofrece.join(', ')}. Demanda: ${company.adnComercial.demanda.join(', ')}. Corredor: ${company.adnComercial.corredorLogistico}.`,
+          metadata: {
+            companyId: company.id,
+            cuit: company.cuit,
+            corridor: company.adnComercial.corredorLogistico,
+          },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          success: true,
+          message: data.decision?.shouldAutoExecute
+            ? `${company.name} ingresada a ARN IA y auto-ejecutada según regla.`
+            : `${company.name} enviada a la Cola Híbrida de ARN IA para revisión y seguimiento.`,
+        };
+      }
+    }
+
+    const user = auth.currentUser;
+    if (user) {
+      await addDoc(collection(db, 'crm_contacts'), {
+        entityType: 'company',
+        name: company.contactName,
+        company: company.name,
+        role: company.contactRole,
+        email: company.email,
+        phone: company.phone,
+        type: 'external',
+        status: 'active',
+        website: company.website,
+        cuitRut: company.cuit,
+        socialMedia: `Plan: ${company.tierLabel} • Corredor: ${company.adnComercial.corredorLogistico}`,
+        industry: company.category,
+        location: `${company.city}, ${company.province}`,
+        userId: user.uid,
+        createdAt: serverTimestamp(),
+      });
+      return {
+        success: true,
+        message: `${company.name} vinculada a tu red comercial.`,
+      };
+    }
+
     return {
-      success: true,
-      message: `${company.name} sincronizada en tu CRM con legajo fiscal y corredor logístico.`,
+      success: false,
+      message: 'Inicia sesión con membresía activa para enviar empresas a ARN IA.',
     };
   } catch (error) {
-    console.error('Error syncing company to CRM:', error);
+    console.error('Error syncing company to ARN IA:', error);
     return {
-      success: true,
-      message: `${company.name} vinculada a la agenda CRM de la sesión.`,
+      success: false,
+      message: 'No se pudo conectar con ARN IA en este momento.',
     };
   }
 }

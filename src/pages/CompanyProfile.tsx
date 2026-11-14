@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Building2, MapPin, Briefcase, Users, Plus, Check, Save, UserPlus, X, Tag } from 'lucide-react';
 import { MAIN_CATEGORIES, INDUSTRIAL_CATEGORIES } from '../lib/categories';
-import {  doc, getDoc, setDoc  } from '../lib/db';
-import { APIProvider, Map, AdvancedMarker, Pin, useMap } from '@vis.gl/react-google-maps';
+import { doc, getDoc, setDoc } from '../lib/db';
+import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { auth, db } from '../lib/db';
+import { getApiUrl } from '../lib/apiConfig';
 
 const API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
@@ -37,12 +38,53 @@ export default function CompanyProfile() {
   ]);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState('Gestión');
+  const [statusBanner, setStatusBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const showBanner = (type: 'ok' | 'err', text: string) => {
+    setStatusBanner({ type, text });
+    setTimeout(() => setStatusBanner(null), 5000);
+  };
 
   useEffect(() => {
     const fetchUser = async () => {
-      // Small timeout to allow auth to initialize if we just arrived
       const unsubscribe = auth.onAuthStateChanged(async (user) => {
         if (user) {
+          try {
+            const token = await auth.getToken();
+            if (token) {
+              const res = await fetch(`${getApiUrl()}/api/company/profile`, {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: 'no-store',
+              });
+              const json = await res.json();
+              if (res.ok && json.profile) {
+                const p = json.profile;
+                setFormData(prev => ({
+                  ...prev,
+                  companyName: p.company_name || '',
+                  description: p.description || '',
+                  address: p.address || '',
+                  province: p.province || 'Chubut',
+                  city: p.city || 'Comodoro Rivadavia',
+                  cuit: p.cuit || '',
+                  employeeCount: p.employee_count || '1-10',
+                  contactEmail: p.email || '',
+                  contactPhone: p.phone || '',
+                  whatsapp: p.whatsapp || '',
+                  website: p.website || '',
+                  lat: Number(p.base_lat) || -45.8641,
+                  lng: Number(p.base_lng) || -67.4965,
+                }));
+                if (Array.isArray(p.services) && p.services.length > 0) {
+                  setSelectedCategories(p.services);
+                }
+                return;
+              }
+            }
+          } catch {
+            // fallback to user doc below
+          }
+
           const docRef = doc(db, 'users', user.uid);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
@@ -63,7 +105,7 @@ export default function CompanyProfile() {
               lat: data.lat || -45.8641,
               lng: data.lng || -67.4965
             }));
-            
+
             if (data.categories) {
               setSelectedCategories(data.categories);
             } else if (data.category) {
@@ -94,11 +136,11 @@ export default function CompanyProfile() {
         },
         (error) => {
           console.error("Error obteniendo ubicación:", error);
-          alert("No se pudo obtener la ubicación.");
+          showBanner('err', 'No se pudo obtener la ubicación actual.');
         }
       );
     } else {
-      alert("La geolocalización no es soportada por este navegador.");
+      showBanner('err', 'La geolocalización no es soportada por este navegador.');
     }
   };
 
@@ -160,25 +202,43 @@ export default function CompanyProfile() {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-
     e.preventDefault();
     if (!auth.currentUser) {
-      alert('Debes iniciar sesión para guardar.');
+      showBanner('err', 'Debes iniciar sesión para guardar el perfil.');
       return;
     }
 
     if (formData.cuit && !isValidCuit(formData.cuit)) {
-      alert('El CUIT ingresado no es válido. Por favor verifica los datos.');
+      showBanner('err', 'El CUIT ingresado no supera la validación de dígito verificador.');
       return;
     }
-    
+
     setIsSaving(true);
     try {
+      const token = await auth.getToken();
+      if (token) {
+        const res = await fetch(`${getApiUrl()}/api/company/profile`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            ...formData,
+            categories: selectedCategories,
+            industry: selectedCategories[0] || 'Servicios Industriales',
+            adnOfrece: selectedCategories,
+            adnDemanda: Object.values(selectedSubcategories).flat(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Error guardando en Postgres');
+      }
+
       const userRef = doc(db, 'users', auth.currentUser.uid);
       await setDoc(userRef, {
         email: auth.currentUser.email || '',
         updatedAt: new Date().toISOString(),
-        
         companyName: formData.companyName || '',
         description: formData.description || '',
         address: formData.address || '',
@@ -197,10 +257,10 @@ export default function CompanyProfile() {
         subcategories: selectedSubcategories || {},
         category: selectedCategories.length > 0 ? selectedCategories[0] : ''
       }, { merge: true });
-      alert('Perfil de empresa actualizado exitosamente.');
+      showBanner('ok', 'Perfil corporativo y vector ADN guardados en producción.');
     } catch (error) {
       console.error(error);
-      alert('Error al guardar el perfil: ' + (error instanceof Error ? error.message : String(error)));
+      showBanner('err', 'Error al guardar el perfil: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsSaving(false);
     }
@@ -212,8 +272,19 @@ export default function CompanyProfile() {
         <div className="mb-8">
           <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Perfil de Empresa</h1>
           <p className="text-slate-600 dark:text-slate-400">
-            Completa la información de tu organización para mejorar la visibilidad en la Patagonia y añadir a tu equipo.
+            Completa la información de tu organización para mejorar la visibilidad en la Patagonia y alimentar el motor vectorial ADN.
           </p>
+          {statusBanner && (
+            <div
+              className={`mt-4 px-4 py-3 rounded-xl border text-xs font-semibold ${
+                statusBanner.type === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+              }`}
+            >
+              {statusBanner.text}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
