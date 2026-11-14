@@ -1,16 +1,38 @@
-const env = ((import.meta as any)?.env ?? {}) as Record<string, string | undefined>;
+declare const __XPATAGONIA_API_URL__: string | undefined;
+
+function readDefineApiUrl(): string {
+  try {
+    if (typeof __XPATAGONIA_API_URL__ !== 'undefined' && __XPATAGONIA_API_URL__) {
+      return __XPATAGONIA_API_URL__;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    return (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
+  } catch {
+    return '';
+  }
+}
 
 export const getApiUrl = (): string => {
-  const raw = env.VITE_API_URL || env.VITE_API_BASE_URL || '';
-  return raw.replace(/\/+$/, '');
+  return readDefineApiUrl().replace(/\/+$/, '');
 };
 
 export const getOsrmUrl = (): string => {
-  const envUrl = env.VITE_OSRM_URL || '';
-  return envUrl ? envUrl.replace(/\/+$/, '') : 'https://router.project-osrm.org';
+  try {
+    const envUrl = (import.meta.env.VITE_OSRM_URL || '').trim();
+    return envUrl ? envUrl.replace(/\/+$/, '') : 'https://router.project-osrm.org';
+  } catch {
+    return 'https://router.project-osrm.org';
+  }
 };
 
 export const getN8nWebhookUrl = (): string => {
-  const envUrl = env.VITE_N8N_WEBHOOK_URL || '';
-  return envUrl ? envUrl.replace(/\/+$/, '') : '';
+  try {
+    const envUrl = (import.meta.env.VITE_N8N_WEBHOOK_URL || '').trim();
+    return envUrl ? envUrl.replace(/\/+$/, '') : '';
+  } catch {
+    return '';
+  }
 };

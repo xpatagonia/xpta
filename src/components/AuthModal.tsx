@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  supabase,
+  getIsSupabaseConfigured,
+  ensureSupabaseConfigured,
+  SUPABASE_READY_EVENT,
+} from '../lib/supabase';
 import { X, Mail, Lock, Loader2, Building2, Briefcase, Zap, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
@@ -45,10 +50,21 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [supabaseReady, setSupabaseReady] = useState(() => getIsSupabaseConfigured());
 
   useEffect(() => {
     setMounted(true);
-    return () => setMounted(false);
+    if (!getIsSupabaseConfigured()) {
+      ensureSupabaseConfigured().then((ok) => {
+        if (ok) setSupabaseReady(true);
+      });
+    }
+    const onReady = () => setSupabaseReady(true);
+    window.addEventListener(SUPABASE_READY_EVENT, onReady);
+    return () => {
+      setMounted(false);
+      window.removeEventListener(SUPABASE_READY_EVENT, onReady);
+    };
   }, []);
 
   useEffect(() => {
@@ -91,6 +107,11 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
     setLoading(true);
     setError(null);
     setSuccess(null);
+
+    if (!getIsSupabaseConfigured()) {
+      const ok = await ensureSupabaseConfigured();
+      setSupabaseReady(ok);
+    }
 
     try {
       if (mode === 'update_password') {
@@ -243,11 +264,11 @@ export default function AuthModal({ isOpen, onClose, initialMode }: AuthModalPro
                 </p>
               </div>
 
-              {!isSupabaseConfigured && (
+              {!supabaseReady && (
                 <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-medium flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 shrink-0 text-amber-500" />
                   <p>
-                    <strong>Falta configurar Supabase en este entorno:</strong> cargá <code className="font-mono">VITE_SUPABASE_URL</code> y <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> en Vercel/Cloudflare y redeployá para habilitar el envío de mails de recuperación.
+                    <strong>Falta configurar Supabase en este entorno:</strong> cargá <code className="font-mono">SUPABASE_URL</code> y <code className="font-mono">SUPABASE_ANON_KEY</code> (o con prefijo <code className="font-mono">VITE_</code>) en Vercel y redeployá para habilitar autenticación y recuperación de clave.
                   </p>
                 </div>
               )}

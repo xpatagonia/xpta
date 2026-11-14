@@ -1,12 +1,50 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getApiUrl } from './apiConfig';
 
-const metaEnv = ((import.meta as any)?.env ?? {}) as Record<string, string | undefined>;
-const rawUrl = (metaEnv.VITE_SUPABASE_URL || '').trim();
-const rawKey = (metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
+declare const __XPATAGONIA_SUPABASE_URL__: string | undefined;
+declare const __XPATAGONIA_SUPABASE_ANON_KEY__: string | undefined;
 
-function isValidHttpUrl(url: string): boolean {
+function readBuildSupabaseUrl(): string {
   try {
-    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+    if (typeof __XPATAGONIA_SUPABASE_URL__ !== 'undefined' && __XPATAGONIA_SUPABASE_URL__) {
+      return __XPATAGONIA_SUPABASE_URL__.trim();
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    return (import.meta.env.VITE_SUPABASE_URL || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function readBuildSupabaseAnonKey(): string {
+  try {
+    if (
+      typeof __XPATAGONIA_SUPABASE_ANON_KEY__ !== 'undefined' &&
+      __XPATAGONIA_SUPABASE_ANON_KEY__
+    ) {
+      return __XPATAGONIA_SUPABASE_ANON_KEY__.trim();
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    return (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function isValidSupabaseConfig(url: string, key: string): boolean {
+  try {
+    if (
+      url &&
+      (url.startsWith('http://') || url.startsWith('https://')) &&
+      key.length > 20 &&
+      !key.includes('placeholder')
+    ) {
       new URL(url);
       return true;
     }
@@ -15,11 +53,6 @@ function isValidHttpUrl(url: string): boolean {
   }
   return false;
 }
-
-export const isSupabaseConfigured: boolean =
-  isValidHttpUrl(rawUrl) &&
-  rawKey.length > 20 &&
-  !rawKey.includes('placeholder');
 
 function createResilientFallbackClient(): SupabaseClient {
   const emptyListResult = { data: [] as any[], error: null };
@@ -53,21 +86,33 @@ function createResilientFallbackClient(): SupabaseClient {
       getSession: async () => ({ data: { session: null }, error: null }),
       getUser: async () => ({ data: { user: null }, error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-      signInWithPassword: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
-      signUp: async () => ({ data: { user: null, session: null }, error: new Error('Supabase no configurado en este entorno') }),
+      signInWithPassword: async () => ({
+        data: { user: null, session: null },
+        error: new Error('Supabase no configurado en este entorno'),
+      }),
+      signUp: async () => ({
+        data: { user: null, session: null },
+        error: new Error('Supabase no configurado en este entorno'),
+      }),
       signOut: async () => ({ error: null }),
       resetPasswordForEmail: async () => ({
         data: null,
-        error: new Error('Supabase Auth no está configurado en este entorno (faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).'),
+        error: new Error(
+          'Supabase Auth no está configurado en este entorno (faltan SUPABASE_URL/VITE_SUPABASE_URL y SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY).'
+        ),
       }),
       signInWithOtp: async () => ({
         data: null,
-        error: new Error('Supabase Auth no está configurado en este entorno (faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).'),
+        error: new Error(
+          'Supabase Auth no está configurado en este entorno (faltan SUPABASE_URL/VITE_SUPABASE_URL y SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY).'
+        ),
       }),
       updateUser: async () => ({
         data: { user: null },
         error: new Error('Supabase Auth no está configurado en este entorno.'),
       }),
+      setSession: async () => ({ data: { user: null, session: null }, error: null }),
+      exchangeCodeForSession: async () => ({ data: { user: null, session: null }, error: null }),
     },
     from: () => ({
       select: () => createQueryBuilder(false),
@@ -79,22 +124,83 @@ function createResilientFallbackClient(): SupabaseClient {
   } as unknown as SupabaseClient;
 }
 
-function initSupabase(): SupabaseClient {
-  if (!isSupabaseConfigured) {
-    return createResilientFallbackClient();
-  }
-
+function buildClient(url: string, key: string): SupabaseClient | null {
+  if (!isValidSupabaseConfig(url, key)) return null;
   try {
-    return createClient(rawUrl, rawKey, {
+    return createClient(url, key, {
       auth: {
         persistSession: typeof window !== 'undefined',
         autoRefreshToken: typeof window !== 'undefined',
-      }
+      },
     });
   } catch (err) {
-    console.warn('[XPATAGONIA] Could not initialize standard Supabase client, using resilient fallback client:', err);
-    return createResilientFallbackClient();
+    console.warn('[XPATAGONIA] Could not initialize standard Supabase client:', err);
+    return null;
   }
 }
 
-export const supabase = initSupabase();
+const initialUrl = readBuildSupabaseUrl();
+const initialKey = readBuildSupabaseAnonKey();
+
+export let isSupabaseConfigured: boolean = isValidSupabaseConfig(initialUrl, initialKey);
+let activeClient: SupabaseClient =
+  buildClient(initialUrl, initialKey) || createResilientFallbackClient();
+
+export const SUPABASE_READY_EVENT = 'xpatagonia:supabase-ready';
+
+export function getIsSupabaseConfigured(): boolean {
+  return isSupabaseConfigured;
+}
+
+let runtimeBootstrapPromise: Promise<boolean> | null = null;
+
+/**
+ * If Vercel has SUPABASE_URL / SUPABASE_ANON_KEY defined in runtime serverless env
+ * without VITE_ prefix or build-time injection, hydrate them dynamically via /api/public-config.
+ */
+export async function ensureSupabaseConfigured(): Promise<boolean> {
+  if (isSupabaseConfigured) return true;
+  if (typeof window === 'undefined') return false;
+  if (runtimeBootstrapPromise) return runtimeBootstrapPromise;
+
+  runtimeBootstrapPromise = (async () => {
+    try {
+      const res = await fetch(`${getApiUrl()}/api/public-config`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return false;
+      const cfg = await res.json().catch(() => null);
+      const runtimeUrl = String(cfg?.supabaseUrl || '').trim();
+      const runtimeKey = String(cfg?.supabaseAnonKey || '').trim();
+      const nextClient = buildClient(runtimeUrl, runtimeKey);
+      if (nextClient) {
+        activeClient = nextClient;
+        isSupabaseConfigured = true;
+        window.dispatchEvent(new CustomEvent(SUPABASE_READY_EVENT, { detail: true }));
+        return true;
+      }
+    } catch {
+      // ignore network timeout
+    } finally {
+      if (!isSupabaseConfigured) {
+        runtimeBootstrapPromise = null;
+      }
+    }
+    return false;
+  })();
+
+  return runtimeBootstrapPromise;
+}
+
+// Kick off runtime config hydration automatically in browser if build-time vars were empty
+if (typeof window !== 'undefined' && !isSupabaseConfigured) {
+  void ensureSupabaseConfigured();
+}
+
+export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    const value = (activeClient as any)[prop];
+    return typeof value === 'function' ? value.bind(activeClient) : value;
+  },
+});

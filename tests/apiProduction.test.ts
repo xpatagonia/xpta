@@ -43,6 +43,20 @@ test('GET /api/health exposes production runtime and integration diagnostics', a
   assert.ok(['active', 'local_queue'].includes(body.n8nMode));
 });
 
+test('GET /api/public-config exposes public Supabase runtime config with no-store headers without leaking secrets', async () => {
+  const res = await fetch(`${baseUrl}/api/public-config`);
+  assert.equal(res.status, 200);
+  assert.equal(
+    res.headers.get('cache-control'),
+    'no-store, no-cache, must-revalidate, max-age=0'
+  );
+  const body = await res.json();
+  assert.equal(typeof body.supabaseUrl, 'string');
+  assert.equal(typeof body.supabaseAnonKey, 'string');
+  assert.equal('serviceRoleKey' in body, false);
+  assert.equal('databaseUrl' in body, false);
+});
+
 test('GET /api/site-settings enforces strict no-store cache headers for cross-device sync', async () => {
   const res = await fetch(`${baseUrl}/api/site-settings`);
   assert.equal(res.status, 200);

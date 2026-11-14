@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, getIsSupabaseConfigured, ensureSupabaseConfigured } from './supabase';
 
 export const db = { type: 'firestore_mock' };
 export const auth = {
@@ -139,7 +139,10 @@ export const getDocs = async (qOrColl) => {
   const isQuery = qOrColl.type === 'query';
   const path = mapTableName(isQuery ? qOrColl.coll.path : qOrColl.path);
 
-  if (!isSupabaseConfigured) {
+  if (!getIsSupabaseConfigured()) {
+    await ensureSupabaseConfigured();
+  }
+  if (!getIsSupabaseConfigured()) {
     return {
       forEach: () => {},
       docs: [],
@@ -182,7 +185,10 @@ export const getDocs = async (qOrColl) => {
 };
 
 export const getDoc = async (docRef) => {
-  if (!isSupabaseConfigured) {
+  if (!getIsSupabaseConfigured()) {
+    await ensureSupabaseConfigured();
+  }
+  if (!getIsSupabaseConfigured()) {
     return { exists: () => false, data: () => null, id: docRef.id };
   }
 

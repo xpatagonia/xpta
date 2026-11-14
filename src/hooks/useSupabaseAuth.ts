@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, ensureSupabaseConfigured } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 
 export function useSupabaseAuth() {
@@ -7,18 +7,35 @@ export function useSupabaseAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active sessions and sets the user
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    let active = true;
+    let subscription: { unsubscribe: () => void } | null = null;
 
-    // Listen for changes on auth state (logged in, signed out, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    const initAuth = async () => {
+      await ensureSupabaseConfigured();
+      if (!active) return;
 
-    return () => subscription.unsubscribe();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (active) {
+        setUser(session?.user ?? null);
+        setLoading(false);
+      }
+
+      const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        if (active) {
+          setUser(nextSession?.user ?? null);
+        }
+      });
+      subscription = data.subscription;
+    };
+
+    void initAuth();
+
+    return () => {
+      active = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   return { user, loading };

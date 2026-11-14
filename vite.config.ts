@@ -31,6 +31,8 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_API_URL ||
     env.VITE_API_BASE_URL ||
     process.env.VITE_API_BASE_URL ||
+    env.API_BASE_URL ||
+    process.env.API_BASE_URL ||
     ''
   ).trim();
 
@@ -57,6 +59,9 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiUrl),
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
+      __XPATAGONIA_API_URL__: JSON.stringify(apiUrl),
+      __XPATAGONIA_SUPABASE_URL__: JSON.stringify(supabaseUrl),
+      __XPATAGONIA_SUPABASE_ANON_KEY__: JSON.stringify(supabaseAnonKey),
     },
   };
 });
