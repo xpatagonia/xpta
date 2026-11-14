@@ -246,3 +246,99 @@ CREATE POLICY "arn_actions_queue_owner_policy"
   ON public.arn_actions_queue FOR ALL
   USING (auth.uid()::text = owner_uid)
   WITH CHECK (auth.uid()::text = owner_uid);
+
+-- 11. Organizaciones PyME Multi-Usuario (2 Gratis / 5 Pro / 10 Corporativo) y Membresía Logística Aparte
+CREATE TABLE IF NOT EXISTS public.organizations (
+  id serial PRIMARY KEY,
+  owner_uid text NOT NULL UNIQUE,
+  name text NOT NULL,
+  plan_slug text NOT NULL DEFAULT 'gratis',
+  seat_limit integer NOT NULL DEFAULT 2,
+  logistics_plan_active boolean NOT NULL DEFAULT false,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.org_members (
+  id serial PRIMARY KEY,
+  organization_id integer NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_uid text NOT NULL UNIQUE,
+  email text NOT NULL,
+  full_name text,
+  org_role text NOT NULL DEFAULT 'comercial',
+  status text NOT NULL DEFAULT 'active',
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.org_invitations (
+  id serial PRIMARY KEY,
+  organization_id integer NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  org_role text NOT NULL DEFAULT 'comercial',
+  invited_by_uid text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE IF EXISTS public.contacts
+  ADD COLUMN IF NOT EXISTS organization_id integer,
+  ADD COLUMN IF NOT EXISTS arn_opportunity_id integer,
+  ADD COLUMN IF NOT EXISTS ai_score integer DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS lead_stage text DEFAULT 'nuevo',
+  ADD COLUMN IF NOT EXISTS last_arn_sync_at timestamptz,
+  ADD COLUMN IF NOT EXISTS odoo_synced boolean DEFAULT false;
+
+ALTER TABLE IF EXISTS public.arn_opportunities
+  ADD COLUMN IF NOT EXISTS organization_id integer,
+  ADD COLUMN IF NOT EXISTS contact_id integer;
+
+ALTER TABLE IF EXISTS public.arn_actions_queue
+  ADD COLUMN IF NOT EXISTS organization_id integer;
+
+-- 12. Gestión y Control de Flota + Contratos de Transporte (Membresía Logística)
+CREATE TABLE IF NOT EXISTS public.fleet_vehicles (
+  id serial PRIMARY KEY,
+  organization_id integer NOT NULL,
+  owner_uid text NOT NULL,
+  name text NOT NULL,
+  plate text NOT NULL,
+  vehicle_type text DEFAULT 'Semirremolque 28t',
+  capacity_tons integer DEFAULT 28,
+  corridor text DEFAULT 'RN 3 / Patagónica',
+  vtv_expiry text,
+  insurance_expiry text,
+  status text DEFAULT 'disponible',
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.fleet_drivers (
+  id serial PRIMARY KEY,
+  organization_id integer NOT NULL,
+  owner_uid text NOT NULL,
+  full_name text NOT NULL,
+  dni text,
+  linti_license text,
+  phone text,
+  assigned_vehicle_id integer,
+  status text DEFAULT 'activo',
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.logistics_contracts (
+  id serial PRIMARY KEY,
+  organization_id integer NOT NULL,
+  owner_uid text NOT NULL,
+  load_id text NOT NULL,
+  origin_name text NOT NULL,
+  destination_name text NOT NULL,
+  carrier_name text NOT NULL,
+  vehicle_id integer,
+  driver_id integer,
+  agreed_price_ars integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'ofertado',
+  tracking_code text,
+  notes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+

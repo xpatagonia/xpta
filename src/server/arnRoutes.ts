@@ -21,6 +21,11 @@ import {
   sortCompaniesBySubscriptionTier,
 } from "../lib/b2bDirectoryData.ts";
 import { haversineKm } from "../lib/patagoniaRouting.ts";
+import {
+  resolveTenantContext,
+  upsertLinkedContactFromArn,
+  registerSaasAndFleetRoutes,
+} from "./saasAndFleetRoutes.ts";
 
 export function validateArgentineCuit(cuit: string): boolean {
   const clean = String(cuit || "").replace(/\D/g, "");
@@ -72,10 +77,15 @@ async function resolveOptionalMember(req: any): Promise<{
   }
 }
 
-export async function getUserArnRule(uid: string): Promise<ArnPolicyRule> {
+export async function getUserArnRule(uid: string, organizationId?: number | null): Promise<ArnPolicyRule> {
   if (!hasDatabaseConfig()) return { ...DEFAULT_ARN_POLICY };
   await ensureProductionTables();
-  const res = await pool.query(`SELECT * FROM public.arn_rules WHERE user_uid = $1`, [uid]);
+  const res = organizationId
+    ? await pool.query(
+        `SELECT * FROM public.arn_rules WHERE organization_id = $1 OR user_uid = $2 ORDER BY (organization_id = $1) DESC LIMIT 1`,
+        [organizationId, uid]
+      )
+    : await pool.query(`SELECT * FROM public.arn_rules WHERE user_uid = $1`, [uid]);
   const row = res.rows?.[0];
   if (!row) return { ...DEFAULT_ARN_POLICY };
   return {
@@ -154,6 +164,8 @@ export async function executeArnAction(actionRow: any): Promise<{ executed: bool
 
 export async function runArnPipelineForEvent(params: {
   ownerUid: string;
+  organizationId?: number | null;
+  contactId?: number | null;
   source: string;
   companyName?: string;
   contactName?: string;
@@ -162,7 +174,13 @@ export async function runArnPipelineForEvent(params: {
   rawText: string;
   metadata?: Record<string, any>;
 }) {
-  const rule = await getUserArnRule(params.ownerUid);
+  let orgId = params.organizationId ?? null;
+  if (!orgId && hasDatabaseConfig()) {
+    const tenant = await resolveTenantContext(params.ownerUid).catch(() => null);
+    orgId = tenant?.organizationId ?? null;
+  }
+
+  const rule = await getUserArnRule(params.ownerUid, orgId);
 
   let catalogSummary = "";
   if (hasDatabaseConfig()) {
@@ -196,27 +214,30 @@ export async function runArnPipelineForEvent(params: {
   );
 
   if (!hasDatabaseConfig()) {
-    return { opportunity: null, action: null, analysis, decision };
+    return { opportunity: null, action: null, analysis, decision, linkedContactId: null };
   }
 
   await ensureProductionTables();
 
+  const initialStage = decision.shouldAutoExecute ? "quoted" : "qualified";
   const oppRes = await pool.query(
     `INSERT INTO public.arn_opportunities (
-      owner_uid, company_name, contact_name, contact_email, cuit, category, corridor,
+      owner_uid, organization_id, contact_id, company_name, contact_name, contact_email, cuit, category, corridor,
       source, stage, ai_score, estimated_amount_usd, urgency, summary, recommended_action, raw_context
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
     RETURNING *`,
     [
       params.ownerUid,
+      orgId,
+      params.contactId || null,
       analysis.companyName,
       analysis.contactName,
       analysis.contactEmail || null,
-      analysis.cuit || null,
+      analysis.cuit || params.metadata?.cuit || null,
       analysis.category,
       analysis.corridor,
       params.source,
-      decision.shouldAutoExecute ? "quoted" : "qualified",
+      initialStage,
       analysis.aiScore,
       analysis.estimatedAmountUsd,
       analysis.urgency,
@@ -227,19 +248,36 @@ export async function runArnPipelineForEvent(params: {
   );
 
   const opp = oppRes.rows[0];
+  const linkedContactId = await upsertLinkedContactFromArn({
+    ownerUid: params.ownerUid,
+    organizationId: orgId,
+    contactId: params.contactId,
+    opportunityId: Number(opp.id),
+    companyName: analysis.companyName,
+    contactName: analysis.contactName,
+    contactEmail: analysis.contactEmail,
+    cuit: analysis.cuit || params.metadata?.cuit,
+    category: analysis.category,
+    corridor: analysis.corridor,
+    aiScore: analysis.aiScore,
+    stage: initialStage,
+    source: params.source,
+  }).catch(() => null);
+
   let status = decision.shouldAutoExecute ? "approved" : "pending_approval";
   let executedAt: Date | null = null;
   let execNote = decision.reason;
 
   const actRes = await pool.query(
     `INSERT INTO public.arn_actions_queue (
-      owner_uid, opportunity_id, action_type, title, target_email,
+      owner_uid, organization_id, opportunity_id, action_type, title, target_email,
       draft_subject, draft_body, estimated_amount_usd, confidence_score,
       execution_mode, status, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
     RETURNING *`,
     [
       params.ownerUid,
+      orgId,
       opp.id,
       analysis.actionType,
       analysis.actionTitle,
@@ -278,7 +316,7 @@ export async function runArnPipelineForEvent(params: {
     }
   }
 
-  return { opportunity: opp, action, analysis, decision };
+  return { opportunity: opp, action, analysis, decision, linkedContactId };
 }
 
 export function registerArnAndModuleRoutes(
@@ -305,15 +343,26 @@ export function registerArnAndModuleRoutes(
         });
       }
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      );
+      const orgId = tenant?.organizationId || null;
       const [rules, oppRes, actRes] = await Promise.all([
-        getUserArnRule(uid),
+        getUserArnRule(uid, orgId),
         pool.query(
-          `SELECT * FROM public.arn_opportunities WHERE owner_uid = $1 ORDER BY updated_at DESC LIMIT 60`,
-          [uid]
+          `SELECT * FROM public.arn_opportunities
+           WHERE ($1::int IS NOT NULL AND organization_id = $1) OR owner_uid = $2
+           ORDER BY updated_at DESC LIMIT 60`,
+          [orgId, uid]
         ),
         pool.query(
-          `SELECT * FROM public.arn_actions_queue WHERE owner_uid = $1 ORDER BY created_at DESC LIMIT 60`,
-          [uid]
+          `SELECT * FROM public.arn_actions_queue
+           WHERE ($1::int IS NOT NULL AND organization_id = $1) OR owner_uid = $2
+           ORDER BY created_at DESC LIMIT 60`,
+          [orgId, uid]
         ),
       ]);
 
@@ -331,6 +380,7 @@ export function registerArnAndModuleRoutes(
         rules,
         opportunities,
         actions,
+        organization: tenant,
         metrics: {
           totalOpportunities: opportunities.length,
           pendingApprovals,
@@ -358,13 +408,20 @@ export function registerArnAndModuleRoutes(
         return res.status(500).json({ error: "Base de datos no configurada" });
       }
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      );
 
       await pool.query(
         `INSERT INTO public.arn_rules (
-          user_uid, mode, auto_approve_max_usd, min_confidence_score,
+          user_uid, organization_id, mode, auto_approve_max_usd, min_confidence_score,
           auto_send_emails, auto_create_logistics, auto_reserve_inventory, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
         ON CONFLICT (user_uid) DO UPDATE SET
+          organization_id = COALESCE(EXCLUDED.organization_id, public.arn_rules.organization_id),
           mode = EXCLUDED.mode,
           auto_approve_max_usd = EXCLUDED.auto_approve_max_usd,
           min_confidence_score = EXCLUDED.min_confidence_score,
@@ -374,6 +431,7 @@ export function registerArnAndModuleRoutes(
           updated_at = now()`,
         [
           uid,
+          tenant?.organizationId || null,
           mode,
           autoApproveMaxUsd,
           minConfidenceScore,
@@ -471,10 +529,17 @@ export function registerArnAndModuleRoutes(
       await ensureProductionTables();
       const actionId = Number(req.params.id);
       const { draftSubject, draftBody } = req.body || {};
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      );
+      const orgId = tenant?.organizationId || null;
 
       const existing = await pool.query(
-        `SELECT * FROM public.arn_actions_queue WHERE id = $1 AND owner_uid = $2`,
-        [actionId, req.user!.uid]
+        `SELECT * FROM public.arn_actions_queue WHERE id = $1 AND (($2::int IS NOT NULL AND organization_id = $2) OR owner_uid = $3)`,
+        [actionId, orgId, req.user!.uid]
       );
       const row = existing.rows?.[0];
       if (!row) return res.status(404).json({ error: "Acción no encontrada" });
@@ -495,7 +560,7 @@ export function registerArnAndModuleRoutes(
              draft_body = $3,
              executed_at = now(),
              metadata = metadata || $4::jsonb
-         WHERE id = $5 AND owner_uid = $6
+         WHERE id = $5 AND (($6::int IS NOT NULL AND organization_id = $6) OR owner_uid = $7)
          RETURNING *`,
         [
           nextStatus,
@@ -503,15 +568,20 @@ export function registerArnAndModuleRoutes(
           updatedRow.draft_body,
           JSON.stringify({ executionNote: execResult.note }),
           actionId,
+          orgId,
           req.user!.uid,
         ]
       );
 
       if (row.opportunity_id && execResult.executed) {
         await pool.query(
-          `UPDATE public.arn_opportunities SET stage = 'quoted', updated_at = now() WHERE id = $1 AND owner_uid = $2`,
-          [row.opportunity_id, req.user!.uid]
+          `UPDATE public.arn_opportunities SET stage = 'quoted', updated_at = now() WHERE id = $1`,
+          [row.opportunity_id]
         );
+        await pool.query(
+          `UPDATE public.contacts SET lead_stage = 'quoted', last_arn_sync_at = now() WHERE arn_opportunity_id = $1`,
+          [row.opportunity_id]
+        ).catch(() => {});
       }
 
       await recordAutomationEvent("outbound_n8n", "arn.action.approved", nextStatus, {
@@ -531,9 +601,15 @@ export function registerArnAndModuleRoutes(
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
       await ensureProductionTables();
       const actionId = Number(req.params.id);
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      );
       await pool.query(
-        `UPDATE public.arn_actions_queue SET status = 'dismissed' WHERE id = $1 AND owner_uid = $2`,
-        [actionId, req.user!.uid]
+        `UPDATE public.arn_actions_queue SET status = 'dismissed' WHERE id = $1 AND (($2::int IS NOT NULL AND organization_id = $2) OR owner_uid = $3)`,
+        [actionId, tenant?.organizationId || null, req.user!.uid]
       );
       res.json({ success: true });
     } catch (err: any) {
@@ -551,10 +627,22 @@ export function registerArnAndModuleRoutes(
       if (!allowed.includes(stage)) {
         return res.status(400).json({ error: "Etapa inválida" });
       }
-      const upd = await pool.query(
-        `UPDATE public.arn_opportunities SET stage = $1, updated_at = now() WHERE id = $2 AND owner_uid = $3 RETURNING *`,
-        [stage, id, req.user!.uid]
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
       );
+      const upd = await pool.query(
+        `UPDATE public.arn_opportunities SET stage = $1, updated_at = now() WHERE id = $2 AND (($3::int IS NOT NULL AND organization_id = $3) OR owner_uid = $4) RETURNING *`,
+        [stage, id, tenant?.organizationId || null, req.user!.uid]
+      );
+      if (upd.rows?.[0]) {
+        await pool.query(
+          `UPDATE public.contacts SET lead_stage = $1, last_arn_sync_at = now() WHERE arn_opportunity_id = $2`,
+          [stage, id]
+        ).catch(() => {});
+      }
       res.json({ success: true, opportunity: upd.rows?.[0] || null });
     } catch (err: any) {
       res.status(500).json({ error: formatPgError(err) });
@@ -1108,4 +1196,10 @@ export function registerArnAndModuleRoutes(
       res.status(500).json({ error: formatPgError(err) });
     }
   });
+
+  registerSaasAndFleetRoutes(app, {
+    runArnPipelineForEvent,
+    recordAutomationEvent,
+  });
 }
+

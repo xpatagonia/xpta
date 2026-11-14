@@ -133,6 +133,134 @@ export async function ensureProductionTables(): Promise<void> {
         status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'bidding', 'assigned', 'completed')),
         created_at timestamptz DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS public.organizations (
+        id serial PRIMARY KEY,
+        owner_uid text NOT NULL UNIQUE,
+        name text NOT NULL,
+        plan_slug text NOT NULL DEFAULT 'gratis',
+        seat_limit integer NOT NULL DEFAULT 2,
+        logistics_plan_active boolean NOT NULL DEFAULT false,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.org_members (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        user_uid text NOT NULL,
+        email text NOT NULL,
+        org_role text NOT NULL DEFAULT 'comercial',
+        status text NOT NULL DEFAULT 'active',
+        joined_at timestamptz DEFAULT now(),
+        UNIQUE (organization_id, user_uid)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.org_invitations (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        email text NOT NULL,
+        org_role text NOT NULL DEFAULT 'comercial',
+        invited_by_uid text NOT NULL,
+        token text NOT NULL,
+        status text NOT NULL DEFAULT 'pending',
+        expires_at timestamptz,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.contacts (
+        id serial PRIMARY KEY,
+        user_uid text,
+        organization_id integer,
+        entity_type text DEFAULT 'contact',
+        name text NOT NULL,
+        company text,
+        role text,
+        email text,
+        phone text,
+        type text,
+        status text,
+        website text,
+        cuit_rut text,
+        social_media text,
+        industry text,
+        location text,
+        arn_opportunity_id integer,
+        ai_score integer DEFAULT 0,
+        lead_stage text DEFAULT 'nuevo',
+        last_arn_sync_at timestamptz,
+        odoo_synced boolean DEFAULT false,
+        created_at timestamptz DEFAULT now()
+      );
+
+      ALTER TABLE IF EXISTS public.contacts
+        ADD COLUMN IF NOT EXISTS organization_id integer,
+        ADD COLUMN IF NOT EXISTS arn_opportunity_id integer,
+        ADD COLUMN IF NOT EXISTS ai_score integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS lead_stage text DEFAULT 'nuevo',
+        ADD COLUMN IF NOT EXISTS last_arn_sync_at timestamptz,
+        ADD COLUMN IF NOT EXISTS odoo_synced boolean DEFAULT false;
+
+      ALTER TABLE IF EXISTS public.arn_rules
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.arn_opportunities
+        ADD COLUMN IF NOT EXISTS organization_id integer,
+        ADD COLUMN IF NOT EXISTS contact_id integer;
+
+      ALTER TABLE IF EXISTS public.arn_actions_queue
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.inventory_items
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      CREATE TABLE IF NOT EXISTS public.fleet_vehicles (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        owner_uid text NOT NULL,
+        name text NOT NULL,
+        plate text NOT NULL,
+        vehicle_type text NOT NULL DEFAULT 'Semirremolque 28t',
+        capacity_tons integer NOT NULL DEFAULT 28,
+        corridor text DEFAULT 'RN 3 / Patagónica',
+        vtv_expiry text,
+        insurance_expiry text,
+        status text NOT NULL DEFAULT 'disponible',
+        gps_label text,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.fleet_drivers (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        owner_uid text NOT NULL,
+        full_name text NOT NULL,
+        dni text,
+        linti_license text,
+        phone text,
+        assigned_vehicle_id integer,
+        status text NOT NULL DEFAULT 'disponible',
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.logistics_contracts (
+        id serial PRIMARY KEY,
+        load_id text NOT NULL,
+        origin_name text NOT NULL,
+        destination_name text NOT NULL,
+        shipper_org_id integer,
+        shipper_uid text,
+        carrier_org_id integer NOT NULL,
+        carrier_uid text NOT NULL,
+        carrier_name text NOT NULL,
+        vehicle_id integer,
+        driver_id integer,
+        agreed_price_ars integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT 'ofertado',
+        tracking_code text,
+        notes text,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
     `);
     arnTablesEnsured = true;
   } catch (err) {

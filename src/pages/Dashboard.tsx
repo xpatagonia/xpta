@@ -1,13 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth, doc, getDoc, collection, onSnapshot } from '../lib/db';
-import { Plus, FileText, Clock, CheckCircle, ChevronRight, LayoutDashboard, Send, Activity, Tag, Users, Package, Inbox, Box, AlertTriangle, PackageCheck, Truck, Shield, Route, Sparkles, Database } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import {
+  Plus,
+  FileText,
+  Clock,
+  CheckCircle,
+  ChevronRight,
+  LayoutDashboard,
+  Send,
+  Users,
+  Package,
+  Truck,
+  Shield,
+  Route,
+  Sparkles,
+  Database,
+  Menu,
+  X,
+  Building2,
+  Warehouse,
+  ShoppingBag,
+  MessageSquare,
+  ExternalLink,
+  Mail,
+} from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+} from 'recharts';
 import CompanyProducts from '../components/CompanyProducts';
 import CompanyInbox from '../components/CompanyInbox';
 import RfqNegotiationModal from '../components/RfqNegotiationModal';
+import FleetControlCenter from '../components/FleetControlCenter';
+import TeamSeatsManager, { OrganizationInfo } from '../components/TeamSeatsManager';
 import { getApiUrl } from '../lib/apiConfig';
 import { computeAdnMatches, syncCompanyToUserCRM } from '../lib/b2bDirectoryData';
 
@@ -21,10 +54,47 @@ interface RFQ {
   createdAt: string;
 }
 
+type OperativeView =
+  | 'overview'
+  | 'arn_crm'
+  | 'rfqs'
+  | 'adn'
+  | 'products'
+  | 'fleet'
+  | 'team';
+
+const VALID_VIEWS: OperativeView[] = [
+  'overview',
+  'arn_crm',
+  'rfqs',
+  'adn',
+  'products',
+  'fleet',
+  'team',
+];
+
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'rfqs'|'products'|'received_rfqs'|'adn'>('rfqs');
-  const [myOffersInput, setMyOffersInput] = useState('Mecanizado CNC, Estructuras Metálicas, Servicios Petroleros');
-  const [myDemandsInput, setMyDemandsInput] = useState('Bridas Forjadas, Transformadores MT, Flete Consolidado');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialArea = searchParams.get('area') as OperativeView | null;
+  const [activeView, setActiveView] = useState<OperativeView>(
+    initialArea && VALID_VIEWS.includes(initialArea) ? initialArea : 'overview'
+  );
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const [orgInfo, setOrgInfo] = useState<OrganizationInfo | null>(null);
+  const [arnSummary, setArnSummary] = useState({
+    totalOpportunities: 0,
+    pendingApprovals: 0,
+    pipelineUsd: 0,
+  });
+  const [contactsCount, setContactsCount] = useState(0);
+
+  const [myOffersInput, setMyOffersInput] = useState(
+    'Mecanizado CNC, Estructuras Metálicas, Servicios Petroleros'
+  );
+  const [myDemandsInput, setMyDemandsInput] = useState(
+    'Bridas Forjadas, Transformadores MT, Flete Consolidado'
+  );
   const [odooSyncStatus, setOdooSyncStatus] = useState<string | null>(null);
   const [adnMatches, setAdnMatches] = useState<any[]>(() =>
     computeAdnMatches({
@@ -33,6 +103,7 @@ export default function Dashboard() {
     })
   );
   const [isMatchingAdn, setIsMatchingAdn] = useState(false);
+
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [negotiationRfq, setNegotiationRfq] = useState<RFQ | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,18 +113,68 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  // Form State
+  // New RFQ form state
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Servicios Industriales');
   const [priority, setPriority] = useState('medium');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEffect(() => {
+    const areaParam = searchParams.get('area') as OperativeView | null;
+    if (areaParam && VALID_VIEWS.includes(areaParam) && areaParam !== activeView) {
+      setActiveView(areaParam);
+    }
+  }, [searchParams, activeView]);
+
+  const selectView = (view: OperativeView) => {
+    setActiveView(view);
+    setMobileNavOpen(false);
+    setSearchParams({ area: view }, { replace: true });
+  };
+
+  const loadWorkspaceMeta = useCallback(async () => {
+    try {
+      const token = await auth.getToken();
+      if (!token) return;
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [orgRes, arnRes, crmRes] = await Promise.all([
+        fetch(`${getApiUrl()}/api/org/team`, { headers, cache: 'no-store' }),
+        fetch(`${getApiUrl()}/api/arn/overview`, { headers, cache: 'no-store' }),
+        fetch(`${getApiUrl()}/api/crm/contacts`, { headers, cache: 'no-store' }),
+      ]);
+
+      if (orgRes.ok) {
+        const orgData = await orgRes.json();
+        if (orgData.organization) setOrgInfo(orgData.organization);
+      }
+      if (arnRes.ok) {
+        const arnData = await arnRes.json();
+        if (arnData.metrics) {
+          setArnSummary({
+            totalOpportunities: Number(arnData.metrics.totalOpportunities || 0),
+            pendingApprovals: Number(arnData.metrics.pendingApprovals || 0),
+            pipelineUsd: Number(arnData.metrics.pipelineUsd || 0),
+          });
+        }
+      }
+      if (crmRes.ok) {
+        const crmData = await crmRes.json();
+        if (Array.isArray(crmData.contacts)) {
+          setContactsCount(crmData.contacts.length);
+        }
+      }
+    } catch {
+      // ignore transient telemetry errors
+    }
+  }, []);
 
   useEffect(() => {
     const fetchRfqs = async () => {
@@ -65,18 +186,14 @@ export default function Dashboard() {
       try {
         const token = await auth.getToken();
         const res = await fetch(`${getApiUrl()}/api/rfqs`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data)) {
-            setRfqs(data);
-          }
+          if (Array.isArray(data)) setRfqs(data);
         }
       } catch (error) {
-        console.error("Error fetching RFQs:", error);
+        console.error('Error fetching RFQs:', error);
       } finally {
         setIsLoading(false);
       }
@@ -98,8 +215,6 @@ export default function Dashboard() {
           const data = docSnap.data();
           ids = data.installed || [];
         }
-        
-        // Auto-enable logistics module for logistics companies
         if (userCategory === 'LOGISTICA' && !ids.includes('logistics')) {
           ids.push('logistics');
         }
@@ -109,7 +224,6 @@ export default function Dashboard() {
       }
     };
 
-    // Wait slightly to let auth initialize
     const isRecoveryFlow =
       typeof window !== 'undefined' &&
       (window.location.hash.includes('type=recovery') ||
@@ -121,21 +235,19 @@ export default function Dashboard() {
       if (user) {
         fetchRfqs();
         fetchModules(user);
+        loadWorkspaceMeta();
       } else if (!isRecoveryFlow) {
         navigate('/');
       }
     });
 
     return () => unsubscribe();
-  }, [navigate]);
+  }, [navigate, loadWorkspaceMeta]);
 
   useEffect(() => {
     if (installedModules.includes('warehousing')) {
       const unsubscribe = onSnapshot(collection(db, 'inventory_items'), (snapshot) => {
-        const items = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+        const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setInventory(items);
       });
       return () => unsubscribe();
@@ -154,11 +266,9 @@ export default function Dashboard() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          title, category, priority, description
-        })
+        body: JSON.stringify({ title, category, priority, description }),
       });
 
       if (res.ok) {
@@ -167,14 +277,13 @@ export default function Dashboard() {
         setIsNewModalOpen(false);
         setShowSuccessToast(true);
         setTimeout(() => setShowSuccessToast(false), 5000);
-        // Reset form
         setTitle('');
         setCategory('Servicios Industriales');
         setPriority('medium');
         setDescription('');
       }
     } catch (error) {
-      console.error("Error creating RFQ:", error);
+      console.error('Error creating RFQ:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -182,11 +291,16 @@ export default function Dashboard() {
 
   const calculateWarehouseData = () => {
     const warehouseMap: Record<string, any> = {};
-    inventory.forEach(item => {
-      const loc = item.location === 'Central CABA' ? 'Central CABA' :
-                  item.location === 'Parque Ind. Comodoro' ? 'PQ Comodoro' : 'Sur Neuquén';
-      
-      if (!warehouseMap[loc]) warehouseMap[loc] = { name: loc, Componentes: 0, Insumos: 0, Maquinaria: 0 };
+    inventory.forEach((item) => {
+      const loc =
+        item.location === 'Central CABA'
+          ? 'Central CABA'
+          : item.location === 'Parque Ind. Comodoro'
+          ? 'PQ Comodoro'
+          : 'Sur Neuquén';
+
+      if (!warehouseMap[loc])
+        warehouseMap[loc] = { name: loc, Componentes: 0, Insumos: 0, Maquinaria: 0 };
       if (['Componentes', 'Insumos', 'Maquinaria'].includes(item.category)) {
         warehouseMap[loc][item.category] += Number(item.stock) || 0;
       }
@@ -194,19 +308,77 @@ export default function Dashboard() {
     return Object.values(warehouseMap);
   };
 
+  const VIEW_META: Record<
+    OperativeView,
+    { areaTag: string; title: string; subtitle: string; accent: string }
+  > = {
+    overview: {
+      areaTag: '01 · Dirección Operativa',
+      title: 'Resumen Ejecutivo B2B',
+      subtitle:
+        'Tablero consolidado por área operativa con pulso en tiempo real de ARN IA, Contactos CRM, Cotizaciones y Capacidad del Equipo.',
+      accent: 'text-orange-600 dark:text-orange-400',
+    },
+    arn_crm: {
+      areaTag: '02 · Área Comercial',
+      title: 'ARN IA + CRM & Contactos',
+      subtitle:
+        'Motor autónomo híbrido y agenda de Contactos CRM trabajando en conjunto con sincronización a Odoo y correo.',
+      accent: 'text-purple-600 dark:text-purple-400',
+    },
+    rfqs: {
+      areaTag: '02 · Área Comercial',
+      title: 'Licitaciones & Cotizaciones (RFQs)',
+      subtitle:
+        'Emisión directa de requerimientos hacia proveedores validados y negociación de ofertas recibidas.',
+      accent: 'text-orange-600 dark:text-orange-400',
+    },
+    adn: {
+      areaTag: '02 · Área Comercial',
+      title: 'ADN Vectorial & Sincronización Odoo',
+      subtitle:
+        'Matching semántico pgvector Norte ↔ Patagonia entre capacidades ofrecidas e insumos demandados.',
+      accent: 'text-emerald-600 dark:text-emerald-400',
+    },
+    products: {
+      areaTag: '03 · Operaciones & Catálogo',
+      title: 'Catálogo de Productos B2B',
+      subtitle:
+        'Gestión centralizada de SKUs industriales, precios mayoristas, normas ISO/API y stock disponible.',
+      accent: 'text-orange-600 dark:text-orange-400',
+    },
+    fleet: {
+      areaTag: '04 · Logística & Flota',
+      title: 'Gestión y Control de Flota & Contratos',
+      subtitle:
+        'Suite dedicada para empresas de transporte y operadores con Membresía Logística: unidades, choferes LINTI y contratación de fletes.',
+      accent: 'text-orange-600 dark:text-orange-400',
+    },
+    team: {
+      areaTag: '05 · Organización & Plan SaaS',
+      title: 'Equipo PyME, Asientos y Membresías',
+      subtitle:
+        'Administración de usuarios por plan (2 Gratis · 5 Pro · 10 Corporativo) y activación de Membresía Logística.',
+      accent: 'text-purple-600 dark:text-purple-400',
+    },
+  };
+
+  const isAdminUser =
+    auth.currentUser?.email === 'xpatagonia.com@gmail.com' ||
+    auth.currentUser?.email === 'admin@xpatagonia.com';
+
   const modalContent = (
     <AnimatePresence>
       {isNewModalOpen && (
         <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
-          <motion.div 
-            initial={{ backgroundColor: 'transparent' }} 
-            animate={{ backgroundColor: 'rgba(0,0,0,0.5)' }} 
-            exit={{ backgroundColor: 'transparent' }} 
-            className="absolute inset-0 backdrop-blur-sm" 
-            onClick={() => setIsNewModalOpen(false)} 
+          <motion.div
+            initial={{ backgroundColor: 'transparent' }}
+            animate={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+            exit={{ backgroundColor: 'transparent' }}
+            className="absolute inset-0 backdrop-blur-sm"
+            onClick={() => setIsNewModalOpen(false)}
           />
-          
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -214,49 +386,56 @@ export default function Dashboard() {
           >
             <div className="p-6 md:p-8">
               <div>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Solicitar Cotización (Match Directo)</h2>
-                <p className="text-sm text-slate-500 mb-6">Su solicitud se enviará en tiempo real y de forma directa a todos los proveedores validados en nuestro directorio que coincidan con la categoría.</p>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+                  Solicitar Cotización (Match Directo)
+                </h2>
+                <p className="text-sm text-slate-500 mb-6">
+                  Su solicitud se enviará en tiempo real a los proveedores validados de nuestro directorio que coincidan con la categoría.
+                </p>
               </div>
-              
               <form onSubmit={handleCreateRfq} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Título Breve</label>
-                  <input 
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Título Breve
+                  </label>
+                  <input
                     required
-                    type="text" 
+                    type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Ej: Provisión de ropa de trabajo ignífuga"
                     className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
                   />
                 </div>
-                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Categoría</label>
-                    <select 
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                      Categoría
+                    </label>
+                    <select
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50 appearance-none"
+                      className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
                     >
-                      <option>Alimentación</option>
-                      <option>Sector Productivo (Ovina, Bovina, Cerdos)</option>
-                      <option>Pesca y Acuicultura (Flotas, Procesadoras)</option>
+                      <option>Servicios Industriales</option>
+                      <option>Hidrocarburos</option>
                       <option>Sector Metalúrgico y Metalmecánico</option>
                       <option>Puertos y Logística Terrestre / Almacenamiento</option>
-                      <option>Hidrocarburos</option>
                       <option>Energías Renovables (Eólica, Solar)</option>
                       <option>Construcción Civil e Infraestructura</option>
                       <option>Tecnología e Innovación</option>
                       <option>Seguridad e Higiene Integral</option>
+                      <option>Alimentación</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Prioridad</label>
-                    <select 
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                      Prioridad
+                    </label>
+                    <select
                       value={priority}
                       onChange={(e) => setPriority(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50 appearance-none"
+                      className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
                     >
                       <option value="low">Baja (Normal)</option>
                       <option value="medium">Media</option>
@@ -264,10 +443,11 @@ export default function Dashboard() {
                     </select>
                   </div>
                 </div>
-
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Descripción Detallada</label>
-                  <textarea 
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Descripción Detallada
+                  </label>
+                  <textarea
                     required
                     rows={4}
                     value={description}
@@ -276,22 +456,21 @@ export default function Dashboard() {
                     className="w-full px-4 py-3 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50 resize-none"
                   />
                 </div>
-
                 <div className="pt-4 flex justify-end gap-3">
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={() => setIsNewModalOpen(false)}
                     className="px-6 py-3 font-bold text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
                   >
                     Cancelar
                   </button>
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     disabled={isSubmitting}
-                    className="flex items-center px-6 py-3 bg-gradient-to-r from-orange-500 to-purple-600 hover:opacity-90 text-white font-bold text-sm rounded-lg transition disabled:opacity-50"
+                    className="flex items-center px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm rounded-lg transition disabled:opacity-50"
                   >
                     {isSubmitting ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
                       <>
                         <Send className="w-4 h-4 mr-2" />
@@ -308,555 +487,880 @@ export default function Dashboard() {
     </AnimatePresence>
   );
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] px-6 py-12 md:px-12">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-end mb-8 border-b border-slate-200 dark:border-white/10 pb-6 gap-6">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <LayoutDashboard className="w-5 h-5 text-orange-500" />
-              <span className="text-sm font-bold uppercase tracking-widest text-slate-500">Panel del Usuario</span>
-            </div>
-            <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-4">
-              Gestión B2B
-            </h1>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-6">
-              <button 
-                onClick={() => setActiveTab('rfqs')}
-                className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] ${activeTab === 'rfqs' ? 'border-orange-500 text-orange-500' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-              >
-                Mis Cotizaciones
-              </button>
-              <button
-                onClick={() => setActiveTab('received_rfqs')}
-                className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'received_rfqs' ? 'border-purple-500 text-purple-500 bg-purple-50/50 dark:bg-purple-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-              >
-                <Sparkles className="w-4 h-4" /> ARN IA (Autónomo)
-              </button>
-              <button 
-                onClick={() => setActiveTab('products')}
-                className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'products' ? 'border-orange-500 text-orange-500 bg-orange-50/50 dark:bg-orange-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-              >
-                <Package className="w-4 h-4" /> Mis Productos
-              </button>
-              <button 
-                onClick={() => setActiveTab('adn')}
-                className={`text-sm font-bold uppercase tracking-wider pb-2 border-b-2 transition-[color,border-color] flex items-center gap-1 ${activeTab === 'adn' ? 'border-emerald-500 text-emerald-500 bg-emerald-50/50 dark:bg-emerald-500/10 rounded-t-lg px-2 -mx-2' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
-              >
-                <Sparkles className="w-4 h-4" /> ADN Empresarial & Odoo
-              </button>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3">
-            {(auth.currentUser?.email === 'xpatagonia.com@gmail.com' ||
-              auth.currentUser?.email === 'admin@xpatagonia.com') && (
-              <button
-                onClick={() => navigate('/admin?tab=sitio')}
-                className="px-4 py-3 whitespace-nowrap bg-purple-600/10 border border-purple-500/30 text-purple-600 dark:text-purple-300 text-xs uppercase tracking-widest font-bold rounded-lg hover:bg-purple-600/20 transition flex items-center gap-2"
-              >
-                <Shield className="w-4 h-4" />
-                Control CMS &amp; Hero
-              </button>
-            )}
-            {activeTab === 'rfqs' && (
-              <button 
-                onClick={() => setIsNewModalOpen(true)}
-                className="px-6 py-3 whitespace-nowrap bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs uppercase tracking-widest font-bold rounded-lg hover:bg-slate-800 dark:hover:bg-slate-200 transition flex items-center shadow-lg shadow-purple-500/10"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Nueva Solicitud
-              </button>
+  const sidebarContent = (
+    <div className="flex flex-col h-full py-5 px-4 space-y-5">
+      {/* Workspace Brand Context */}
+      <div className="px-2 pb-3 border-b border-slate-200 dark:border-white/10">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Workspace Operativo PyME
+        </p>
+        <p className="text-sm font-bold text-slate-900 dark:text-white truncate mt-0.5">
+          {orgInfo?.orgName || auth.currentUser?.email || 'Mi Empresa B2B'}
+        </p>
+        {orgInfo && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px] font-mono tabular-nums">
+            <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold">
+              {orgInfo.planName} · {orgInfo.usedSeats}/{orgInfo.seatLimit} us.
+            </span>
+            {orgInfo.hasLogisticsAccess && (
+              <span className="px-2 py-0.5 rounded bg-orange-500/15 text-orange-700 dark:text-orange-300 font-semibold">
+                Flota Activa
+              </span>
             )}
           </div>
+        )}
+      </div>
+
+      {/* AREA 01: RESUMEN EJECUTIVO */}
+      <div>
+        <div className="px-2 mb-1.5 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            01 · Resumen Ejecutivo
+          </span>
         </div>
+        <div className="space-y-1">
+          <button
+            onClick={() => selectView('overview')}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'overview'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4 shrink-0" />
+            <span>Panel General B2B</span>
+          </button>
+        </div>
+      </div>
 
-        {activeTab === 'rfqs' ? (
-          <>
-            {/* Dashboard Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-500/10 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-orange-500" />
-                  </div>
-                  <span className="inline-flex items-center text-emerald-500 text-xs font-bold bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 rounded-md">
-                    +12% este mes
-                  </span>
-                </div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-sm font-bold uppercase tracking-wider mb-1">Cotizaciones Activas</h3>
-                <p className="text-3xl font-display font-bold text-slate-900 dark:text-white">
-                  {rfqs.length}
-                </p>
+      {/* AREA 02: COMERCIAL · ARN & CRM */}
+      <div className="rounded-2xl bg-purple-500/[0.06] dark:bg-purple-500/[0.08] border border-purple-500/20 p-2.5">
+        <div className="px-1.5 mb-2 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-purple-700 dark:text-purple-300">
+            02 · Comercial · ARN &amp; CRM
+          </span>
+          {arnSummary.pendingApprovals > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-purple-600 text-white text-[10px] font-mono font-bold tabular-nums">
+              {arnSummary.pendingApprovals}
+            </span>
+          )}
+        </div>
+        <div className="space-y-1">
+          <button
+            onClick={() => selectView('arn_crm')}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'arn_crm'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-white/5'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 shrink-0" />
+              ARN IA + Contactos CRM
+            </span>
+          </button>
+          <button
+            onClick={() => selectView('rfqs')}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'rfqs'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-white/5'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <FileText className="w-4 h-4 shrink-0" />
+              Mis Cotizaciones (RFQs)
+            </span>
+            <span className="text-[10px] font-mono tabular-nums opacity-75">
+              {rfqs.length}
+            </span>
+          </button>
+          <button
+            onClick={() => selectView('adn')}
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'adn'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-white/5'
+            }`}
+          >
+            <Database className="w-4 h-4 shrink-0" />
+            <span>ADN Vector &amp; Odoo</span>
+          </button>
+          <button
+            onClick={() => navigate('/chat')}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-white/5 transition text-left"
+          >
+            <span className="flex items-center gap-2">
+              <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+              Mensajería B2B
+            </span>
+            <ExternalLink className="w-3 h-3 opacity-60" />
+          </button>
+        </div>
+      </div>
+
+      {/* AREA 03: OPERACIONES & CATÁLOGO */}
+      <div className="rounded-2xl bg-emerald-500/[0.05] dark:bg-emerald-500/[0.07] border border-emerald-500/20 p-2.5">
+        <div className="px-1.5 mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+            03 · Operaciones &amp; Catálogo
+          </span>
+        </div>
+        <div className="space-y-1">
+          <button
+            onClick={() => selectView('products')}
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'products'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-white/5'
+            }`}
+          >
+            <Package className="w-4 h-4 shrink-0" />
+            <span>Mis Productos &amp; SKUs</span>
+          </button>
+          <button
+            onClick={() => navigate('/warehousing')}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-white/5 transition text-left"
+          >
+            <span className="flex items-center gap-2">
+              <Warehouse className="w-3.5 h-3.5 shrink-0" />
+              Almacenamiento WMS
+            </span>
+            <ExternalLink className="w-3 h-3 opacity-60" />
+          </button>
+          <button
+            onClick={() => navigate('/ecommerce')}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-white/5 transition text-left"
+          >
+            <span className="flex items-center gap-2">
+              <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+              E-commerce B2B
+            </span>
+            <ExternalLink className="w-3 h-3 opacity-60" />
+          </button>
+        </div>
+      </div>
+
+      {/* AREA 04: LOGÍSTICA & CONTROL DE FLOTA */}
+      <div className="rounded-2xl bg-orange-500/[0.06] dark:bg-orange-500/[0.08] border border-orange-500/25 p-2.5">
+        <div className="px-1.5 mb-2 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-orange-700 dark:text-orange-300">
+            04 · Logística &amp; Flota
+          </span>
+          {orgInfo?.hasLogisticsAccess && (
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          )}
+        </div>
+        <div className="space-y-1">
+          <button
+            onClick={() => selectView('fleet')}
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'fleet'
+                ? 'bg-orange-500 text-white shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-white/5'
+            }`}
+          >
+            <Truck className="w-4 h-4 shrink-0" />
+            <span>Flota, Choferes &amp; Contratos</span>
+          </button>
+          <button
+            onClick={() => navigate('/logistica')}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-white/5 transition text-left"
+          >
+            <span className="flex items-center gap-2">
+              <Route className="w-3.5 h-3.5 shrink-0" />
+              Rutas OSRM &amp; Bolsa
+            </span>
+            <ExternalLink className="w-3 h-3 opacity-60" />
+          </button>
+        </div>
+      </div>
+
+      {/* AREA 05: ORGANIZACIÓN & PLAN SAAS */}
+      <div className="rounded-2xl bg-slate-100/80 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 p-2.5">
+        <div className="px-1.5 mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+            05 · Organización &amp; Plan
+          </span>
+        </div>
+        <div className="space-y-1">
+          <button
+            onClick={() => selectView('team')}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold transition text-left ${
+              activeView === 'team'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-white/80 dark:hover:bg-white/5'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Users className="w-4 h-4 shrink-0" />
+              Equipo &amp; Plan SaaS
+            </span>
+            {orgInfo && (
+              <span className="text-[10px] font-mono tabular-nums opacity-80">
+                {orgInfo.usedSeats}/{orgInfo.seatLimit}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => navigate('/perfil-empresa')}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-white/5 transition text-left"
+          >
+            <span className="flex items-center gap-2">
+              <Building2 className="w-3.5 h-3.5 shrink-0" />
+              Perfil Fiscal Empresa
+            </span>
+            <ExternalLink className="w-3 h-3 opacity-60" />
+          </button>
+          {isAdminUser && (
+            <button
+              onClick={() => navigate('/admin?tab=sitio')}
+              className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition text-left"
+            >
+              <span className="flex items-center gap-2">
+                <Shield className="w-3.5 h-3.5 shrink-0" />
+                Admin CMS &amp; Hero
+              </span>
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const meta = VIEW_META[activeView];
+
+  return (
+    <div className="min-h-[calc(100vh-4.25rem)] bg-slate-50 dark:bg-[#0A080C] flex">
+      {/* Desktop Fixed-Height Sticky Sidebar */}
+      <aside className="hidden lg:block w-[276px] shrink-0 bg-white dark:bg-[#110E17] border-r border-slate-200 dark:border-white/10 lg:sticky lg:top-[65px] lg:h-[calc(100vh-65px)] overflow-y-auto">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Drawer */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-[120] lg:hidden flex">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+              className="relative z-10 w-[290px] max-w-[85vw] bg-white dark:bg-[#110E17] h-full overflow-y-auto border-r border-slate-200 dark:border-white/10"
+            >
+              <div className="flex items-center justify-between px-4 pt-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Áreas Operativas
+                </span>
+                <button
+                  onClick={() => setMobileNavOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              
-              <div className="bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-500/10 flex items-center justify-center">
-                    <Users className="w-5 h-5 text-purple-500" />
-                  </div>
-                </div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-sm font-bold uppercase tracking-wider mb-1">Proveedores en Red</h3>
-                <p className="text-3xl font-display font-bold text-slate-900 dark:text-white">
-                  2,450
-                </p>
-              </div>
-              
-              <div className="bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center">
-                    <Activity className="w-5 h-5 text-emerald-500" />
-                  </div>
-                </div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-sm font-bold uppercase tracking-wider mb-1">Ahorro Estimado</h3>
-                <p className="text-3xl font-display font-bold text-slate-900 dark:text-white">
-                   18.5%
-                </p>
+              {sidebarContent}
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Workspace Canvas */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Contextual Top Bar */}
+        <header className="sticky top-[65px] z-30 bg-white/95 dark:bg-[#110E17]/95 backdrop-blur-md border-b border-slate-200 dark:border-white/10 px-4 sm:px-6 lg:px-8 py-4">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-3 min-w-0">
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                className="lg:hidden p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 shrink-0"
+                aria-label="Abrir navegación por áreas"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="min-w-0">
+                <span
+                  className={`text-[11px] font-bold uppercase tracking-widest block ${meta.accent}`}
+                >
+                  {meta.areaTag}
+                </span>
+                <h1 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white truncate">
+                  {meta.title}
+                </h1>
               </div>
             </div>
 
-            {/* Módulos Activos (Integración) */}
-            {installedModules.length > 0 && (
-              <div className="mb-12">
-                 <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Módulos Activos</h2>
-                 <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {installedModules.includes('warehousing') && (
-                       <div className="bg-white dark:bg-[#1A1625] p-6 rounded-3xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
-                           <div className="flex justify-between items-center mb-6">
-                              <div className="flex items-center gap-3 text-slate-900 dark:text-white">
-                                <PackageCheck className="w-5 h-5 text-orange-500" />
-                                <h4 className="font-bold">Inventario</h4>
-                              </div>
-                              <button 
-                                onClick={() => navigate('/warehousing')}
-                                className="text-xs font-bold uppercase text-orange-500 hover:underline"
-                              >
-                                Abrir Módulo
-                              </button>
-                           </div>
-                           
-                           <div className="flex gap-4 mb-6">
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">Total SKUs</h5>
-                                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{inventory.length > 0 ? inventory.length : 14}</p>
-                              </div>
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">Alertas</h5>
-                                 <p className="text-2xl font-bold text-red-500">{inventory.length > 0 ? inventory.filter(i => i.status === 'low-stock' || i.status === 'out-of-stock').length : 2}</p>
-                              </div>
-                           </div>
-
-                           <div className="flex-1 min-h-[150px]">
-                              {inventory.length > 0 ? (
-                                <ResponsiveContainer width="100%" height="100%">
-                                   <BarChart data={calculateWarehouseData()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                     <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} opacity={0.2} />
-                                     <XAxis dataKey="name" tick={{fill: '#888', fontSize: 10}} axisLine={false} tickLine={false} />
-                                     <YAxis tick={{fill: '#888', fontSize: 10}} axisLine={false} tickLine={false} />
-                                     <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1A1625', borderColor: '#333', color: '#fff', borderRadius: '8px'}} />
-                                     <Bar dataKey="Componentes" stackId="a" fill="#f97316" radius={[0, 0, 4, 4]} />
-                                     <Bar dataKey="Insumos" stackId="a" fill="#eab308" />
-                                     <Bar dataKey="Maquinaria" stackId="a" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                                   </BarChart>
-                                </ResponsiveContainer>
-                              ) : (
-                                <div className="flex items-center justify-center h-full text-sm text-slate-500 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/5">Cargar datos para visualizar</div>
-                              )}
-                           </div>
-                       </div>
-                    )}
-
-                    {installedModules.includes('logistica') && (
-                       <div className="bg-white dark:bg-[#1A1625] p-6 rounded-3xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
-                           <div className="flex justify-between items-center mb-6">
-                              <div className="flex items-center gap-3 text-slate-900 dark:text-white">
-                                <Truck className="w-5 h-5 text-blue-500" />
-                                <h4 className="font-bold">Logística y Cargas</h4>
-                              </div>
-                              <button 
-                                onClick={() => navigate('/logistica')}
-                                className="text-xs font-bold uppercase text-blue-500 hover:underline"
-                              >
-                                Abrir Módulo
-                              </button>
-                           </div>
-                           
-                           <div className="flex gap-4 mb-6">
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">En Tránsito</h5>
-                                 <p className="text-2xl font-bold text-slate-900 dark:text-white">12</p>
-                              </div>
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">Entregados hoy</h5>
-                                 <p className="text-2xl font-bold text-emerald-500">4</p>
-                              </div>
-                           </div>
-
-                           <div className="flex-1 flex flex-col gap-3 justify-center">
-                              <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/5 text-sm flex justify-between items-center">
-                                <span className="text-slate-600 dark:text-slate-400">Guía #89221-A</span>
-                                <span className="text-blue-500 font-bold text-xs uppercase bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded">En Ruta</span>
-                              </div>
-                              <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/5 text-sm flex justify-between items-center">
-                                <span className="text-slate-600 dark:text-slate-400">Guía #89222-A</span>
-                                <span className="text-emerald-500 font-bold text-xs uppercase bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 rounded">Descargando</span>
-                              </div>
-                               <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/5 text-sm flex justify-between items-center">
-                                <span className="text-slate-600 dark:text-slate-400">Guía #89223-B</span>
-                                <span className="text-amber-500 font-bold text-xs uppercase bg-amber-50 dark:bg-amber-500/10 px-2 py-1 rounded">Programado</span>
-                              </div>
-                           </div>
-                       </div>
-                    )}
-
-                    {(installedModules.includes('ecommerce') || installedModules.includes('certifications')) && (
-                       <div className="bg-white dark:bg-[#1A1625] p-6 rounded-3xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
-                           <div className="flex justify-between items-center mb-6">
-                              <div className="flex items-center gap-3 text-slate-900 dark:text-white">
-                                <Box className="w-5 h-5 text-purple-500" />
-                                <h4 className="font-bold">E-commerce B2B</h4>
-                              </div>
-                              <button 
-                                onClick={() => navigate('/ecommerce')}
-                                className="text-xs font-bold uppercase text-purple-500 hover:underline"
-                              >
-                                Abrir Catálogo
-                              </button>
-                           </div>
-                           
-                           <div className="flex gap-4 mb-6">
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">Productos</h5>
-                                 <p className="text-2xl font-bold text-slate-900 dark:text-white">24</p>
-                              </div>
-                              <div className="flex-1 bg-slate-50 dark:bg-black/20 p-4 rounded-xl">
-                                 <h5 className="text-xs font-bold text-slate-500 mb-1">Pedidos Activos</h5>
-                                 <p className="text-2xl font-bold text-emerald-500">3</p>
-                              </div>
-                           </div>
-
-                           <div className="flex-1 flex flex-col justify-center">
-                              <h5 className="text-xs font-bold text-slate-500 mb-3">Normas Cumplidas Destacadas</h5>
-                              <div className="flex flex-col gap-2 border-t border-slate-100 dark:border-white/5 pt-3">
-                                 <div className="flex items-center gap-3 text-sm">
-                                   <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                   <span className="text-slate-600 dark:text-slate-400 font-medium">Bomba Centrífuga 200HP</span>
-                                   <span className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">ISO 9001</span>
-                                 </div>
-                                 <div className="flex items-center gap-3 text-sm">
-                                   <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                   <span className="text-slate-600 dark:text-slate-400 font-medium">Motor Trifásico Industrial</span>
-                                   <span className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">ISO 14001</span>
-                                 </div>
-                              </div>
-                           </div>
-                       </div>
-                    )}
-                 </div>
-              </div>
-            )}
-
-            {isLoading ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="w-8 h-8 border-t-2 border-r-2 border-orange-500 rounded-full animate-spin"></div>
-              </div>
-            ) : rfqs.length === 0 ? (
-              <div className="bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/5 rounded-2xl p-12 text-center shadow-sm">
-                <div className="w-16 h-16 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <FileText className="w-8 h-8 text-slate-400" />
-                </div>
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">No tienes cotizaciones activas</h3>
-                <p className="text-slate-500 mb-6 max-w-md mx-auto">
-                  Comienza a optimizar tus compras enviando tu primer Requerimiento de Cotización (RFQ). El sistema notificará automáticamente a los proveedores verificados que coincidan con tus necesidades.
-                </p>
-                <button 
-                  onClick={() => setIsNewModalOpen(true)}
-                  className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white text-xs uppercase tracking-widest font-bold rounded-lg transition"
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              {orgInfo && (
+                <button
+                  onClick={() => selectView('team')}
+                  className="px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-purple-500/40 transition flex items-center gap-2 whitespace-nowrap font-mono tabular-nums"
                 >
-                  Crear mi primer RFQ
-                </button>
-              </div>
-            ) : (
-              <div className="bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/5 shadow-sm rounded-2xl overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 dark:bg-white/5 text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
-                      <th className="px-6 py-4 font-semibold">Requerimiento</th>
-                      <th className="px-6 py-4 font-semibold">Categoría</th>
-                      <th className="px-6 py-4 font-semibold">Estado</th>
-                      <th className="px-6 py-4 font-semibold text-right">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rfqs.map((rfq) => (
-                      <tr key={rfq.id} className="border-b border-slate-100 dark:border-white/5 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group">
-                        <td className="px-6 py-5">
-                          <p className="font-bold text-slate-900 dark:text-white text-sm mb-1">{rfq.title}</p>
-                          <p className="text-xs text-slate-500">#{rfq.id.toString().padStart(5, '0')} • {new Date(rfq.createdAt).toLocaleDateString()}</p>
-                        </td>
-                        <td className="px-6 py-5">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300">
-                            {rfq.category}
-                          </span>
-                        </td>
-                        <td className="px-6 py-5">
-                          {rfq.status === 'pending' && (
-                            <span className="inline-flex items-center text-orange-500 text-xs font-semibold">
-                              <Clock className="w-3.5 h-3.5 mr-1" /> Notificando Proveedores
-                            </span>
-                          )}
-                          {rfq.status === 'quoted' && (
-                            <span className="inline-flex items-center text-purple-500 text-xs font-semibold">
-                              <FileText className="w-3.5 h-3.5 mr-1" /> Cotizaciones Recibidas
-                            </span>
-                          )}
-                          {rfq.status === 'awarded' && (
-                            <span className="inline-flex items-center text-emerald-500 text-xs font-semibold">
-                              <CheckCircle className="w-3.5 h-3.5 mr-1" /> Adjudicado
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-5 text-right">
-                          <button 
-                            onClick={() => setNegotiationRfq(rfq)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500/10 hover:bg-orange-500 text-orange-600 dark:text-orange-400 hover:text-white rounded-xl text-xs font-bold transition shadow-sm"
-                          >
-                            <span>Negociar Ofertas</span>
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Suggested Services */}
-            <div className="mt-12">
-              <div className="flex justify-between items-end mb-6">
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Servicios Recomendados</h2>
-                <button 
-                  onClick={() => navigate('/servicios')}
-                  className="text-xs font-bold uppercase tracking-wider text-orange-500 hover:text-orange-600 transition flex items-center"
-                >
-                  Ver Directorio <ChevronRight className="w-3 h-3 ml-1" />
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { title: 'Inspección No Destructiva NDT', cat: 'Servicios Industriales' },
-                  { title: 'Instalaciones Electromecánicas', cat: 'Mantenimiento' },
-                  { title: 'Logística de Cargas Especiales', cat: 'Transporte' },
-                  { title: 'Provisión de EPP Ignífugo', cat: 'Seguridad' },
-                ].map((svc, i) => (
-                  <div key={i} onClick={() => navigate('/servicios')} className="bg-white dark:bg-[#1A1625] p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-orange-500/30 transition cursor-pointer flex items-center gap-4 group">
-                    <div className="w-12 h-12 bg-slate-100 dark:bg-white/5 rounded-lg flex items-center justify-center shrink-0">
-                      <Tag className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900 dark:text-white text-sm group-hover:text-orange-500 transition-colors">{svc.title}</h4>
-                      <p className="text-xs text-slate-500">{svc.cat}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        ) : activeTab === 'received_rfqs' ? (
-          <CompanyInbox />
-        ) : activeTab === 'adn' ? (
-          <div className="space-y-6">
-            <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-500 block mb-1">
-                    Motor pgvector + Corredores OSRM
+                  <Users className="w-3.5 h-3.5 text-purple-500" />
+                  <span>
+                    {orgInfo.planName} · {orgInfo.usedSeats}/{orgInfo.seatLimit}
                   </span>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                    ADN Empresarial (Matching Norte ↔ Patagonia)
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Define qué ofrece tu empresa y qué insumos demanda para detectar contrapartes compatibles y consolidar fletes en un clic.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 shrink-0">
-                  <button
-                    onClick={async () => {
-                      setIsMatchingAdn(true);
-                      try {
-                        const token = await auth.getToken();
-                        const res = await fetch(`${getApiUrl()}/api/adn/match`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                          },
-                          body: JSON.stringify({
-                            offers: myOffersInput,
-                            demands: myDemandsInput,
-                          }),
-                        });
-                        const data = await res.json();
-                        if (res.ok && Array.isArray(data.matches) && data.matches.length > 0) {
-                          setAdnMatches(data.matches);
-                          setOdooSyncStatus('Matching vectorial pgvector + corredores OSRM actualizado desde servidor.');
-                        } else {
-                          setAdnMatches(
-                            computeAdnMatches({
-                              myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
-                              myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
-                            })
-                          );
-                        }
-                      } catch {
-                        setAdnMatches(
-                          computeAdnMatches({
-                            myOffers: myOffersInput.split(',').map((s) => s.trim()).filter(Boolean),
-                            myDemands: myDemandsInput.split(',').map((s) => s.trim()).filter(Boolean),
-                          })
-                        );
-                      } finally {
-                        setIsMatchingAdn(false);
-                        setTimeout(() => setOdooSyncStatus(null), 4000);
-                      }
-                    }}
-                    disabled={isMatchingAdn}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    {isMatchingAdn ? 'Calculando pgvector...' : 'Calcular Match IA'}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const token = await auth.getToken();
-                        const res = await fetch(`${getApiUrl()}/api/crm/sync-odoo`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                          },
-                          body: JSON.stringify({
-                            offers: myOffersInput,
-                            demands: myDemandsInput,
-                            userEmail: auth.currentUser?.email || 'miembro@xpatagonia.online',
-                          }),
-                        });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
-                        setOdooSyncStatus(
-                          data.forwardedToN8n
-                            ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
-                            : 'Perfil ADN guardado en servidor y registrado en bitácora n8n.'
-                        );
-                      } catch (err: any) {
-                        setOdooSyncStatus(`No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`);
-                      }
-                      setTimeout(() => setOdooSyncStatus(null), 4000);
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap"
-                  >
-                    <Database className="w-4 h-4" />
-                    Sincronizar Odoo (n8n)
-                  </button>
-                </div>
-              </div>
-
-              {odooSyncStatus && (
-                <div className="mb-4 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                  {odooSyncStatus}
-                </div>
+                </button>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Capacidades / Productos que Ofrecemos
-                  </label>
-                  <input
-                    type="text"
-                    value={myOffersInput}
-                    onChange={(e) => setMyOffersInput(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Insumos / Servicios que Demandamos
-                  </label>
-                  <input
-                    type="text"
-                    value={myDemandsInput}
-                    onChange={(e) => setMyDemandsInput(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
-                  />
-                </div>
-              </div>
+              <button
+                onClick={() => setIsNewModalOpen(true)}
+                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs uppercase tracking-wider font-bold rounded-xl transition flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" /> Nueva Solicitud RFQ
+              </button>
             </div>
+          </div>
+          <p className="max-w-7xl mx-auto text-xs text-slate-500 mt-1.5 hidden sm:block">
+            {meta.subtitle}
+          </p>
+        </header>
 
-            <div className="space-y-3">
-              {adnMatches.map((match) => (
-                <div
-                  key={match.company.id}
-                  className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm"
-                >
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        {match.compatibilityPercent}% Match ADN
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-7xl mx-auto space-y-6">
+            {/* AREA 01: OVERVIEW */}
+            {activeView === 'overview' && (
+              <div className="space-y-6">
+                {/* Executive KPI Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 font-mono tabular-nums">
+                  <div
+                    onClick={() => selectView('arn_crm')}
+                    className="cursor-pointer bg-white dark:bg-[#1A1625] p-5 rounded-2xl border border-slate-200 dark:border-white/10 hover:border-purple-500/40 transition"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500">
+                        Pipeline ARN IA
                       </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-semibold text-purple-600 dark:text-purple-400">
-                        {match.company.tierLabel}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="text-slate-500 font-mono tabular-nums">
-                        ~{match.estimatedRoadKm} km por {match.corridorSynergy}
-                      </span>
+                      <Sparkles className="w-4 h-4 text-purple-500" />
                     </div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {match.company.name}
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
-                      {match.matchReason} · Base: {match.company.city}, {match.company.province}
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                      USD {arnSummary.pipelineUsd.toLocaleString('es-AR')}
+                    </p>
+                    <p className="text-[11px] font-sans text-slate-500 mt-1">
+                      {arnSummary.totalOpportunities} oportunidades · {arnSummary.pendingApprovals} por aprobar
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => navigate(`/logistica?tab=rutas&origin=${encodeURIComponent(match.company.adnComercial.ciudadBase)}&dest=${encodeURIComponent('Añelo (Hub Vaca Muerta)')}`)}
-                      className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
-                    >
-                      <Route className="w-3.5 h-3.5 text-orange-500" />
-                      Calcular Flete
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const res = await syncCompanyToUserCRM(match.company);
-                        setOdooSyncStatus(res.message);
-                        setTimeout(() => setOdooSyncStatus(null), 4000);
-                      }}
-                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Enviar a ARN IA
-                    </button>
+                  <div
+                    onClick={() => selectView('arn_crm')}
+                    className="cursor-pointer bg-white dark:bg-[#1A1625] p-5 rounded-2xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 transition"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500">
+                        Contactos CRM
+                      </span>
+                      <Mail className="w-4 h-4 text-orange-500" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                      {contactsCount}
+                    </p>
+                    <p className="text-[11px] font-sans text-slate-500 mt-1">
+                      Agenda sincronizada bidireccionalmente con ARN IA
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => selectView('rfqs')}
+                    className="cursor-pointer bg-white dark:bg-[#1A1625] p-5 rounded-2xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 transition"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500">
+                        Cotizaciones (RFQs)
+                      </span>
+                      <FileText className="w-4 h-4 text-orange-500" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                      {rfqs.length}
+                    </p>
+                    <p className="text-[11px] font-sans text-slate-500 mt-1">
+                      Emisión y negociación en tiempo real
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => selectView('team')}
+                    className="cursor-pointer bg-white dark:bg-[#1A1625] p-5 rounded-2xl border border-slate-200 dark:border-white/10 hover:border-purple-500/40 transition"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500">
+                        Capacidad SaaS PyME
+                      </span>
+                      <Users className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                      {orgInfo ? `${orgInfo.usedSeats}/${orgInfo.seatLimit}` : '1/2'}
+                    </p>
+                    <p className="text-[11px] font-sans text-slate-500 mt-1">
+                      {orgInfo ? orgInfo.planName : 'Plan Gratis'} {orgInfo?.hasLogisticsAccess ? '· Flota Activa' : ''}
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <CompanyProducts />
-        )}
 
+                {/* Operative Areas Quick Launch Matrix */}
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">
+                    Accesos por Área Operativa
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div
+                      onClick={() => selectView('arn_crm')}
+                      className="cursor-pointer bg-white dark:bg-[#1A1625] border border-purple-500/25 hover:border-purple-500/60 rounded-2xl p-5 transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                          Área Comercial
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                          ARN IA + Contactos CRM
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          Calificación autónoma, cola híbrida de aprobación, RFQs e agenda CRM integrada.
+                        </p>
+                      </div>
+                      <span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-purple-600 dark:text-purple-400">
+                        Abrir Centro Comercial <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
+
+                    <div
+                      onClick={() => selectView('products')}
+                      className="cursor-pointer bg-white dark:bg-[#1A1625] border border-emerald-500/25 hover:border-emerald-500/60 rounded-2xl p-5 transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          Operaciones &amp; Stock
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                          Catálogo B2B &amp; WMS
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          Publicación de SKUs, reservas automáticas de inventario y e-commerce industrial.
+                        </p>
+                      </div>
+                      <span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        Gestionar Productos <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
+
+                    <div
+                      onClick={() => selectView('fleet')}
+                      className="cursor-pointer bg-white dark:bg-[#1A1625] border border-orange-500/25 hover:border-orange-500/60 rounded-2xl p-5 transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                          Logística &amp; Transporte
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                          Control de Flota &amp; Contratos
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          Unidades, choferes LINTI, vencimientos VTV y contratación directa de cargas.
+                        </p>
+                      </div>
+                      <span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-orange-600 dark:text-orange-400">
+                        {orgInfo?.hasLogisticsAccess ? 'Operar Flota' : 'Ver Membresía Logística'}{' '}
+                        <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
+
+                    <div
+                      onClick={() => selectView('team')}
+                      className="cursor-pointer bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 hover:border-slate-400 dark:hover:border-white/30 rounded-2xl p-5 transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          Organización SaaS
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                          Usuarios, Roles &amp; Plan
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          Invitá miembros según tu plan (2 Gratis · 5 Pro · 10 Corporativo) y gestioná roles.
+                        </p>
+                      </div>
+                      <span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-slate-900 dark:text-white">
+                        Administrar Equipo <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Active Warehouse Chart Snapshot if enabled */}
+                {installedModules.includes('warehousing') && inventory.length > 0 && (
+                  <div className="bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/10">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                          Distribución de Stock WMS por Base Operativa
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          {inventory.length} SKUs registrados en depósitos patagónicos y CABA
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => navigate('/warehousing')}
+                        className="text-xs font-bold text-orange-500 hover:underline whitespace-nowrap"
+                      >
+                        Abrir WMS Completo
+                      </button>
+                    </div>
+                    <div className="h-[190px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={calculateWarehouseData()}
+                          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} opacity={0.2} />
+                          <XAxis dataKey="name" tick={{ fill: '#888', fontSize: 10 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: '#888', fontSize: 10 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip
+                            cursor={{ fill: 'transparent' }}
+                            contentStyle={{
+                              backgroundColor: '#1A1625',
+                              borderColor: '#333',
+                              color: '#fff',
+                              borderRadius: '8px',
+                            }}
+                          />
+                          <Bar dataKey="Componentes" stackId="a" fill="#f97316" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="Insumos" stackId="a" fill="#eab308" />
+                          <Bar dataKey="Maquinaria" stackId="a" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AREA 02A: ARN IA + CRM & CONTACTOS */}
+            {activeView === 'arn_crm' && <CompanyInbox />}
+
+            {/* AREA 02B: RFQs */}
+            {activeView === 'rfqs' && (
+              <div className="space-y-4">
+                {isLoading ? (
+                  <div className="flex justify-center items-center h-64">
+                    <div className="w-8 h-8 border-t-2 border-r-2 border-orange-500 rounded-full animate-spin" />
+                  </div>
+                ) : rfqs.length === 0 ? (
+                  <div className="bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-2xl p-12 text-center shadow-sm">
+                    <div className="w-16 h-16 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <FileText className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                      No tienes cotizaciones activas
+                    </h3>
+                    <p className="text-slate-500 mb-6 max-w-md mx-auto text-sm">
+                      Envía tu primer Requerimiento de Cotización (RFQ) para notificar en tiempo real a proveedores verificados.
+                    </p>
+                    <button
+                      onClick={() => setIsNewModalOpen(true)}
+                      className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white text-xs uppercase tracking-widest font-bold rounded-lg transition"
+                    >
+                      Crear mi primer RFQ
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 shadow-sm rounded-2xl overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-white/5 text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
+                          <th className="px-6 py-4 font-semibold">Requerimiento</th>
+                          <th className="px-6 py-4 font-semibold">Categoría</th>
+                          <th className="px-6 py-4 font-semibold">Estado</th>
+                          <th className="px-6 py-4 font-semibold text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rfqs.map((rfq) => (
+                          <tr
+                            key={rfq.id}
+                            className="border-b border-slate-100 dark:border-white/5 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                          >
+                            <td className="px-6 py-5">
+                              <p className="font-bold text-slate-900 dark:text-white text-sm mb-1">
+                                {rfq.title}
+                              </p>
+                              <p className="text-xs text-slate-500 font-mono tabular-nums">
+                                #{rfq.id.toString().padStart(5, '0')} ·{' '}
+                                {new Date(rfq.createdAt).toLocaleDateString('es-AR')}
+                              </p>
+                            </td>
+                            <td className="px-6 py-5">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300">
+                                {rfq.category}
+                              </span>
+                            </td>
+                            <td className="px-6 py-5">
+                              {rfq.status === 'pending' && (
+                                <span className="inline-flex items-center text-orange-500 text-xs font-semibold">
+                                  <Clock className="w-3.5 h-3.5 mr-1" /> Notificando Proveedores
+                                </span>
+                              )}
+                              {rfq.status === 'quoted' && (
+                                <span className="inline-flex items-center text-purple-500 text-xs font-semibold">
+                                  <FileText className="w-3.5 h-3.5 mr-1" /> Cotizaciones Recibidas
+                                </span>
+                              )}
+                              {rfq.status === 'awarded' && (
+                                <span className="inline-flex items-center text-emerald-500 text-xs font-semibold">
+                                  <CheckCircle className="w-3.5 h-3.5 mr-1" /> Adjudicado
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-5 text-right">
+                              <button
+                                onClick={() => setNegotiationRfq(rfq)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500/10 hover:bg-orange-500 text-orange-600 dark:text-orange-400 hover:text-white rounded-xl text-xs font-bold transition whitespace-nowrap"
+                              >
+                                <span>Negociar Ofertas</span>
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AREA 02C: ADN VECTORIAL & ODOO */}
+            {activeView === 'adn' && (
+              <div className="space-y-6">
+                <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-500 block mb-1">
+                        Motor pgvector + Corredores OSRM
+                      </span>
+                      <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                        ADN Empresarial (Matching Norte ↔ Patagonia)
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Define qué ofrece tu empresa y qué insumos demanda para detectar contrapartes compatibles y enviarlas a Contactos CRM + ARN IA.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <button
+                        onClick={async () => {
+                          setIsMatchingAdn(true);
+                          try {
+                            const token = await auth.getToken();
+                            const res = await fetch(`${getApiUrl()}/api/adn/match`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({
+                                offers: myOffersInput,
+                                demands: myDemandsInput,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (res.ok && Array.isArray(data.matches) && data.matches.length > 0) {
+                              setAdnMatches(data.matches);
+                              setOdooSyncStatus(
+                                'Matching vectorial pgvector + corredores OSRM actualizado desde servidor.'
+                              );
+                            } else {
+                              setAdnMatches(
+                                computeAdnMatches({
+                                  myOffers: myOffersInput
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                  myDemands: myDemandsInput
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              );
+                            }
+                          } catch {
+                            setAdnMatches(
+                              computeAdnMatches({
+                                myOffers: myOffersInput
+                                  .split(',')
+                                  .map((s) => s.trim())
+                                  .filter(Boolean),
+                                myDemands: myDemandsInput
+                                  .split(',')
+                                  .map((s) => s.trim())
+                                  .filter(Boolean),
+                              })
+                            );
+                          } finally {
+                            setIsMatchingAdn(false);
+                            setTimeout(() => setOdooSyncStatus(null), 4000);
+                          }
+                        }}
+                        disabled={isMatchingAdn}
+                        className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        {isMatchingAdn ? 'Calculando pgvector...' : 'Calcular Match IA'}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const token = await auth.getToken();
+                            const res = await fetch(`${getApiUrl()}/api/crm/sync-odoo`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({
+                                offers: myOffersInput,
+                                demands: myDemandsInput,
+                                userEmail: auth.currentUser?.email || 'miembro@xpatagonia.online',
+                              }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
+                            setOdooSyncStatus(
+                              data.forwardedToN8n
+                                ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
+                                : 'Perfil ADN guardado en servidor y registrado en bitácora n8n.'
+                            );
+                          } catch (err: any) {
+                            setOdooSyncStatus(
+                              `No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`
+                            );
+                          }
+                          setTimeout(() => setOdooSyncStatus(null), 4000);
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap"
+                      >
+                        <Database className="w-4 h-4" />
+                        Sincronizar Odoo (n8n)
+                      </button>
+                    </div>
+                  </div>
+
+                  {odooSyncStatus && (
+                    <div className="mb-4 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                      {odooSyncStatus}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                        Capacidades / Productos que Ofrecemos
+                      </label>
+                      <input
+                        type="text"
+                        value={myOffersInput}
+                        onChange={(e) => setMyOffersInput(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                        Insumos / Servicios que Demandamos
+                      </label>
+                      <input
+                        type="text"
+                        value={myDemandsInput}
+                        onChange={(e) => setMyDemandsInput(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {adnMatches.map((match) => (
+                    <div
+                      key={match.company.id}
+                      className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                            {match.compatibilityPercent}% Match ADN
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-semibold text-purple-600 dark:text-purple-400">
+                            {match.company.tierLabel}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-slate-500 font-mono tabular-nums">
+                            ~{match.estimatedRoadKm} km por {match.corridorSynergy}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                          {match.company.name}
+                        </h3>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          {match.matchReason} · Base: {match.company.city}, {match.company.province}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/logistica?tab=rutas&origin=${encodeURIComponent(
+                                match.company.adnComercial.ciudadBase
+                              )}&dest=${encodeURIComponent('Añelo (Hub Vaca Muerta)')}`
+                            )
+                          }
+                          className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:border-orange-500/40 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          <Route className="w-3.5 h-3.5 text-orange-500" />
+                          Calcular Flete
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const res = await syncCompanyToUserCRM(match.company);
+                            setOdooSyncStatus(res.message);
+                            loadWorkspaceMeta();
+                            setTimeout(() => setOdooSyncStatus(null), 4000);
+                          }}
+                          className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          CRM + ARN IA
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AREA 03: PRODUCTOS */}
+            {activeView === 'products' && <CompanyProducts />}
+
+            {/* AREA 04: LOGÍSTICA & CONTROL DE FLOTA */}
+            {activeView === 'fleet' && (
+              <FleetControlCenter onMembershipActivated={loadWorkspaceMeta} />
+            )}
+
+            {/* AREA 05: ORGANIZACIÓN, EQUIPO & PLAN SAAS */}
+            {activeView === 'team' && (
+              <TeamSeatsManager onOrganizationUpdated={(updated) => setOrgInfo(updated)} />
+            )}
+          </div>
+        </main>
       </div>
 
       {mounted && createPortal(modalContent, document.body)}
 
-      {/* MODAL DE NEGOCIACIÓN Y CIERRE DE RFQ */}
       {negotiationRfq && (
         <RfqNegotiationModal
           rfq={negotiationRfq}
@@ -900,4 +1404,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

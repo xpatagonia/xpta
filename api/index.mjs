@@ -18,10 +18,16 @@ __export(schema_exports, {
   chatMessages: () => chatMessages,
   companyProfiles: () => companyProfiles,
   contacts: () => contacts,
+  fleetDrivers: () => fleetDrivers,
+  fleetVehicles: () => fleetVehicles,
   insights: () => insights,
   inventoryItems: () => inventoryItems,
+  logisticsContracts: () => logisticsContracts,
   memberships: () => memberships,
   moduleRequests: () => moduleRequests,
+  orgInvitations: () => orgInvitations,
+  orgMembers: () => orgMembers,
+  organizations: () => organizations,
   permissions: () => permissions,
   products: () => products,
   rfqs: () => rfqs,
@@ -33,7 +39,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
-var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, siteSettings, automationLogs, arnRules, arnOpportunities, arnActionsQueue, chatMessages;
+var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts;
 var init_schema = __esm({
   "src/db/schema.ts"() {
     users = pgTable("users", {
@@ -131,6 +137,7 @@ var init_schema = __esm({
     contacts = pgTable("contacts", {
       id: serial("id").primaryKey(),
       userId: text("user_uid"),
+      organizationId: integer("organization_id"),
       entityType: text("entity_type").default("contact"),
       name: text("name").notNull(),
       company: text("company"),
@@ -144,6 +151,11 @@ var init_schema = __esm({
       socialMedia: text("social_media"),
       industry: text("industry"),
       location: text("location"),
+      arnOpportunityId: integer("arn_opportunity_id"),
+      aiScore: integer("ai_score").default(0),
+      leadStage: text("lead_stage").default("nuevo"),
+      lastArnSyncAt: timestamp("last_arn_sync_at"),
+      odooSynced: boolean("odoo_synced").default(false),
       createdAt: timestamp("created_at").defaultNow()
     });
     insights = pgTable("insights", {
@@ -160,6 +172,7 @@ var init_schema = __esm({
     inventoryItems = pgTable("inventory_items", {
       id: serial("id").primaryKey(),
       userId: text("user_uid"),
+      organizationId: integer("organization_id"),
       sku: text("sku"),
       name: text("name"),
       category: text("category"),
@@ -203,11 +216,11 @@ var init_schema = __esm({
     memberships = pgTable("memberships", {
       id: serial("id").primaryKey(),
       name: text("name").notNull(),
-      // e.g., 'Basic', 'Premium', 'Enterprise'
+      // e.g., 'Basic', 'Pro Industria', 'Corporativo', 'Logística & Flota'
       tier: integer("tier").notNull(),
       // 1, 2, 3
       price: integer("price").notNull().default(0),
-      // Monthly price in cents/pesos
+      // Monthly price in ARS
       features: jsonb("features").default("[]"),
       // List of features enabled
       maxProducts: integer("max_products").default(10),
@@ -228,6 +241,39 @@ var init_schema = __esm({
       autoRenew: boolean("auto_renew").default(true),
       createdAt: timestamp("created_at").defaultNow()
     });
+    organizations = pgTable("organizations", {
+      id: serial("id").primaryKey(),
+      ownerUid: text("owner_uid").notNull().unique(),
+      name: text("name").notNull(),
+      planSlug: text("plan_slug").notNull().default("gratis"),
+      // 'gratis' (2) | 'pro' (5) | 'corporativo' (10)
+      seatLimit: integer("seat_limit").notNull().default(2),
+      logisticsPlanActive: boolean("logistics_plan_active").notNull().default(false),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    orgMembers = pgTable("org_members", {
+      id: serial("id").primaryKey(),
+      organizationId: integer("organization_id").notNull(),
+      userUid: text("user_uid").notNull(),
+      email: text("email").notNull(),
+      orgRole: text("org_role").notNull().default("comercial"),
+      // 'company_admin' | 'comercial' | 'operador'
+      status: text("status").notNull().default("active"),
+      joinedAt: timestamp("joined_at").defaultNow()
+    });
+    orgInvitations = pgTable("org_invitations", {
+      id: serial("id").primaryKey(),
+      organizationId: integer("organization_id").notNull(),
+      email: text("email").notNull(),
+      orgRole: text("org_role").notNull().default("comercial"),
+      invitedByUid: text("invited_by_uid").notNull(),
+      token: text("token").notNull(),
+      status: text("status").notNull().default("pending"),
+      // 'pending' | 'accepted' | 'revoked'
+      expiresAt: timestamp("expires_at"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
     siteSettings = pgTable("site_settings", {
       key: text("key").primaryKey(),
       // e.g., 'global_site_config'
@@ -246,6 +292,7 @@ var init_schema = __esm({
     });
     arnRules = pgTable("arn_rules", {
       userId: text("user_uid").primaryKey(),
+      organizationId: integer("organization_id"),
       mode: text("mode").notNull().default("hybrid"),
       // 'hybrid' | 'manual' | 'auto'
       autoApproveMaxUsd: integer("auto_approve_max_usd").notNull().default(1500),
@@ -258,6 +305,8 @@ var init_schema = __esm({
     arnOpportunities = pgTable("arn_opportunities", {
       id: serial("id").primaryKey(),
       ownerUid: text("owner_uid").notNull(),
+      organizationId: integer("organization_id"),
+      contactId: integer("contact_id"),
       companyName: text("company_name").notNull(),
       contactName: text("contact_name"),
       contactEmail: text("contact_email"),
@@ -265,7 +314,7 @@ var init_schema = __esm({
       category: text("category").default("General"),
       corridor: text("corridor"),
       source: text("source").notNull().default("manual"),
-      // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger'
+      // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger' | 'crm_contact'
       stage: text("stage").notNull().default("detected"),
       // 'detected' | 'qualified' | 'quoted' | 'negotiating' | 'awarded' | 'archived'
       aiScore: integer("ai_score").notNull().default(70),
@@ -280,6 +329,7 @@ var init_schema = __esm({
     arnActionsQueue = pgTable("arn_actions_queue", {
       id: serial("id").primaryKey(),
       ownerUid: text("owner_uid").notNull(),
+      organizationId: integer("organization_id"),
       opportunityId: integer("opportunity_id"),
       actionType: text("action_type").notNull(),
       // 'send_quote_email' | 'send_followup_email' | 'create_logistics_load' | 'reserve_inventory' | 'notify_providers'
@@ -307,6 +357,55 @@ var init_schema = __esm({
       msgType: text("msg_type").notNull().default("text"),
       metadata: jsonb("metadata").default("{}"),
       createdAt: timestamp("created_at").defaultNow()
+    });
+    fleetVehicles = pgTable("fleet_vehicles", {
+      id: serial("id").primaryKey(),
+      organizationId: integer("organization_id").notNull(),
+      ownerUid: text("owner_uid").notNull(),
+      name: text("name").notNull(),
+      plate: text("plate").notNull(),
+      vehicleType: text("vehicle_type").notNull().default("Semirremolque 28t"),
+      capacityTons: integer("capacity_tons").notNull().default(28),
+      corridor: text("corridor").default("RN 3 / Patag\xF3nica"),
+      vtvExpiry: text("vtv_expiry"),
+      insuranceExpiry: text("insurance_expiry"),
+      status: text("status").notNull().default("disponible"),
+      // 'disponible' | 'en_ruta' | 'mantenimiento'
+      gpsLabel: text("gps_label"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    fleetDrivers = pgTable("fleet_drivers", {
+      id: serial("id").primaryKey(),
+      organizationId: integer("organization_id").notNull(),
+      ownerUid: text("owner_uid").notNull(),
+      fullName: text("full_name").notNull(),
+      dni: text("dni"),
+      lintiLicense: text("linti_license"),
+      phone: text("phone"),
+      assignedVehicleId: integer("assigned_vehicle_id"),
+      status: text("status").notNull().default("disponible"),
+      // 'disponible' | 'en_viaje' | 'licencia'
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    logisticsContracts = pgTable("logistics_contracts", {
+      id: serial("id").primaryKey(),
+      loadId: text("load_id").notNull(),
+      originName: text("origin_name").notNull(),
+      destinationName: text("destination_name").notNull(),
+      shipperOrgId: integer("shipper_org_id"),
+      shipperUid: text("shipper_uid"),
+      carrierOrgId: integer("carrier_org_id").notNull(),
+      carrierUid: text("carrier_uid").notNull(),
+      carrierName: text("carrier_name").notNull(),
+      vehicleId: integer("vehicle_id"),
+      driverId: integer("driver_id"),
+      agreedPriceArs: integer("agreed_price_ars").notNull().default(0),
+      status: text("status").notNull().default("ofertado"),
+      // 'ofertado' | 'adjudicado' | 'en_transito' | 'entregado' | 'cancelado'
+      trackingCode: text("tracking_code"),
+      notes: text("notes"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
     });
   }
 });
@@ -661,7 +760,7 @@ import "dotenv/config";
 import fs from "fs";
 import express from "express";
 import path from "path";
-import crypto from "crypto";
+import crypto2 from "crypto";
 import cors from "cors";
 import { createClient as createClient4 } from "@supabase/supabase-js";
 
@@ -1026,6 +1125,134 @@ async function ensureProductionTables() {
         target_price_ars bigint,
         status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'bidding', 'assigned', 'completed')),
         created_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS public.organizations (
+        id serial PRIMARY KEY,
+        owner_uid text NOT NULL UNIQUE,
+        name text NOT NULL,
+        plan_slug text NOT NULL DEFAULT 'gratis',
+        seat_limit integer NOT NULL DEFAULT 2,
+        logistics_plan_active boolean NOT NULL DEFAULT false,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.org_members (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        user_uid text NOT NULL,
+        email text NOT NULL,
+        org_role text NOT NULL DEFAULT 'comercial',
+        status text NOT NULL DEFAULT 'active',
+        joined_at timestamptz DEFAULT now(),
+        UNIQUE (organization_id, user_uid)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.org_invitations (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        email text NOT NULL,
+        org_role text NOT NULL DEFAULT 'comercial',
+        invited_by_uid text NOT NULL,
+        token text NOT NULL,
+        status text NOT NULL DEFAULT 'pending',
+        expires_at timestamptz,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.contacts (
+        id serial PRIMARY KEY,
+        user_uid text,
+        organization_id integer,
+        entity_type text DEFAULT 'contact',
+        name text NOT NULL,
+        company text,
+        role text,
+        email text,
+        phone text,
+        type text,
+        status text,
+        website text,
+        cuit_rut text,
+        social_media text,
+        industry text,
+        location text,
+        arn_opportunity_id integer,
+        ai_score integer DEFAULT 0,
+        lead_stage text DEFAULT 'nuevo',
+        last_arn_sync_at timestamptz,
+        odoo_synced boolean DEFAULT false,
+        created_at timestamptz DEFAULT now()
+      );
+
+      ALTER TABLE IF EXISTS public.contacts
+        ADD COLUMN IF NOT EXISTS organization_id integer,
+        ADD COLUMN IF NOT EXISTS arn_opportunity_id integer,
+        ADD COLUMN IF NOT EXISTS ai_score integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS lead_stage text DEFAULT 'nuevo',
+        ADD COLUMN IF NOT EXISTS last_arn_sync_at timestamptz,
+        ADD COLUMN IF NOT EXISTS odoo_synced boolean DEFAULT false;
+
+      ALTER TABLE IF EXISTS public.arn_rules
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.arn_opportunities
+        ADD COLUMN IF NOT EXISTS organization_id integer,
+        ADD COLUMN IF NOT EXISTS contact_id integer;
+
+      ALTER TABLE IF EXISTS public.arn_actions_queue
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.inventory_items
+        ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      CREATE TABLE IF NOT EXISTS public.fleet_vehicles (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        owner_uid text NOT NULL,
+        name text NOT NULL,
+        plate text NOT NULL,
+        vehicle_type text NOT NULL DEFAULT 'Semirremolque 28t',
+        capacity_tons integer NOT NULL DEFAULT 28,
+        corridor text DEFAULT 'RN 3 / Patag\xF3nica',
+        vtv_expiry text,
+        insurance_expiry text,
+        status text NOT NULL DEFAULT 'disponible',
+        gps_label text,
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.fleet_drivers (
+        id serial PRIMARY KEY,
+        organization_id integer NOT NULL,
+        owner_uid text NOT NULL,
+        full_name text NOT NULL,
+        dni text,
+        linti_license text,
+        phone text,
+        assigned_vehicle_id integer,
+        status text NOT NULL DEFAULT 'disponible',
+        created_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.logistics_contracts (
+        id serial PRIMARY KEY,
+        load_id text NOT NULL,
+        origin_name text NOT NULL,
+        destination_name text NOT NULL,
+        shipper_org_id integer,
+        shipper_uid text,
+        carrier_org_id integer NOT NULL,
+        carrier_uid text NOT NULL,
+        carrier_name text NOT NULL,
+        vehicle_id integer,
+        driver_id integer,
+        agreed_price_ars integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT 'ofertado',
+        tracking_code text,
+        notes text,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
       );
     `);
     arnTablesEnsured = true;
@@ -1824,6 +2051,1012 @@ function sortCompaniesBySubscriptionTier(items) {
   });
 }
 
+// src/server/saasAndFleetRoutes.ts
+init_db();
+import crypto from "crypto";
+
+// src/services/saasPlans.ts
+var SAAS_PLANS = {
+  gratis: {
+    slug: "gratis",
+    membershipLabel: "Basic",
+    displayName: "Plan Gratis / Inicial",
+    seatLimit: 2,
+    priceMonthlyArs: 0,
+    priceLabel: "Gratis (hasta 2 usuarios)",
+    tier: 1
+  },
+  pro: {
+    slug: "pro",
+    membershipLabel: "Pro Industria",
+    displayName: "Plan Pro Industria",
+    seatLimit: 5,
+    priceMonthlyArs: 65e3,
+    priceLabel: "$65.000 ARS/mes",
+    tier: 2
+  },
+  corporativo: {
+    slug: "corporativo",
+    membershipLabel: "Corporativo",
+    displayName: "Plan Corporativo",
+    seatLimit: 10,
+    priceMonthlyArs: 14e4,
+    priceLabel: "$140.000 ARS/mes",
+    tier: 3
+  }
+};
+var LOGISTICS_MEMBERSHIP = {
+  slug: "logistica_flota",
+  displayName: "Membres\xEDa Log\xEDstica & Control de Flota",
+  priceMonthlyArs: 95e3,
+  priceLabel: "$95.000 ARS/mes",
+  seatLimit: 10
+};
+function resolvePlanConfig(input) {
+  const normalized = String(input || "gratis").trim().toLowerCase();
+  if (normalized === "corporativo" || normalized === "enterprise" || normalized.includes("corporativo")) {
+    return SAAS_PLANS.corporativo;
+  }
+  if (normalized === "pro" || normalized === "premium" || normalized.includes("pro")) {
+    return SAAS_PLANS.pro;
+  }
+  return SAAS_PLANS.gratis;
+}
+function canAddOrganizationSeat(currentUsedSeats, seatLimit) {
+  const used = Math.max(0, Number(currentUsedSeats) || 0);
+  const limit = Math.max(1, Number(seatLimit) || 2);
+  const remaining = Math.max(0, limit - used);
+  if (used >= limit) {
+    return {
+      allowed: false,
+      remaining: 0,
+      reason: `Alcanzaste el l\xEDmite de ${limit} usuarios de tu plan actual. Actualiz\xE1 tu plan o liber\xE1 un asiento para invitar a otro miembro.`
+    };
+  }
+  return { allowed: true, remaining };
+}
+function canAccessLogisticsSuite(params) {
+  if (params.logisticsPlanActive) return true;
+  const membership = String(params.membershipName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (membership.includes("logist")) return true;
+  if (params.roleName === "system_admin") return true;
+  return false;
+}
+
+// src/server/saasAndFleetRoutes.ts
+async function resolveTenantContext(uid, email, membershipName, roleName) {
+  if (!hasDatabaseConfig()) return null;
+  await ensureProductionTables();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (normalizedEmail) {
+    const inviteRes = await pool.query(
+      `SELECT * FROM public.org_invitations
+       WHERE lower(email) = $1 AND status = 'pending'
+       ORDER BY created_at DESC LIMIT 1`,
+      [normalizedEmail]
+    );
+    const pendingInvite = inviteRes.rows?.[0];
+    if (pendingInvite) {
+      await pool.query(
+        `INSERT INTO public.org_members (organization_id, user_uid, email, org_role, status)
+         VALUES ($1, $2, $3, $4, 'active')
+         ON CONFLICT (organization_id, user_uid) DO UPDATE SET
+           status = 'active',
+           org_role = EXCLUDED.org_role`,
+        [pendingInvite.organization_id, uid, normalizedEmail, pendingInvite.org_role || "comercial"]
+      );
+      await pool.query(
+        `UPDATE public.org_invitations SET status = 'accepted' WHERE id = $1`,
+        [pendingInvite.id]
+      );
+    }
+  }
+  const memberRes = await pool.query(
+    `SELECT o.*, om.org_role
+     FROM public.org_members om
+     JOIN public.organizations o ON o.id = om.organization_id
+     WHERE om.user_uid = $1 AND om.status = 'active'
+     ORDER BY om.id ASC LIMIT 1`,
+    [uid]
+  );
+  let orgRow = memberRes.rows?.[0];
+  let orgRole = orgRow?.org_role || "company_admin";
+  if (!orgRow) {
+    const plan2 = resolvePlanConfig(membershipName);
+    const profileRes = await pool.query(`SELECT company_name, industry FROM public.company_profiles WHERE user_uid = $1`, [uid]).catch(() => ({ rows: [] }));
+    const profileRow = profileRes.rows?.[0];
+    const orgName = profileRow?.company_name?.trim() || (normalizedEmail ? `${normalizedEmail.split("@")[0]} \xB7 PyME` : "Mi Empresa B2B");
+    const isLogCat = String(profileRow?.industry || "").toUpperCase().includes("LOGIST") || String(membershipName || "").toLowerCase().includes("logist");
+    const insertedOrg = await pool.query(
+      `INSERT INTO public.organizations (owner_uid, name, plan_slug, seat_limit, logistics_plan_active)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (owner_uid) DO UPDATE SET updated_at = now()
+       RETURNING *`,
+      [uid, orgName, plan2.slug, plan2.seatLimit, isLogCat]
+    );
+    orgRow = insertedOrg.rows[0];
+    orgRole = "company_admin";
+    await pool.query(
+      `INSERT INTO public.org_members (organization_id, user_uid, email, org_role, status)
+       VALUES ($1, $2, $3, 'company_admin', 'active')
+       ON CONFLICT (organization_id, user_uid) DO NOTHING`,
+      [orgRow.id, uid, normalizedEmail || uid]
+    );
+    await pool.query(
+      `UPDATE public.contacts SET organization_id = $1 WHERE user_uid = $2 AND organization_id IS NULL`,
+      [orgRow.id, uid]
+    ).catch(() => {
+    });
+    await pool.query(
+      `UPDATE public.arn_opportunities SET organization_id = $1 WHERE owner_uid = $2 AND organization_id IS NULL`,
+      [orgRow.id, uid]
+    ).catch(() => {
+    });
+    await pool.query(
+      `UPDATE public.arn_actions_queue SET organization_id = $1 WHERE owner_uid = $2 AND organization_id IS NULL`,
+      [orgRow.id, uid]
+    ).catch(() => {
+    });
+  }
+  const [membersCountRes, invitesCountRes] = await Promise.all([
+    pool.query(
+      `SELECT count(*)::int AS cnt FROM public.org_members WHERE organization_id = $1 AND status = 'active'`,
+      [orgRow.id]
+    ),
+    pool.query(
+      `SELECT count(*)::int AS cnt FROM public.org_invitations WHERE organization_id = $1 AND status = 'pending'`,
+      [orgRow.id]
+    )
+  ]);
+  const activeMembersCount = Number(membersCountRes.rows?.[0]?.cnt || 1);
+  const pendingInvitesCount = Number(invitesCountRes.rows?.[0]?.cnt || 0);
+  const plan = resolvePlanConfig(orgRow.plan_slug || membershipName);
+  const seatLimit = Number(orgRow.seat_limit) || plan.seatLimit;
+  const hasLogisticsAccess = canAccessLogisticsSuite({
+    logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    membershipName,
+    roleName
+  });
+  return {
+    organizationId: Number(orgRow.id),
+    ownerUid: String(orgRow.owner_uid),
+    orgName: String(orgRow.name),
+    planSlug: plan.slug,
+    planName: plan.displayName,
+    seatLimit,
+    usedSeats: activeMembersCount + pendingInvitesCount,
+    activeMembersCount,
+    pendingInvitesCount,
+    orgRole,
+    logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    hasLogisticsAccess
+  };
+}
+async function upsertLinkedContactFromArn(params) {
+  if (!hasDatabaseConfig()) return null;
+  await ensureProductionTables();
+  const cleanEmail = String(params.contactEmail || "").trim().toLowerCase();
+  const cleanCompany = String(params.companyName || "").trim();
+  const orgId = params.organizationId || null;
+  let existingId = params.contactId || null;
+  if (!existingId && cleanEmail) {
+    const byEmail = await pool.query(
+      `SELECT id FROM public.contacts
+       WHERE ($1::int IS NOT NULL AND organization_id = $1 OR user_uid = $2)
+         AND lower(email) = $3
+       ORDER BY id DESC LIMIT 1`,
+      [orgId, params.ownerUid, cleanEmail]
+    );
+    if (byEmail.rows?.[0]?.id) existingId = Number(byEmail.rows[0].id);
+  }
+  if (!existingId && cleanCompany) {
+    const byCompany = await pool.query(
+      `SELECT id FROM public.contacts
+       WHERE ($1::int IS NOT NULL AND organization_id = $1 OR user_uid = $2)
+         AND lower(company) = lower($3)
+       ORDER BY id DESC LIMIT 1`,
+      [orgId, params.ownerUid, cleanCompany]
+    );
+    if (byCompany.rows?.[0]?.id) existingId = Number(byCompany.rows[0].id);
+  }
+  if (existingId) {
+    await pool.query(
+      `UPDATE public.contacts
+       SET organization_id = COALESCE(organization_id, $1),
+           arn_opportunity_id = $2,
+           ai_score = $3,
+           lead_stage = $4,
+           last_arn_sync_at = now(),
+           industry = COALESCE(NULLIF($5, ''), industry),
+           location = COALESCE(NULLIF($6, ''), location),
+           cuit_rut = COALESCE(NULLIF($7, ''), cuit_rut)
+       WHERE id = $8`,
+      [
+        orgId,
+        params.opportunityId,
+        params.aiScore,
+        params.stage,
+        params.category || "",
+        params.corridor || "",
+        params.cuit || "",
+        existingId
+      ]
+    );
+    await pool.query(
+      `UPDATE public.arn_opportunities SET contact_id = $1 WHERE id = $2`,
+      [existingId, params.opportunityId]
+    );
+    return existingId;
+  }
+  const inserted = await pool.query(
+    `INSERT INTO public.contacts (
+      user_uid, organization_id, entity_type, name, company, role, email,
+      type, status, cuit_rut, industry, location,
+      arn_opportunity_id, ai_score, lead_stage, last_arn_sync_at
+    ) VALUES ($1,$2,'contact',$3,$4,'Contacto Comercial',$5,$6,'active',$7,$8,$9,$10,$11,$12,now())
+    RETURNING id`,
+    [
+      params.ownerUid,
+      orgId,
+      params.contactName || cleanCompany || "Contacto B2B",
+      cleanCompany || "Empresa Detectada",
+      cleanEmail || null,
+      params.source === "rfq" ? "Cliente / Comprador" : "Prospecto ARN",
+      params.cuit || null,
+      params.category || "Servicios Industriales",
+      params.corridor || "Patagonia",
+      params.opportunityId,
+      params.aiScore,
+      params.stage
+    ]
+  );
+  const newContactId = Number(inserted.rows[0].id);
+  await pool.query(
+    `UPDATE public.arn_opportunities SET contact_id = $1 WHERE id = $2`,
+    [newContactId, params.opportunityId]
+  );
+  return newContactId;
+}
+function registerSaasAndFleetRoutes(app, deps) {
+  app.get("/api/org/team", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) {
+        return res.json({
+          organization: {
+            id: 0,
+            name: "Mi Empresa B2B",
+            planSlug: "gratis",
+            planName: SAAS_PLANS.gratis.displayName,
+            seatLimit: 2,
+            usedSeats: 1,
+            logisticsPlanActive: false,
+            hasLogisticsAccess: false
+          },
+          members: [
+            {
+              user_uid: req.user.uid,
+              email: req.user.email,
+              org_role: "company_admin",
+              status: "active"
+            }
+          ],
+          invitations: [],
+          plansCatalog: Object.values(SAAS_PLANS),
+          logisticsMembership: LOGISTICS_MEMBERSHIP
+        });
+      }
+      const [membersRes, invitesRes] = await Promise.all([
+        pool.query(
+          `SELECT id, user_uid, email, org_role, status, joined_at
+           FROM public.org_members
+           WHERE organization_id = $1 AND status = 'active'
+           ORDER BY joined_at ASC`,
+          [tenant.organizationId]
+        ),
+        pool.query(
+          `SELECT id, email, org_role, status, created_at
+           FROM public.org_invitations
+           WHERE organization_id = $1 AND status = 'pending'
+           ORDER BY created_at DESC`,
+          [tenant.organizationId]
+        )
+      ]);
+      res.json({
+        organization: tenant,
+        members: membersRes.rows || [],
+        invitations: invitesRes.rows || [],
+        plansCatalog: Object.values(SAAS_PLANS),
+        logisticsMembership: LOGISTICS_MEMBERSHIP
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/org/invitations", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "Base de datos no configurada" });
+      if (tenant.orgRole !== "company_admin" && req.user.roleName !== "system_admin") {
+        return res.status(403).json({
+          error: "Solo el Administrador de la Empresa puede invitar nuevos usuarios."
+        });
+      }
+      const inviteEmail = String(req.body?.email || "").trim().toLowerCase();
+      const orgRole = ["company_admin", "comercial", "operador"].includes(req.body?.orgRole) ? req.body.orgRole : "comercial";
+      if (!inviteEmail || !inviteEmail.includes("@")) {
+        return res.status(400).json({ error: "Ingresa un email corporativo v\xE1lido." });
+      }
+      const duplicateMember = await pool.query(
+        `SELECT id FROM public.org_members WHERE organization_id = $1 AND lower(email) = $2 AND status = 'active'`,
+        [tenant.organizationId, inviteEmail]
+      );
+      if (duplicateMember.rows.length > 0) {
+        return res.status(400).json({ error: "Este usuario ya forma parte del equipo de la empresa." });
+      }
+      const duplicateInvite = await pool.query(
+        `SELECT id FROM public.org_invitations WHERE organization_id = $1 AND lower(email) = $2 AND status = 'pending'`,
+        [tenant.organizationId, inviteEmail]
+      );
+      if (duplicateInvite.rows.length > 0) {
+        return res.status(400).json({ error: "Ya existe una invitaci\xF3n pendiente para ese email." });
+      }
+      const seatCheck = canAddOrganizationSeat(tenant.usedSeats, tenant.seatLimit);
+      if (!seatCheck.allowed) {
+        return res.status(403).json({
+          error: seatCheck.reason,
+          code: "SEAT_LIMIT_REACHED",
+          seatLimit: tenant.seatLimit,
+          usedSeats: tenant.usedSeats
+        });
+      }
+      const token = crypto.randomBytes(16).toString("hex");
+      const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1e3);
+      const inserted = await pool.query(
+        `INSERT INTO public.org_invitations (organization_id, email, org_role, invited_by_uid, token, status, expires_at)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+         RETURNING *`,
+        [tenant.organizationId, inviteEmail, orgRole, req.user.uid, token, expiresAt]
+      );
+      if (process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD) {
+        try {
+          const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+          await sendEmail2(
+            inviteEmail,
+            `Invitaci\xF3n a ${tenant.orgName} en xPatagonia B2B`,
+            `Hola,
+
+Te invitaron a sumarte al espacio de trabajo de ${tenant.orgName} en xPatagonia con rol "${orgRole}".
+
+Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${inviteEmail}) para acceder autom\xE1ticamente al CRM, ARN IA y los m\xF3dulos de tu empresa.`
+          );
+        } catch {
+        }
+      }
+      await deps.recordAutomationEvent("outbound_n8n", "org.member.invited", "processed", {
+        organizationId: tenant.organizationId,
+        email: inviteEmail,
+        orgRole
+      });
+      res.json({ success: true, invitation: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/org/invitations/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (tenant.orgRole !== "company_admin" && req.user.roleName !== "system_admin") {
+        return res.status(403).json({ error: "Permisos insuficientes" });
+      }
+      await pool.query(
+        `UPDATE public.org_invitations SET status = 'revoked' WHERE id = $1 AND organization_id = $2`,
+        [Number(req.params.id), tenant.organizationId]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.patch("/api/org/members/:uid/role", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (tenant.orgRole !== "company_admin" && req.user.roleName !== "system_admin") {
+        return res.status(403).json({ error: "Permisos insuficientes" });
+      }
+      const nextRole = ["company_admin", "comercial", "operador"].includes(req.body?.orgRole) ? req.body.orgRole : "comercial";
+      await pool.query(
+        `UPDATE public.org_members SET org_role = $1 WHERE organization_id = $2 AND user_uid = $3`,
+        [nextRole, tenant.organizationId, req.params.uid]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/org/members/:uid", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (tenant.orgRole !== "company_admin" && req.user.roleName !== "system_admin") {
+        return res.status(403).json({ error: "Permisos insuficientes" });
+      }
+      if (req.params.uid === tenant.ownerUid) {
+        return res.status(400).json({ error: "No pod\xE9s eliminar al titular principal de la empresa." });
+      }
+      await pool.query(
+        `DELETE FROM public.org_members WHERE organization_id = $1 AND user_uid = $2`,
+        [tenant.organizationId, req.params.uid]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/org/plan", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (tenant.orgRole !== "company_admin" && req.user.roleName !== "system_admin") {
+        return res.status(403).json({ error: "Solo el Administrador de la Empresa puede cambiar el plan." });
+      }
+      const body = req.body || {};
+      const nextPlan = body.planSlug ? resolvePlanConfig(body.planSlug) : resolvePlanConfig(tenant.planSlug);
+      const nextLogistics = typeof body.logisticsPlanActive === "boolean" ? body.logisticsPlanActive : tenant.logisticsPlanActive;
+      const nextName = typeof body.orgName === "string" && body.orgName.trim() ? body.orgName.trim() : tenant.orgName;
+      if (tenant.usedSeats > nextPlan.seatLimit) {
+        return res.status(400).json({
+          error: `Actualmente ten\xE9s ${tenant.usedSeats} asientos ocupados. Liber\xE1 miembros o invitaciones antes de bajar a un plan de ${nextPlan.seatLimit} usuarios.`
+        });
+      }
+      await pool.query(
+        `UPDATE public.organizations
+         SET plan_slug = $1, seat_limit = $2, logistics_plan_active = $3, name = $4, updated_at = now()
+         WHERE id = $5`,
+        [nextPlan.slug, nextPlan.seatLimit, nextLogistics, nextName, tenant.organizationId]
+      );
+      await deps.recordAutomationEvent("outbound_n8n", "saas.plan.updated", "processed", {
+        organizationId: tenant.organizationId,
+        planSlug: nextPlan.slug,
+        seatLimit: nextPlan.seatLimit,
+        logisticsPlanActive: nextLogistics
+      });
+      const updatedTenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        nextPlan.membershipLabel,
+        req.user.roleName
+      );
+      res.json({ success: true, organization: updatedTenant });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.get("/api/crm/contacts", requireAuth, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.json({ contacts: [] });
+      const rows = await pool.query(
+        `SELECT c.*,
+                ao.stage AS opp_stage,
+                ao.ai_score AS opp_ai_score,
+                ao.estimated_amount_usd AS opp_amount_usd,
+                ao.recommended_action AS opp_recommended_action
+         FROM public.contacts c
+         LEFT JOIN public.arn_opportunities ao ON ao.id = c.arn_opportunity_id
+         WHERE c.organization_id = $1 OR c.user_uid = $2
+         ORDER BY c.created_at DESC
+         LIMIT 200`,
+        [tenant.organizationId, req.user.uid]
+      );
+      res.json({ contacts: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/crm/contacts", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      const b = req.body || {};
+      if (!b.name && !b.company) {
+        return res.status(400).json({ error: "Nombre o empresa del contacto es obligatorio." });
+      }
+      const inserted = await pool.query(
+        `INSERT INTO public.contacts (
+          user_uid, organization_id, entity_type, name, company, role, email, phone,
+          type, status, website, cuit_rut, industry, location, lead_stage
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'nuevo')
+        RETURNING *`,
+        [
+          req.user.uid,
+          tenant.organizationId,
+          b.entityType || "contact",
+          String(b.name || b.company).trim(),
+          String(b.company || b.name).trim(),
+          b.role || "Compras / Comercial",
+          b.email || null,
+          b.phone || null,
+          b.type || "Cliente",
+          b.status || "active",
+          b.website || null,
+          b.cuitRut || null,
+          b.industry || "Servicios Industriales",
+          b.location || "Patagonia"
+        ]
+      );
+      let contact = inserted.rows[0];
+      let arnResult = null;
+      if (b.autoActivateArn) {
+        arnResult = await deps.runArnPipelineForEvent({
+          ownerUid: req.user.uid,
+          organizationId: tenant.organizationId,
+          contactId: contact.id,
+          source: "crm_contact",
+          companyName: contact.company || contact.name,
+          contactName: contact.name,
+          contactEmail: contact.email || void 0,
+          category: contact.industry || void 0,
+          rawText: b.arnNote || `Nuevo contacto CRM registrado: ${contact.name} (${contact.company}). Rubro: ${contact.industry}. Ubicaci\xF3n: ${contact.location}. Evaluar oportunidad comercial y preparar primer acercamiento.`
+        });
+        const refreshed = await pool.query(`SELECT * FROM public.contacts WHERE id = $1`, [contact.id]);
+        if (refreshed.rows?.[0]) contact = refreshed.rows[0];
+      }
+      res.json({ success: true, contact, arnResult });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.patch("/api/crm/contacts/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      const id = Number(req.params.id);
+      const b = req.body || {};
+      const updated = await pool.query(
+        `UPDATE public.contacts
+         SET name = COALESCE($1, name),
+             company = COALESCE($2, company),
+             role = COALESCE($3, role),
+             email = COALESCE($4, email),
+             phone = COALESCE($5, phone),
+             type = COALESCE($6, type),
+             status = COALESCE($7, status),
+             cuit_rut = COALESCE($8, cuit_rut),
+             industry = COALESCE($9, industry),
+             location = COALESCE($10, location),
+             odoo_synced = COALESCE($11, odoo_synced)
+         WHERE id = $12 AND (organization_id = $13 OR user_uid = $14)
+         RETURNING *`,
+        [
+          b.name ?? null,
+          b.company ?? null,
+          b.role ?? null,
+          b.email ?? null,
+          b.phone ?? null,
+          b.type ?? null,
+          b.status ?? null,
+          b.cuitRut ?? null,
+          b.industry ?? null,
+          b.location ?? null,
+          typeof b.odooSynced === "boolean" ? b.odooSynced : null,
+          id,
+          tenant.organizationId,
+          req.user.uid
+        ]
+      );
+      if (!updated.rows?.[0]) return res.status(404).json({ error: "Contacto no encontrado" });
+      res.json({ success: true, contact: updated.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/crm/contacts/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      await pool.query(
+        `DELETE FROM public.contacts WHERE id = $1 AND (organization_id = $2 OR user_uid = $3)`,
+        [Number(req.params.id), tenant.organizationId, req.user.uid]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/crm/contacts/:id/activate-arn", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      const contactId = Number(req.params.id);
+      const contactRes = await pool.query(
+        `SELECT * FROM public.contacts WHERE id = $1 AND (organization_id = $2 OR user_uid = $3)`,
+        [contactId, tenant.organizationId, req.user.uid]
+      );
+      const contact = contactRes.rows?.[0];
+      if (!contact) return res.status(404).json({ error: "Contacto no encontrado en tu organizaci\xF3n." });
+      const note = String(req.body?.note || "").trim();
+      const result = await deps.runArnPipelineForEvent({
+        ownerUid: req.user.uid,
+        organizationId: tenant.organizationId,
+        contactId: contact.id,
+        source: "crm_contact",
+        companyName: contact.company || contact.name,
+        contactName: contact.name,
+        contactEmail: contact.email || void 0,
+        category: contact.industry || void 0,
+        rawText: note || `Activaci\xF3n desde CRM Contactos: ${contact.name} (${contact.company || "Sin empresa"}), Cargo: ${contact.role || "Compras"}, Rubro: ${contact.industry || "General"}, Zona: ${contact.location || "Patagonia"}. Preparar propuesta comercial B2B y seguimiento.`,
+        metadata: { cuit: contact.cuit_rut || "", phone: contact.phone || "" }
+      });
+      const refreshed = await pool.query(`SELECT * FROM public.contacts WHERE id = $1`, [contactId]);
+      res.json({ success: true, contact: refreshed.rows?.[0] || contact, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || formatPgError(err) });
+    }
+  });
+  app.get("/api/fleet/overview", requireAuth, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) {
+        return res.json({
+          hasLogisticsMembership: false,
+          vehicles: [],
+          drivers: [],
+          contracts: [],
+          openLoads: []
+        });
+      }
+      const [loadsRes, shipperContractsRes] = await Promise.all([
+        pool.query(`SELECT * FROM public.logistics_loads ORDER BY created_at DESC LIMIT 40`),
+        pool.query(
+          `SELECT * FROM public.logistics_contracts
+           WHERE shipper_org_id = $1 OR carrier_org_id = $1
+           ORDER BY updated_at DESC LIMIT 40`,
+          [tenant.organizationId]
+        )
+      ]);
+      if (!tenant.hasLogisticsAccess) {
+        return res.json({
+          hasLogisticsMembership: false,
+          organization: tenant,
+          vehicles: [],
+          drivers: [],
+          contracts: shipperContractsRes.rows || [],
+          openLoads: loadsRes.rows || []
+        });
+      }
+      const [vehiclesRes, driversRes] = await Promise.all([
+        pool.query(
+          `SELECT * FROM public.fleet_vehicles WHERE organization_id = $1 ORDER BY created_at DESC`,
+          [tenant.organizationId]
+        ),
+        pool.query(
+          `SELECT * FROM public.fleet_drivers WHERE organization_id = $1 ORDER BY created_at DESC`,
+          [tenant.organizationId]
+        )
+      ]);
+      res.json({
+        hasLogisticsMembership: true,
+        organization: tenant,
+        vehicles: vehiclesRes.rows || [],
+        drivers: driversRes.rows || [],
+        contracts: shipperContractsRes.rows || [],
+        openLoads: loadsRes.rows || []
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/fleet/vehicles", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({
+          error: "Requiere Membres\xEDa Log\xEDstica & Control de Flota activa para registrar unidades.",
+          requiresLogisticsMembership: true
+        });
+      }
+      const b = req.body || {};
+      if (!b.name || !b.plate) {
+        return res.status(400).json({ error: "Nombre de unidad y dominio/patente son obligatorios." });
+      }
+      const inserted = await pool.query(
+        `INSERT INTO public.fleet_vehicles (
+          organization_id, owner_uid, name, plate, vehicle_type, capacity_tons,
+          corridor, vtv_expiry, insurance_expiry, status, gps_label
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING *`,
+        [
+          tenant.organizationId,
+          req.user.uid,
+          String(b.name).trim(),
+          String(b.plate).trim().toUpperCase(),
+          b.vehicleType || "Semirremolque 28t",
+          Math.max(1, Number(b.capacityTons) || 28),
+          b.corridor || "RN 3 / Patag\xF3nica",
+          b.vtvExpiry || null,
+          b.insuranceExpiry || null,
+          b.status || "disponible",
+          b.gpsLabel || "Activo en corredor"
+        ]
+      );
+      res.json({ success: true, vehicle: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.patch("/api/fleet/vehicles/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({ error: "Requiere Membres\xEDa Log\xEDstica activa." });
+      }
+      const nextStatus = ["disponible", "en_ruta", "mantenimiento"].includes(req.body?.status) ? req.body.status : "disponible";
+      const updated = await pool.query(
+        `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2 AND organization_id = $3 RETURNING *`,
+        [nextStatus, Number(req.params.id), tenant.organizationId]
+      );
+      res.json({ success: true, vehicle: updated.rows?.[0] || null });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/fleet/vehicles/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({ error: "Requiere Membres\xEDa Log\xEDstica activa." });
+      }
+      await pool.query(
+        `DELETE FROM public.fleet_vehicles WHERE id = $1 AND organization_id = $2`,
+        [Number(req.params.id), tenant.organizationId]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/fleet/drivers", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({
+          error: "Requiere Membres\xEDa Log\xEDstica & Control de Flota activa para registrar choferes.",
+          requiresLogisticsMembership: true
+        });
+      }
+      const b = req.body || {};
+      if (!b.fullName) {
+        return res.status(400).json({ error: "El nombre completo del chofer es obligatorio." });
+      }
+      const inserted = await pool.query(
+        `INSERT INTO public.fleet_drivers (
+          organization_id, owner_uid, full_name, dni, linti_license, phone, assigned_vehicle_id, status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING *`,
+        [
+          tenant.organizationId,
+          req.user.uid,
+          String(b.fullName).trim(),
+          b.dni || null,
+          b.lintiLicense || null,
+          b.phone || null,
+          b.assignedVehicleId ? Number(b.assignedVehicleId) : null,
+          b.status || "disponible"
+        ]
+      );
+      res.json({ success: true, driver: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.delete("/api/fleet/drivers/:id", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({ error: "Requiere Membres\xEDa Log\xEDstica activa." });
+      }
+      await pool.query(
+        `DELETE FROM public.fleet_drivers WHERE id = $1 AND organization_id = $2`,
+        [Number(req.params.id), tenant.organizationId]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/logistics/contracts", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      if (!tenant.hasLogisticsAccess) {
+        return res.status(403).json({
+          error: "Solo empresas con Membres\xEDa Log\xEDstica & Flota pueden postular unidades y operar contratos de transporte.",
+          requiresLogisticsMembership: true
+        });
+      }
+      const b = req.body || {};
+      if (!b.loadId || !b.originName || !b.destinationName) {
+        return res.status(400).json({ error: "Carga, origen y destino son obligatorios." });
+      }
+      const trackingCode = `TRK-${Date.now().toString().slice(-6)}`;
+      const inserted = await pool.query(
+        `INSERT INTO public.logistics_contracts (
+          load_id, origin_name, destination_name, shipper_org_id, shipper_uid,
+          carrier_org_id, carrier_uid, carrier_name, vehicle_id, driver_id,
+          agreed_price_ars, status, tracking_code, notes
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ofertado',$12,$13)
+        RETURNING *`,
+        [
+          String(b.loadId),
+          String(b.originName),
+          String(b.destinationName),
+          b.shipperOrgId ? Number(b.shipperOrgId) : null,
+          b.shipperUid || null,
+          tenant.organizationId,
+          req.user.uid,
+          tenant.orgName,
+          b.vehicleId ? Number(b.vehicleId) : null,
+          b.driverId ? Number(b.driverId) : null,
+          Math.max(0, Number(b.agreedPriceArs) || 0),
+          trackingCode,
+          b.notes || null
+        ]
+      );
+      await deps.recordAutomationEvent("outbound_n8n", "logistics.contract.bid_submitted", "processed", {
+        contractId: inserted.rows[0].id,
+        trackingCode,
+        carrierOrgId: tenant.organizationId
+      });
+      res.json({ success: true, contract: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.patch("/api/logistics/contracts/:id/status", requireAuth, async (req, res) => {
+    try {
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "DB no configurada" });
+      const contractId = Number(req.params.id);
+      const nextStatus = String(req.body?.status || "");
+      const allowed = ["ofertado", "adjudicado", "en_transito", "entregado", "cancelado"];
+      if (!allowed.includes(nextStatus)) {
+        return res.status(400).json({ error: "Estado de contrato inv\xE1lido" });
+      }
+      const existingRes = await pool.query(
+        `SELECT * FROM public.logistics_contracts
+         WHERE id = $1 AND (carrier_org_id = $2 OR shipper_org_id = $2 OR carrier_uid = $3 OR shipper_uid = $3)`,
+        [contractId, tenant.organizationId, req.user.uid]
+      );
+      const existing = existingRes.rows?.[0];
+      if (!existing) return res.status(404).json({ error: "Contrato no encontrado" });
+      const updated = await pool.query(
+        `UPDATE public.logistics_contracts SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+        [nextStatus, contractId]
+      );
+      if (existing.vehicle_id && (nextStatus === "en_transito" || nextStatus === "entregado")) {
+        await pool.query(
+          `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2`,
+          [nextStatus === "en_transito" ? "en_ruta" : "disponible", existing.vehicle_id]
+        ).catch(() => {
+        });
+      }
+      await deps.recordAutomationEvent("outbound_n8n", "logistics.contract.status_changed", "processed", {
+        contractId,
+        status: nextStatus,
+        trackingCode: existing.tracking_code
+      });
+      res.json({ success: true, contract: updated.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+}
+
 // src/server/arnRoutes.ts
 function validateArgentineCuit(cuit) {
   const clean = String(cuit || "").replace(/\D/g, "");
@@ -1866,10 +3099,13 @@ async function resolveOptionalMember(req) {
     return { authenticated: false };
   }
 }
-async function getUserArnRule(uid) {
+async function getUserArnRule(uid, organizationId) {
   if (!hasDatabaseConfig()) return { ...DEFAULT_ARN_POLICY };
   await ensureProductionTables();
-  const res = await pool.query(`SELECT * FROM public.arn_rules WHERE user_uid = $1`, [uid]);
+  const res = organizationId ? await pool.query(
+    `SELECT * FROM public.arn_rules WHERE organization_id = $1 OR user_uid = $2 ORDER BY (organization_id = $1) DESC LIMIT 1`,
+    [organizationId, uid]
+  ) : await pool.query(`SELECT * FROM public.arn_rules WHERE user_uid = $1`, [uid]);
   const row = res.rows?.[0];
   if (!row) return { ...DEFAULT_ARN_POLICY };
   return {
@@ -1936,7 +3172,12 @@ async function executeArnAction(actionRow) {
   return { executed: true, note: "Acci\xF3n registrada en flujo aut\xF3nomo ARN." };
 }
 async function runArnPipelineForEvent(params) {
-  const rule = await getUserArnRule(params.ownerUid);
+  let orgId = params.organizationId ?? null;
+  if (!orgId && hasDatabaseConfig()) {
+    const tenant = await resolveTenantContext(params.ownerUid).catch(() => null);
+    orgId = tenant?.organizationId ?? null;
+  }
+  const rule = await getUserArnRule(params.ownerUid, orgId);
   let catalogSummary = "";
   if (hasDatabaseConfig()) {
     await ensureProductionTables();
@@ -1964,25 +3205,28 @@ async function runArnPipelineForEvent(params) {
     analysis.aiScore
   );
   if (!hasDatabaseConfig()) {
-    return { opportunity: null, action: null, analysis, decision };
+    return { opportunity: null, action: null, analysis, decision, linkedContactId: null };
   }
   await ensureProductionTables();
+  const initialStage = decision.shouldAutoExecute ? "quoted" : "qualified";
   const oppRes = await pool.query(
     `INSERT INTO public.arn_opportunities (
-      owner_uid, company_name, contact_name, contact_email, cuit, category, corridor,
+      owner_uid, organization_id, contact_id, company_name, contact_name, contact_email, cuit, category, corridor,
       source, stage, ai_score, estimated_amount_usd, urgency, summary, recommended_action, raw_context
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
     RETURNING *`,
     [
       params.ownerUid,
+      orgId,
+      params.contactId || null,
       analysis.companyName,
       analysis.contactName,
       analysis.contactEmail || null,
-      analysis.cuit || null,
+      analysis.cuit || params.metadata?.cuit || null,
       analysis.category,
       analysis.corridor,
       params.source,
-      decision.shouldAutoExecute ? "quoted" : "qualified",
+      initialStage,
       analysis.aiScore,
       analysis.estimatedAmountUsd,
       analysis.urgency,
@@ -1992,18 +3236,34 @@ async function runArnPipelineForEvent(params) {
     ]
   );
   const opp = oppRes.rows[0];
+  const linkedContactId = await upsertLinkedContactFromArn({
+    ownerUid: params.ownerUid,
+    organizationId: orgId,
+    contactId: params.contactId,
+    opportunityId: Number(opp.id),
+    companyName: analysis.companyName,
+    contactName: analysis.contactName,
+    contactEmail: analysis.contactEmail,
+    cuit: analysis.cuit || params.metadata?.cuit,
+    category: analysis.category,
+    corridor: analysis.corridor,
+    aiScore: analysis.aiScore,
+    stage: initialStage,
+    source: params.source
+  }).catch(() => null);
   let status = decision.shouldAutoExecute ? "approved" : "pending_approval";
   let executedAt = null;
   let execNote = decision.reason;
   const actRes = await pool.query(
     `INSERT INTO public.arn_actions_queue (
-      owner_uid, opportunity_id, action_type, title, target_email,
+      owner_uid, organization_id, opportunity_id, action_type, title, target_email,
       draft_subject, draft_body, estimated_amount_usd, confidence_score,
       execution_mode, status, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
     RETURNING *`,
     [
       params.ownerUid,
+      orgId,
       opp.id,
       analysis.actionType,
       analysis.actionTitle,
@@ -2039,7 +3299,7 @@ async function runArnPipelineForEvent(params) {
       );
     }
   }
-  return { opportunity: opp, action, analysis, decision };
+  return { opportunity: opp, action, analysis, decision, linkedContactId };
 }
 function registerArnAndModuleRoutes(app, recordAutomationEvent) {
   app.get("/api/arn/overview", requireAuth, async (req, res) => {
@@ -2054,15 +3314,26 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
         });
       }
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      const orgId = tenant?.organizationId || null;
       const [rules, oppRes, actRes] = await Promise.all([
-        getUserArnRule(uid),
+        getUserArnRule(uid, orgId),
         pool.query(
-          `SELECT * FROM public.arn_opportunities WHERE owner_uid = $1 ORDER BY updated_at DESC LIMIT 60`,
-          [uid]
+          `SELECT * FROM public.arn_opportunities
+           WHERE ($1::int IS NOT NULL AND organization_id = $1) OR owner_uid = $2
+           ORDER BY updated_at DESC LIMIT 60`,
+          [orgId, uid]
         ),
         pool.query(
-          `SELECT * FROM public.arn_actions_queue WHERE owner_uid = $1 ORDER BY created_at DESC LIMIT 60`,
-          [uid]
+          `SELECT * FROM public.arn_actions_queue
+           WHERE ($1::int IS NOT NULL AND organization_id = $1) OR owner_uid = $2
+           ORDER BY created_at DESC LIMIT 60`,
+          [orgId, uid]
         )
       ]);
       const opportunities = oppRes.rows || [];
@@ -2076,6 +3347,7 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
         rules,
         opportunities,
         actions,
+        organization: tenant,
         metrics: {
           totalOpportunities: opportunities.length,
           pendingApprovals,
@@ -2101,12 +3373,19 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
         return res.status(500).json({ error: "Base de datos no configurada" });
       }
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
       await pool.query(
         `INSERT INTO public.arn_rules (
-          user_uid, mode, auto_approve_max_usd, min_confidence_score,
+          user_uid, organization_id, mode, auto_approve_max_usd, min_confidence_score,
           auto_send_emails, auto_create_logistics, auto_reserve_inventory, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
         ON CONFLICT (user_uid) DO UPDATE SET
+          organization_id = COALESCE(EXCLUDED.organization_id, public.arn_rules.organization_id),
           mode = EXCLUDED.mode,
           auto_approve_max_usd = EXCLUDED.auto_approve_max_usd,
           min_confidence_score = EXCLUDED.min_confidence_score,
@@ -2116,6 +3395,7 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
           updated_at = now()`,
         [
           uid,
+          tenant?.organizationId || null,
           mode,
           autoApproveMaxUsd,
           minConfidenceScore,
@@ -2205,9 +3485,16 @@ ${mail.text || mail.snippet || ""}`,
       await ensureProductionTables();
       const actionId = Number(req.params.id);
       const { draftSubject, draftBody } = req.body || {};
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      const orgId = tenant?.organizationId || null;
       const existing = await pool.query(
-        `SELECT * FROM public.arn_actions_queue WHERE id = $1 AND owner_uid = $2`,
-        [actionId, req.user.uid]
+        `SELECT * FROM public.arn_actions_queue WHERE id = $1 AND (($2::int IS NOT NULL AND organization_id = $2) OR owner_uid = $3)`,
+        [actionId, orgId, req.user.uid]
       );
       const row = existing.rows?.[0];
       if (!row) return res.status(404).json({ error: "Acci\xF3n no encontrada" });
@@ -2225,7 +3512,7 @@ ${mail.text || mail.snippet || ""}`,
              draft_body = $3,
              executed_at = now(),
              metadata = metadata || $4::jsonb
-         WHERE id = $5 AND owner_uid = $6
+         WHERE id = $5 AND (($6::int IS NOT NULL AND organization_id = $6) OR owner_uid = $7)
          RETURNING *`,
         [
           nextStatus,
@@ -2233,14 +3520,20 @@ ${mail.text || mail.snippet || ""}`,
           updatedRow.draft_body,
           JSON.stringify({ executionNote: execResult.note }),
           actionId,
+          orgId,
           req.user.uid
         ]
       );
       if (row.opportunity_id && execResult.executed) {
         await pool.query(
-          `UPDATE public.arn_opportunities SET stage = 'quoted', updated_at = now() WHERE id = $1 AND owner_uid = $2`,
-          [row.opportunity_id, req.user.uid]
+          `UPDATE public.arn_opportunities SET stage = 'quoted', updated_at = now() WHERE id = $1`,
+          [row.opportunity_id]
         );
+        await pool.query(
+          `UPDATE public.contacts SET lead_stage = 'quoted', last_arn_sync_at = now() WHERE arn_opportunity_id = $1`,
+          [row.opportunity_id]
+        ).catch(() => {
+        });
       }
       await recordAutomationEvent("outbound_n8n", "arn.action.approved", nextStatus, {
         actionId,
@@ -2257,9 +3550,15 @@ ${mail.text || mail.snippet || ""}`,
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
       await ensureProductionTables();
       const actionId = Number(req.params.id);
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
       await pool.query(
-        `UPDATE public.arn_actions_queue SET status = 'dismissed' WHERE id = $1 AND owner_uid = $2`,
-        [actionId, req.user.uid]
+        `UPDATE public.arn_actions_queue SET status = 'dismissed' WHERE id = $1 AND (($2::int IS NOT NULL AND organization_id = $2) OR owner_uid = $3)`,
+        [actionId, tenant?.organizationId || null, req.user.uid]
       );
       res.json({ success: true });
     } catch (err) {
@@ -2276,10 +3575,23 @@ ${mail.text || mail.snippet || ""}`,
       if (!allowed.includes(stage)) {
         return res.status(400).json({ error: "Etapa inv\xE1lida" });
       }
-      const upd = await pool.query(
-        `UPDATE public.arn_opportunities SET stage = $1, updated_at = now() WHERE id = $2 AND owner_uid = $3 RETURNING *`,
-        [stage, id, req.user.uid]
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
       );
+      const upd = await pool.query(
+        `UPDATE public.arn_opportunities SET stage = $1, updated_at = now() WHERE id = $2 AND (($3::int IS NOT NULL AND organization_id = $3) OR owner_uid = $4) RETURNING *`,
+        [stage, id, tenant?.organizationId || null, req.user.uid]
+      );
+      if (upd.rows?.[0]) {
+        await pool.query(
+          `UPDATE public.contacts SET lead_stage = $1, last_arn_sync_at = now() WHERE arn_opportunity_id = $2`,
+          [stage, id]
+        ).catch(() => {
+        });
+      }
       res.json({ success: true, opportunity: upd.rows?.[0] || null });
     } catch (err) {
       res.status(500).json({ error: formatPgError(err) });
@@ -2755,6 +4067,10 @@ ${mail.text || mail.snippet || ""}`,
     } catch (err) {
       res.status(500).json({ error: formatPgError(err) });
     }
+  });
+  registerSaasAndFleetRoutes(app, {
+    runArnPipelineForEvent,
+    recordAutomationEvent
   });
 }
 
@@ -3918,7 +5234,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
           return res.status(400).json({ error: "Missing filename or base64Data" });
         }
         const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
-        const safeName = `hero-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${cleanExt}`;
+        const safeName = `hero-${Date.now()}-${crypto2.randomBytes(4).toString("hex")}${cleanExt}`;
         const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
         const buffer = Buffer.from(rawBase64, "base64");
         const resolvedMime = mimeType || "application/octet-stream";

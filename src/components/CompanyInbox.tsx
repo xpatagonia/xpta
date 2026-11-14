@@ -1,13 +1,15 @@
 import { getApiUrl } from '../lib/apiConfig';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Inbox, CheckCircle, Clock, MessageSquare, AlertCircle, Send, Plus, Mail, FileText, Sparkles } from 'lucide-react';
+import { Inbox, CheckCircle, Clock, MessageSquare, AlertCircle, Send, Plus, Mail, FileText, Sparkles, Users } from 'lucide-react';
 import { db, auth, collection, onSnapshot } from '../lib/db';
 import { onAuthStateChanged } from '../lib/db';
 import ArnAiRadar from './ArnAiRadar';
+import CrmContactsPanel from './CrmContactsPanel';
 
 export default function CompanyInbox() {
-  const [activeSection, setActiveSection] = useState<'arn' | 'inbox' | 'templates'>('arn');
+  const [activeSection, setActiveSection] = useState<'arn' | 'contacts' | 'inbox' | 'templates'>('arn');
+  const [arnRefreshKey, setArnRefreshKey] = useState(0);
   const [statusNotice, setStatusNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const showNotice = (type: 'ok' | 'err', text: string) => {
     setStatusNotice({ type, text });
@@ -61,39 +63,45 @@ export default function CompanyInbox() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-[#1A1625] px-6 py-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-white dark:bg-[#1A1625] px-6 py-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-purple-500" /> ARN IA &amp; Bandeja Comercial
+            <Sparkles className="w-5 h-5 text-purple-500" /> ARN IA + CRM &amp; Contactos
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Inteligencia autónoma híbrida que reemplaza al CRM manual: califica oportunidades, redacta cotizaciones y coordina despachos.
+            Ingeniería bidireccional conectada: cada contacto CRM alimenta a ARN IA y cada oportunidad o RFQ actualiza automáticamente tu agenda comercial y Odoo.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-          <div className="flex gap-2 w-full sm:w-auto bg-slate-100 dark:bg-black/20 p-1.5 rounded-xl">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full xl:w-auto">
+          <div className="flex flex-wrap gap-1.5 w-full sm:w-auto bg-slate-100 dark:bg-black/25 p-1.5 rounded-xl">
             <button
               onClick={() => setActiveSection('arn')}
-              className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'arn' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+              className={`px-3.5 py-2 flex items-center gap-2 rounded-lg text-xs sm:text-sm font-bold transition whitespace-nowrap shrink-0 flex-1 sm:flex-none justify-center ${activeSection === 'arn' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
             >
               <Sparkles className="w-4 h-4" /> ARN IA
             </button>
             <button
+              onClick={() => setActiveSection('contacts')}
+              className={`px-3.5 py-2 flex items-center gap-2 rounded-lg text-xs sm:text-sm font-bold transition whitespace-nowrap shrink-0 flex-1 sm:flex-none justify-center ${activeSection === 'contacts' ? 'bg-white dark:bg-[#1A1625] text-orange-600 dark:text-orange-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+            >
+              <Users className="w-4 h-4" /> Contactos CRM
+            </button>
+            <button
               onClick={() => setActiveSection('inbox')}
-              className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'inbox' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+              className={`px-3.5 py-2 flex items-center gap-2 rounded-lg text-xs sm:text-sm font-bold transition whitespace-nowrap shrink-0 flex-1 sm:flex-none justify-center ${activeSection === 'inbox' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
             >
               <Inbox className="w-4 h-4" /> RFQs
             </button>
             <button
               onClick={() => setActiveSection('templates')}
-              className={`px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-bold transition flex-1 sm:flex-none justify-center ${activeSection === 'templates' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+              className={`px-3.5 py-2 flex items-center gap-2 rounded-lg text-xs sm:text-sm font-bold transition whitespace-nowrap shrink-0 flex-1 sm:flex-none justify-center ${activeSection === 'templates' ? 'bg-white dark:bg-[#1A1625] text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
             >
               <FileText className="w-4 h-4" /> Plantillas
             </button>
           </div>
           <button
             onClick={() => { setComposeData({ to: '', subject: '', body: templates.find(t => t.label === 'Firma Automática')?.content || '' }); setShowCompose(true); }}
-            className="w-full sm:w-auto px-4 py-2.5 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-bold transition flex justify-center items-center gap-2 shadow-lg shadow-purple-500/20"
+            className="w-full sm:w-auto px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs sm:text-sm font-bold transition flex justify-center items-center gap-2 whitespace-nowrap shrink-0"
           >
             <MessageSquare className="w-4 h-4" /> Redactar
           </button>
@@ -112,7 +120,25 @@ export default function CompanyInbox() {
         </div>
       )}
 
-      {activeSection === 'arn' && <ArnAiRadar />}
+      {activeSection === 'arn' && <ArnAiRadar refreshTrigger={arnRefreshKey} />}
+
+      {activeSection === 'contacts' && (
+        <CrmContactsPanel
+          onArnActivated={() => {
+            setArnRefreshKey((k) => k + 1);
+            showNotice('ok', 'Contacto vinculado a ARN IA. Revisá la cola híbrida o el pipeline comercial.');
+          }}
+          onComposeEmail={(email, company) => {
+            const sig = templates.find((t) => t.label === 'Firma Automática')?.content || '';
+            setComposeData({
+              to: email,
+              subject: company ? `Contacto Comercial B2B · ${company}` : 'Contacto Comercial xPatagonia',
+              body: `Estimados,\n\nNos comunicamos desde el hub comercial xPatagonia para coordinar oportunidades y cotizaciones.\n${sig}`,
+            });
+            setShowCompose(true);
+          }}
+        />
+      )}
 
       {activeSection === 'inbox' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -340,7 +366,7 @@ export default function CompanyInbox() {
         </motion.div>
       )}
 
-      {/* Sección de Contactos CRM reemplazada por Motor ARN IA */}
+      {/* Contactos CRM integrado arriba en activeSection === 'contacts' */}
 
       {activeSection === 'templates' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">

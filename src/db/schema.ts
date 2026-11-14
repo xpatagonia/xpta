@@ -97,6 +97,7 @@ export const rfqs = pgTable('rfqs', {
 export const contacts = pgTable('contacts', {
   id: serial('id').primaryKey(),
   userId: text('user_uid'),
+  organizationId: integer('organization_id'),
   entityType: text('entity_type').default('contact'),
   name: text('name').notNull(),
   company: text('company'),
@@ -110,6 +111,11 @@ export const contacts = pgTable('contacts', {
   socialMedia: text('social_media'),
   industry: text('industry'),
   location: text('location'),
+  arnOpportunityId: integer('arn_opportunity_id'),
+  aiScore: integer('ai_score').default(0),
+  leadStage: text('lead_stage').default('nuevo'),
+  lastArnSyncAt: timestamp('last_arn_sync_at'),
+  odooSynced: boolean('odoo_synced').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -128,6 +134,7 @@ export const insights = pgTable('insights', {
 export const inventoryItems = pgTable('inventory_items', {
   id: serial('id').primaryKey(),
   userId: text('user_uid'),
+  organizationId: integer('organization_id'),
   sku: text('sku'),
   name: text('name'),
   category: text('category'),
@@ -182,9 +189,9 @@ export const userRoles = pgTable('user_roles', {
 
 export const memberships = pgTable('memberships', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull(), // e.g., 'Basic', 'Premium', 'Enterprise'
+  name: text('name').notNull(), // e.g., 'Basic', 'Pro Industria', 'Corporativo', 'Logística & Flota'
   tier: integer('tier').notNull(), // 1, 2, 3
-  price: integer('price').notNull().default(0), // Monthly price in cents/pesos
+  price: integer('price').notNull().default(0), // Monthly price in ARS
   features: jsonb('features').default('[]'), // List of features enabled
   maxProducts: integer('max_products').default(10),
   maxRfqsMonthly: integer('max_rfqs_monthly').default(3),
@@ -200,6 +207,43 @@ export const userMemberships = pgTable('user_memberships', {
   startDate: timestamp('start_date').defaultNow(),
   endDate: timestamp('end_date'), // Null means lifetime/auto-renews until cancelled
   autoRenew: boolean('auto_renew').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ==========================================
+// ORGANIZACIONES MULTI-USUARIO (2 / 5 / 10 ASIENTOS)
+// ==========================================
+
+export const organizations = pgTable('organizations', {
+  id: serial('id').primaryKey(),
+  ownerUid: text('owner_uid').notNull().unique(),
+  name: text('name').notNull(),
+  planSlug: text('plan_slug').notNull().default('gratis'), // 'gratis' (2) | 'pro' (5) | 'corporativo' (10)
+  seatLimit: integer('seat_limit').notNull().default(2),
+  logisticsPlanActive: boolean('logistics_plan_active').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const orgMembers = pgTable('org_members', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').notNull(),
+  userUid: text('user_uid').notNull(),
+  email: text('email').notNull(),
+  orgRole: text('org_role').notNull().default('comercial'), // 'company_admin' | 'comercial' | 'operador'
+  status: text('status').notNull().default('active'),
+  joinedAt: timestamp('joined_at').defaultNow(),
+});
+
+export const orgInvitations = pgTable('org_invitations', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').notNull(),
+  email: text('email').notNull(),
+  orgRole: text('org_role').notNull().default('comercial'),
+  invitedByUid: text('invited_by_uid').notNull(),
+  token: text('token').notNull(),
+  status: text('status').notNull().default('pending'), // 'pending' | 'accepted' | 'revoked'
+  expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -229,6 +273,7 @@ export const automationLogs = pgTable('automation_logs', {
 
 export const arnRules = pgTable('arn_rules', {
   userId: text('user_uid').primaryKey(),
+  organizationId: integer('organization_id'),
   mode: text('mode').notNull().default('hybrid'), // 'hybrid' | 'manual' | 'auto'
   autoApproveMaxUsd: integer('auto_approve_max_usd').notNull().default(1500),
   minConfidenceScore: integer('min_confidence_score').notNull().default(82),
@@ -241,13 +286,15 @@ export const arnRules = pgTable('arn_rules', {
 export const arnOpportunities = pgTable('arn_opportunities', {
   id: serial('id').primaryKey(),
   ownerUid: text('owner_uid').notNull(),
+  organizationId: integer('organization_id'),
+  contactId: integer('contact_id'),
   companyName: text('company_name').notNull(),
   contactName: text('contact_name'),
   contactEmail: text('contact_email'),
   cuit: text('cuit'),
   category: text('category').default('General'),
   corridor: text('corridor'),
-  source: text('source').notNull().default('manual'), // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger'
+  source: text('source').notNull().default('manual'), // 'rfq' | 'email_imap' | 'home_lead' | 'directory' | 'messenger' | 'crm_contact'
   stage: text('stage').notNull().default('detected'), // 'detected' | 'qualified' | 'quoted' | 'negotiating' | 'awarded' | 'archived'
   aiScore: integer('ai_score').notNull().default(70),
   estimatedAmountUsd: integer('estimated_amount_usd').notNull().default(0),
@@ -262,6 +309,7 @@ export const arnOpportunities = pgTable('arn_opportunities', {
 export const arnActionsQueue = pgTable('arn_actions_queue', {
   id: serial('id').primaryKey(),
   ownerUid: text('owner_uid').notNull(),
+  organizationId: integer('organization_id'),
   opportunityId: integer('opportunity_id'),
   actionType: text('action_type').notNull(), // 'send_quote_email' | 'send_followup_email' | 'create_logistics_load' | 'reserve_inventory' | 'notify_providers'
   title: text('title').notNull(),
@@ -289,3 +337,55 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ==========================================
+// MEMBRESÍA LOGÍSTICA: FLOTA, CHOFERES Y CONTRATOS
+// ==========================================
+
+export const fleetVehicles = pgTable('fleet_vehicles', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').notNull(),
+  ownerUid: text('owner_uid').notNull(),
+  name: text('name').notNull(),
+  plate: text('plate').notNull(),
+  vehicleType: text('vehicle_type').notNull().default('Semirremolque 28t'),
+  capacityTons: integer('capacity_tons').notNull().default(28),
+  corridor: text('corridor').default('RN 3 / Patagónica'),
+  vtvExpiry: text('vtv_expiry'),
+  insuranceExpiry: text('insurance_expiry'),
+  status: text('status').notNull().default('disponible'), // 'disponible' | 'en_ruta' | 'mantenimiento'
+  gpsLabel: text('gps_label'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const fleetDrivers = pgTable('fleet_drivers', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').notNull(),
+  ownerUid: text('owner_uid').notNull(),
+  fullName: text('full_name').notNull(),
+  dni: text('dni'),
+  lintiLicense: text('linti_license'),
+  phone: text('phone'),
+  assignedVehicleId: integer('assigned_vehicle_id'),
+  status: text('status').notNull().default('disponible'), // 'disponible' | 'en_viaje' | 'licencia'
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const logisticsContracts = pgTable('logistics_contracts', {
+  id: serial('id').primaryKey(),
+  loadId: text('load_id').notNull(),
+  originName: text('origin_name').notNull(),
+  destinationName: text('destination_name').notNull(),
+  shipperOrgId: integer('shipper_org_id'),
+  shipperUid: text('shipper_uid'),
+  carrierOrgId: integer('carrier_org_id').notNull(),
+  carrierUid: text('carrier_uid').notNull(),
+  carrierName: text('carrier_name').notNull(),
+  vehicleId: integer('vehicle_id'),
+  driverId: integer('driver_id'),
+  agreedPriceArs: integer('agreed_price_ars').notNull().default(0),
+  status: text('status').notNull().default('ofertado'), // 'ofertado' | 'adjudicado' | 'en_transito' | 'entregado' | 'cancelado'
+  trackingCode: text('tracking_code'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});

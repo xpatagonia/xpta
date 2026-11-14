@@ -1,57 +1,57 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock } from 'lucide-react';
+import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock, Truck, Users, FileCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SiteSettings, fetchSiteSettings, getCachedSiteSettings, SITE_SETTINGS_EVENT } from '../lib/siteSettings';
 
 const tiers = [
   {
-    name: 'Plan Inicial',
+    name: 'Plan Gratis / Inicial',
     id: 'tier-basic',
-    badge: 'Prioridad Nivel 3',
-    priceMonthly: '$25.000',
-    currency: 'ARS',
-    billingPeriod: '/mes',
-    description: 'Para PyMEs y proveedores que inician su posicionamiento en el directorio patagónico.',
+    badge: 'Hasta 2 Usuarios PyME',
+    priceMonthly: 'Gratis',
+    currency: 'Base / $25.000 ARS',
+    billingPeriod: '/mes opcional destacado',
+    description: 'Para PyMEs que inician operación comercial en Patagonia con hasta 2 miembros de equipo.',
     features: [
+      'Hasta 2 usuarios de equipo en el Panel y CRM',
+      'Agenda de Contactos CRM + enlace básico con ARN IA',
       'Presencia en el directorio (Orden Nivel 3)',
-      'Ficha comercial básica de empresa',
       'Hasta 3 respuestas a Cotizaciones (RFQs) / mes',
       'Acceso a bandeja de correo corporativo básico',
     ],
     notIncluded: [
       'Desbloqueo total de base de datos en CRM (CUIT y decisores)',
-      'Sincronización en 1 clic de empresas al CRM',
-      'Posicionamiento prioritario en Directorio y Marketplace',
-      'Insignia de Empresa Verificada y Auditada',
+      'Automatización híbrida ilimitada ARN IA + Odoo n8n',
+      'Gestión de Flota y Contratos de Transporte (Membresía Logística)',
     ],
-    cta: 'Suscribirse al Plan Inicial',
+    cta: 'Comenzar Plan Gratis (2 Usuarios)',
     popular: false,
     icon: Shield,
     color: 'text-slate-500',
     bg: 'bg-white dark:bg-[#1A1625]',
   },
   {
-    name: 'Plan Pro Industrial',
+    name: 'Plan Pro Industria',
     id: 'tier-pro',
-    badge: 'Prioridad Nivel 2 • Más Elegido',
+    badge: 'Hasta 5 Usuarios • Más Elegido',
     priceMonthly: '$65.000',
     currency: 'ARS',
     billingPeriod: '/mes',
-    description: 'Para empresas proveedoras e industriales que buscan conectar, cotizar e integrar clientes al CRM.',
+    description: 'Para empresas proveedoras e industriales con equipos de compras y ventas operando ARN IA + CRM.',
     features: [
+      'Hasta 5 usuarios de equipo (Admin, Comercial, Operador)',
+      'ARN IA Híbrido + Contactos CRM bidireccionales completos',
       'Posicionamiento Destacado (Orden Nivel 2 en Directorio)',
       'Desbloqueo de datos completos (CUIT, Decisores, Teléfonos)',
-      'Sincronización directa de empresas al CRM',
-      'Respuestas a RFQs y Chat B2B ilimitados',
+      'Respuestas a RFQs, Chat B2B y Plantillas ilimitadas',
       'Insignia de Empresa Verificada en Catálogo',
-      'Sistema de Correo Corporativo y Plantillas CRM',
     ],
     notIncluded: [
-      'Máxima prioridad Nivel 1 en cabeceras de rubro',
-      'Integración API con ERP externo y multi-usuario ilimitado',
+      'Hasta 10 usuarios multi-área y prioridad Nivel 1',
+      'Suite de Control de Flota (requiere Membresía Logística)',
     ],
-    cta: 'Activar Plan Pro Industrial',
+    cta: 'Activar Plan Pro (5 Usuarios)',
     popular: true,
     icon: Zap,
     color: 'text-orange-500',
@@ -60,21 +60,21 @@ const tiers = [
   {
     name: 'Plan Corporativo',
     id: 'tier-corp',
-    badge: 'Prioridad Nivel 1 • Máxima Visibilidad',
+    badge: 'Hasta 10 Usuarios • Nivel 1',
     priceMonthly: '$140.000',
     currency: 'ARS',
     billingPeriod: '/mes',
-    description: 'Para operadoras, contratistas regionales y grandes proveedores con operación multi-provincia.',
+    description: 'Para operadoras, contratistas regionales y proveedores multi-provincia con equipos de hasta 10 usuarios.',
     features: [
+      'Hasta 10 usuarios de equipo con roles por área operativa',
       'Máxima prioridad en resultados (Orden Nivel 1 Corporativo)',
-      'Acceso total a base de datos B2B precargada en el CRM',
-      'Módulos Logística, Warehousing y E-commerce B2B incluidos',
-      'Usuarios de equipo ilimitados en el Panel y CRM',
-      'Publicación destacada de novedades en Patagonia Insights',
-      'Ejecutivo de cuenta y soporte técnico dedicado',
+      'ARN IA Autónomo + CRM + Sincronización Odoo ERP (n8n)',
+      'Acceso total a base de datos B2B y Matching ADN pgvector',
+      'Módulos Warehousing WMS y E-commerce B2B incluidos',
+      'Soporte técnico dedicado y publicación en Insights',
     ],
     notIncluded: [],
-    cta: 'Activar Plan Corporativo',
+    cta: 'Activar Corporativo (10 Usuarios)',
     popular: false,
     icon: Crown,
     color: 'text-purple-500',
@@ -96,7 +96,7 @@ export default function Pricing() {
   }, []);
 
   const dynamicPrices: Record<string, string> = {
-    'tier-basic': settings.platform.basicPrice || '$25.000',
+    'tier-basic': settings.platform.basicPrice || 'Gratis',
     'tier-pro': settings.platform.proPrice || '$65.000',
     'tier-corp': settings.platform.corpPrice || '$140.000',
   };
@@ -106,13 +106,13 @@ export default function Pricing() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-14">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-bold uppercase tracking-wider border border-purple-500/20 mb-4">
-            <Database className="w-3.5 h-3.5" /> Membresías B2B + CRM Integrado
+            <Database className="w-3.5 h-3.5" /> SaaS B2B Multi-Usuario · ARN IA + CRM
           </span>
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-display font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
-            Planes de Suscripción y Posicionamiento
+            Planes PyME y Membresía Logística
           </h1>
           <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400">
-            Mientras la sección <strong>Insights</strong> es abierta al público, el acceso a datos fiscales (CUIT), contactos de compras, emisión de cotizaciones e integración con el <strong>CRM</strong> es exclusivo para empresas suscriptas.
+            Escalá tu equipo comercial según la capacidad de tu empresa (<strong>2, 5 o 10 usuarios</strong>) con ARN IA y CRM unificados, o activá la membresía dedicada para empresas de transporte y logística.
           </p>
         </div>
 
@@ -125,7 +125,7 @@ export default function Pricing() {
                 Usuario Público (Sin Suscripción)
               </h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Acceso libre a <strong>Patagonia Insights</strong> (noticias, reportes y videos de YouTube), indicadores económicos y vista general limitada del directorio sin datos de contacto ni CRM.
+                Acceso libre a <strong>Patagonia Insights</strong> (noticias y reportes), indicadores económicos y vista general del directorio sin datos fiscales ni herramientas SaaS.
               </p>
             </div>
           </div>
@@ -133,10 +133,10 @@ export default function Pricing() {
             <Unlock className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <h3 className="text-sm font-bold text-white mb-1">
-                Miembro Registrado con Suscripción Activa
+                Empresa Miembro (2 / 5 / 10 Asientos)
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Posicionamiento jerárquico de tu empresa en el directorio, desbloqueo de CUIT y decisores comerciales, Chat B2B, correo corporativo y sincronización en 1 clic con el <strong>CRM</strong>.
+                Espacio compartido multi-usuario con invitaciones por email, desbloqueo de CUIT y decisores, agenda <strong>Contactos CRM</strong> y automatización híbrida <strong>ARN IA</strong>.
               </p>
             </div>
           </div>
@@ -181,7 +181,7 @@ export default function Pricing() {
                 </div>
 
                 <div className="mb-6 pb-6 border-b border-slate-100 dark:border-white/5">
-                  <div className="flex items-baseline gap-1.5 font-mono">
+                  <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
                     <span className="text-3xl font-bold text-slate-900 dark:text-white">
                       {dynamicPrices[tier.id] || tier.priceMonthly}
                     </span>
@@ -216,7 +216,7 @@ export default function Pricing() {
                 </ul>
 
                 <Link
-                  to="/dashboard"
+                  to="/dashboard?area=team"
                   className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
                     tier.popular
                       ? 'bg-orange-500 text-white hover:bg-orange-600'
@@ -229,6 +229,53 @@ export default function Pricing() {
               </motion.div>
             );
           })}
+        </div>
+
+        {/* Dedicated Separate Membership for Logistics Companies */}
+        <div className="max-w-6xl mx-auto mt-10 bg-white dark:bg-[#1A1625] border border-orange-500/40 rounded-2xl p-7 sm:p-8 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-3 max-w-3xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[11px] font-bold uppercase tracking-wider border border-orange-500/20">
+                <Truck className="w-3.5 h-3.5" /> Membresía Aparte · Empresas de Logística y Transporte
+              </div>
+              <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white">
+                Suite Logística: Gestión, Control de Flota y Contratación de Fletes
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                Membresía independiente diseñada para transportistas, flotas de carretones, carga refrigerada y operadores patagónicos que operan licitaciones y contratación directa desde la plataforma.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs text-slate-700 dark:text-slate-300">
+                <div className="flex items-start gap-2">
+                  <Truck className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                  <span><strong>Control de Flota:</strong> Unidades, patentes, vencimientos de VTV, seguros y estados en ruta.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Users className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                  <span><strong>Choferes LINTI:</strong> Legajo de conductores habilitados y asignación por unidad.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <FileCheck className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                  <span><strong>Contratación Activa:</strong> Oferta y adjudicación directa sobre cargas y retornos vacíos.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="shrink-0 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl p-5 flex flex-col justify-between min-w-[260px]">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Arancel Mensual Operador</p>
+                <p className="text-3xl font-mono font-bold tabular-nums text-slate-900 dark:text-white mt-1">
+                  $95.000 <span className="text-xs font-sans font-bold text-slate-500">ARS/mes</span>
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">Incluye hasta 10 usuarios operativos de tráfico y despacho.</p>
+              </div>
+              <Link
+                to="/dashboard?area=fleet"
+                className="mt-5 w-full py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <Truck className="w-4 h-4" /> Activar Membresía Logística
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     </div>

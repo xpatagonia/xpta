@@ -84,7 +84,7 @@ const STAGE_LABELS: Record<string, string> = {
   archived: 'Archivada',
 };
 
-export default function ArnAiRadar() {
+export default function ArnAiRadar({ refreshTrigger = 0 }: { refreshTrigger?: number }) {
   const [subTab, setSubTab] = useState<'queue' | 'pipeline' | 'rules' | 'copilot'>('queue');
   const [rules, setRules] = useState<ArnRules>(DEFAULT_RULES);
   const [opportunities, setOpportunities] = useState<ArnOpportunity[]>([]);
@@ -140,6 +140,7 @@ export default function ArnAiRadar() {
       }
       const res = await fetch(`${getApiUrl()}/api/arn/overview`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Error cargando motor ARN IA');
@@ -164,7 +165,7 @@ export default function ArnAiRadar() {
 
   useEffect(() => {
     loadOverview();
-  }, [loadOverview]);
+  }, [loadOverview, refreshTrigger]);
 
   const handleSaveRules = async (e: React.FormEvent) => {
     e.preventDefault();

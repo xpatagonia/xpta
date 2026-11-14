@@ -28,6 +28,7 @@ import {
 import { collection, onSnapshot, doc, getDoc, db, auth } from '../lib/db';
 import LogisticsLiveMonitoring from '../components/LogisticsLiveMonitoring';
 import PatagoniaRouteMap from '../components/PatagoniaRouteMap';
+import FleetControlCenter from '../components/FleetControlCenter';
 import {
   PATAGONIA_LOGISTIC_NODES,
   calculatePatagoniaRoute,
@@ -156,7 +157,8 @@ export default function LogisticsModule() {
       tabParam === 'rutas' ||
       tabParam === 'cotizador' ||
       tabParam === 'colaborativa' ||
-      tabParam === 'monitoreo'
+      tabParam === 'monitoreo' ||
+      tabParam === 'flotas'
     ) {
       setActiveTab(tabParam);
     }
@@ -505,29 +507,29 @@ export default function LogisticsModule() {
             Mis Envíos
           </button>
 
+          <button
+            onClick={() => setActiveTab('flotas')}
+            className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 flex items-center gap-2 ${
+              activeTab === 'flotas'
+                ? 'bg-orange-500 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Truck className="w-4 h-4" />
+            Flota &amp; Contratos
+          </button>
+
           {isLogisticsProvider && (
-            <>
-              <button
-                onClick={() => setActiveTab('flotas')}
-                className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 ${
-                  activeTab === 'flotas'
-                    ? 'bg-orange-500 text-white'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Flota
-              </button>
-              <button
-                onClick={() => setActiveTab('guias')}
-                className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 ${
-                  activeTab === 'guias'
-                    ? 'bg-orange-500 text-white'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Guías
-              </button>
-            </>
+            <button
+              onClick={() => setActiveTab('guias')}
+              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'guias'
+                  ? 'bg-orange-500 text-white'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Guías
+            </button>
           )}
         </div>
 
@@ -1244,33 +1246,19 @@ export default function LogisticsModule() {
             </motion.div>
           )}
 
-          {/* 7. FLOTAS & GUÍAS (LOGÍSTICA HABILITADA) */}
+          {/* 7. FLOTAS & CONTRATOS (MEMBRESÍA LOGÍSTICA) */}
           {activeTab === 'flotas' && (
             <motion.div
               key="tab-flotas"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-6"
             >
-              {[
-                { name: 'Tractor Iveco Stralis', plate: 'AF-123-BC', driver: 'Marcos Ruiz', cap: '28 Toneladas', status: 'Operativo' },
-                { name: 'Camión Scania G410', plate: 'AE-456-XY', driver: 'Juan Pérez', cap: '30 Toneladas', status: 'Operativo' },
-                { name: 'Furgón VW Delivery', plate: 'AD-789-ZW', driver: 'En Taller', cap: '9 Toneladas', status: 'Mantenimiento' },
-              ].map((v) => (
-                <div key={v.plate} className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10">
-                  <div className="flex justify-between items-center mb-3">
-                    <Truck className="w-5 h-5 text-orange-500" />
-                    <span className="text-xs font-bold text-emerald-500">{v.status}</span>
-                  </div>
-                  <h3 className="font-bold text-slate-900 dark:text-white">{v.name}</h3>
-                  <p className="text-xs font-mono text-slate-500 mb-3">Dominio: {v.plate}</p>
-                  <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
-                    <div>Chofer: {v.driver}</div>
-                    <div>Capacidad: {v.cap}</div>
-                  </div>
-                </div>
-              ))}
+              <FleetControlCenter
+                onMembershipActivated={() =>
+                  notify('Membresía Logística activada: Gestión de Flota y Contratos desbloqueados.')
+                }
+              />
             </motion.div>
           )}
 

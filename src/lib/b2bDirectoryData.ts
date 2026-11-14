@@ -524,8 +524,8 @@ export async function syncCompanyToUserCRM(company: B2BCompanyRecord): Promise<{
         return {
           success: true,
           message: data.decision?.shouldAutoExecute
-            ? `${company.name} ingresada a ARN IA y auto-ejecutada según regla.`
-            : `${company.name} enviada a la Cola Híbrida de ARN IA para revisión y seguimiento.`,
+            ? `${company.name} guardada en Contactos CRM, enlazada con ARN IA y auto-ejecutada según regla.`
+            : `${company.name} guardada en Contactos CRM y enviada a la Cola Híbrida de ARN IA.`,
         };
       }
     }

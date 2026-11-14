@@ -186,6 +186,16 @@ test('ARN IA and private B2B module endpoints strictly enforce Bearer authentica
     { method: 'PUT', path: '/api/company/profile', body: { companyName: 'Test S.A.' } },
     { method: 'POST', path: '/api/logistics/reverse-auction', body: { loadId: '1', bidPrice: 100000 } },
     { method: 'POST', path: '/api/crm/sync-odoo', body: { companyName: 'Test S.A.' } },
+    { method: 'GET', path: '/api/org/team' },
+    { method: 'POST', path: '/api/org/invitations', body: { email: 'nuevo@empresa.example' } },
+    { method: 'POST', path: '/api/org/plan', body: { planSlug: 'pro' } },
+    { method: 'GET', path: '/api/crm/contacts' },
+    { method: 'POST', path: '/api/crm/contacts', body: { name: 'Ana', company: 'Sur S.A.' } },
+    { method: 'POST', path: '/api/crm/contacts/1/activate-arn', body: {} },
+    { method: 'GET', path: '/api/fleet/overview' },
+    { method: 'POST', path: '/api/fleet/vehicles', body: { name: 'Scania G410', plate: 'AF-123-BC' } },
+    { method: 'POST', path: '/api/fleet/drivers', body: { fullName: 'Juan Perez' } },
+    { method: 'POST', path: '/api/logistics/contracts', body: { loadId: '1', agreedPriceArs: 500000 } },
   ];
 
   for (const reqSpec of guardedRequests) {
