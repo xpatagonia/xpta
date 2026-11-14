@@ -5,7 +5,7 @@ import Hero from './components/Hero';
 import RegionalIndicators from './components/RegionalIndicators';
 import Categories from './components/Categories';
 import HowItWorks from './components/HowItWorks';
-import EcosystemGrid from './components/EcosystemGrid';
+import PlatformCapabilities from './components/PlatformCapabilities';
 import Contact from './components/Contact';
 import Footer from './components/Footer';
 import BackToTop from './components/BackToTop';
@@ -54,9 +54,9 @@ function Home() {
       <Hero />
       {sections.indicators && <RegionalIndicators />}
       {sections.insights && <NewsMagazine />}
+      {sections.ecosystem && <PlatformCapabilities />}
       {sections.categories && <Categories />}
       {sections.howItWorks && <HowItWorks />}
-      {sections.ecosystem && <EcosystemGrid />}
       {sections.contact && <Contact />}
     </>
   );

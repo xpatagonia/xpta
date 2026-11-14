@@ -302,6 +302,11 @@ export async function ensureProductionTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS next_retry_at timestamptz,
         ADD COLUMN IF NOT EXISTS last_error text,
         ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+      ALTER TABLE IF EXISTS public.company_profiles
+        ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
+        ADD COLUMN IF NOT EXISTS credential_label text,
+        ADD COLUMN IF NOT EXISTS service_modality text;
     `);
     arnTablesEnsured = true;
   } catch (err) {

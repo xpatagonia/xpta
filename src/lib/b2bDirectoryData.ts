@@ -3,6 +3,37 @@ import { getApiUrl } from './apiConfig';
 import { haversineKm } from './patagoniaRouting';
 
 export type SubscriptionTier = 'corporativo' | 'pro' | 'inicial';
+export type DirectoryEntityType = 'empresa' | 'emprendimiento' | 'profesional' | 'servicio';
+
+export const ENTITY_TYPE_CONFIG: Record<
+  DirectoryEntityType,
+  {
+    label: string;
+    pluralLabel: string;
+    description: string;
+  }
+> = {
+  empresa: {
+    label: 'Empresa',
+    pluralLabel: 'Empresas',
+    description: 'Contratistas, fabricantes y proveedoras industriales consolidadas.',
+  },
+  emprendimiento: {
+    label: 'Emprendimiento',
+    pluralLabel: 'Emprendimientos',
+    description: 'Proyectos productivos, pymes nacientes y startups tecnológicas regionales.',
+  },
+  profesional: {
+    label: 'Profesional',
+    pluralLabel: 'Profesionales',
+    description: 'Ingenieros, auditores ambientales, despachantes y especialistas matriculados.',
+  },
+  servicio: {
+    label: 'Servicio Industrial',
+    pluralLabel: 'Servicios',
+    description: 'Prestaciones técnicas en campo, ensayos, izajes, calibración y mantenimiento.',
+  },
+};
 
 export interface AdnComercial {
   ofrece: string[];
@@ -16,6 +47,7 @@ export interface AdnComercial {
 
 export interface B2BCompanyRecord {
   id: string;
+  entityType: DirectoryEntityType;
   name: string;
   cuit: string;
   tier: SubscriptionTier;
@@ -27,6 +59,8 @@ export interface B2BCompanyRecord {
   province: string;
   city: string;
   employeeCount: string;
+  credentialLabel?: string;
+  serviceModality?: string;
   publicSummary: string;
   // Member-gated commercial & CRM fields
   contactName: string;
@@ -77,6 +111,7 @@ export const TIER_CONFIG: Record<
 export const B2B_COMPANIES: B2BCompanyRecord[] = [
   {
     id: 'comp-petrosur',
+    entityType: 'empresa',
     name: 'PetroSur Ingeniería & Fluidos S.A.',
     cuit: '30-71489210-9',
     tier: 'corporativo',
@@ -110,6 +145,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-logistica-austral',
+    entityType: 'empresa',
     name: 'Logística Austral Multimodal S.R.L.',
     cuit: '30-68923415-4',
     tier: 'corporativo',
@@ -143,6 +179,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-eolica-sur',
+    entityType: 'empresa',
     name: 'RenovaPatagonia Electromecánica S.A.',
     cuit: '30-71550932-1',
     tier: 'corporativo',
@@ -176,6 +213,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-rosario-forja',
+    entityType: 'empresa',
     name: 'Forja & Válvulas del Paraná S.A. (Proveedor Extra-Regional)',
     cuit: '30-70841299-8',
     tier: 'corporativo',
@@ -210,6 +248,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-metalurgica-andina',
+    entityType: 'empresa',
     name: 'Metalúrgica Golfo San Jorge S.A.',
     cuit: '30-70112984-7',
     tier: 'pro',
@@ -243,6 +282,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-cordoba-electromec',
+    entityType: 'empresa',
     name: 'Potencia & Transformadores Córdoba S.A. (Proveedor Extra-Regional)',
     cuit: '30-69441822-3',
     tier: 'pro',
@@ -277,6 +317,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-austral-naval',
+    entityType: 'empresa',
     name: 'Servicios Navales & Pesqueros Australes S.R.L.',
     cuit: '30-71204918-3',
     tier: 'pro',
@@ -310,6 +351,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-constructora-valle',
+    entityType: 'empresa',
     name: 'Obras Civiles & Movimiento de Suelos Alto Valle S.A.',
     cuit: '30-69884120-2',
     tier: 'pro',
@@ -343,6 +385,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-seguridad-epp',
+    entityType: 'empresa',
     name: 'Seguridad Industrial Sur & EPP S.R.L.',
     cuit: '30-71609211-5',
     tier: 'inicial',
@@ -376,6 +419,7 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
   },
   {
     id: 'comp-agro-patagonia',
+    entityType: 'empresa',
     name: 'AgroTecnología Valle Inferior S.A.',
     cuit: '30-70991823-6',
     tier: 'inicial',
@@ -405,6 +449,222 @@ export const B2B_COMPANIES: B2BCompanyRecord[] = [
       ciudadBase: 'Viedma (Valle Inferior)',
       lat: -40.8135,
       lng: -62.9967,
+    },
+  },
+  {
+    id: 'emp-sensores-vaca-muerta',
+    entityType: 'emprendimiento',
+    name: 'Patagonia IoT & Telemetría de Campo (Emprendimiento)',
+    cuit: '30-71834012-4',
+    tier: 'pro',
+    tierPriority: 2,
+    tierLabel: 'Plan Pro Industrial',
+    verified: true,
+    category: 'Tecnología e Innovación',
+    subcategories: ['Sensores LoRaWAN', 'Monitoreo de Tanques', 'Telemetría Solar'],
+    province: 'Neuquén',
+    city: 'Neuquén Capital',
+    employeeCount: '1-10',
+    credentialLabel: 'Incubado Polo Tecnológico Neuquén · Estadio Escalado',
+    serviceModality: 'Despliegue rápido en yacimientos y plantas',
+    publicSummary:
+      'Emprendimiento de base tecnológica dedicado a sensores autónomos con panel solar para medición de nivel, presión y temperatura en baterías y cisternas remotas.',
+    contactName: 'Ing. Tomás Benítez',
+    contactRole: 'Co-fundador & Arquitectura IoT',
+    email: 'tbenitez@patagoniaiot.com.ar',
+    phone: '+54 9 299 583-1190',
+    whatsapp: '+5492995831190',
+    website: 'https://patagoniaiot.com.ar',
+    certifications: ['ENACOM Homologado', 'IP67 ATEX Zona 2'],
+    paymentTerms: 'Suscripción Hardware-as-a-Service o Compra Directa',
+    creditRating: 'AA (Emprendimiento Validado)',
+    adnComercial: {
+      ofrece: ['Sensores LoRaWAN', 'Telemetría de Tanques', 'Alertas en Campo'],
+      demanda: ['Gabinetes Estancos', 'Baterías LiFePO4', 'Montaje Eléctrico'],
+      corredorLogistico: 'RN 22 / Neuquén - Añelo',
+      ciudadBase: 'Neuquén Capital',
+      lat: -38.9516,
+      lng: -68.0591,
+    },
+  },
+  {
+    id: 'emp-ecored-marina',
+    entityType: 'emprendimiento',
+    name: 'EcoRed Austral · Economía Circular Pesquera',
+    cuit: '30-71802914-9',
+    tier: 'inicial',
+    tierPriority: 3,
+    tierLabel: 'Plan Inicial',
+    verified: true,
+    category: 'Medio Ambiente y Sustentabilidad',
+    subcategories: ['Reciclaje de Redes', 'Pallets Plásticos', 'Trazabilidad Triple Impacto'],
+    province: 'Chubut',
+    city: 'Puerto Madryn',
+    employeeCount: '1-10',
+    credentialLabel: 'Certificación Triple Impacto · Planta Piloto Madryn',
+    serviceModality: 'Retiro programado en puertos patagónicos',
+    publicSummary:
+      'Emprendimiento industrial que recupera cajones, cabos y redes pesqueras en desuso para fabricar pellets y pallets plásticos industriales resistentes al frío extremo.',
+    contactName: 'Lic. Camila Herrera',
+    contactRole: 'Directora Productiva',
+    email: 'cherrera@ecoredaustral.com.ar',
+    phone: '+54 9 280 462-8830',
+    whatsapp: '+5492804628830',
+    website: 'https://ecoredaustral.com.ar',
+    certifications: ['Registro Ambiental Chubut', 'Triple Impacto'],
+    paymentTerms: 'Canje por Gestión de Residuo / Cuenta 15 días',
+    creditRating: 'A+ (Verificado)',
+    adnComercial: {
+      ofrece: ['Pallets Plásticos Frío', 'Certificados de Valorización', 'Recolección Portuaria'],
+      demanda: ['Transporte Retorno Puerto Madryn → Rawson', 'Molienda Industrial'],
+      corredorLogistico: 'RN 3 / Puerto Madryn - Rawson',
+      ciudadBase: 'Puerto Madryn',
+      lat: -42.7692,
+      lng: -65.0385,
+    },
+  },
+  {
+    id: 'prof-eia-bariloche',
+    entityType: 'profesional',
+    name: 'Ing. Amb. Mariana Ledesma · Consultora Ambiental',
+    cuit: '27-31445908-3',
+    tier: 'corporativo',
+    tierPriority: 1,
+    tierLabel: 'Plan Corporativo',
+    verified: true,
+    category: 'Medio Ambiente y Sustentabilidad',
+    subcategories: ['Estudios EIA', 'Auditoría ISO 14001', 'Gestión de Efluentes'],
+    province: 'Río Negro',
+    city: 'San Carlos de Bariloche / Alto Valle',
+    employeeCount: 'Profesional Matriculado',
+    credentialLabel: 'Matrícula Profesional RN-4418 · Perito Ambiental',
+    serviceModality: 'Auditoría en campo y dirección técnica remota',
+    publicSummary:
+      'Ingeniera ambiental matriculada con 14 años en evaluación de impacto ambiental, habilitaciones provinciales para locaciones hidrocarburíferas y planes de cierre.',
+    contactName: 'Ing. Mariana Ledesma',
+    contactRole: 'Titular & Auditora Líder ISO 14001',
+    email: 'mledesma@consultora-andes.com.ar',
+    phone: '+54 9 294 455-7120',
+    whatsapp: '+5492944557120',
+    website: 'https://consultora-andes.com.ar',
+    certifications: ['Registro Provincial EIA', 'Auditora IRAM ISO 14001'],
+    paymentTerms: 'Honorarios por Etapa / Factura A',
+    creditRating: 'AAA (Matrícula Verificada)',
+    adnComercial: {
+      ofrece: ['Estudios de Impacto Ambiental', 'Auditoría ISO 14001', 'Habilitaciones'],
+      demanda: ['Muestreo de Suelos Certificado', 'Laboratorios Químicos', 'Drones LiDAR'],
+      corredorLogistico: 'RN 40 / Bariloche - Neuquén',
+      ciudadBase: 'San Carlos de Bariloche',
+      lat: -41.1335,
+      lng: -71.3103,
+    },
+  },
+  {
+    id: 'prof-aduanero-ushuaia',
+    entityType: 'profesional',
+    name: 'Lic. Esteban Márquez · Despachante de Aduana & Comex',
+    cuit: '20-28903411-7',
+    tier: 'pro',
+    tierPriority: 2,
+    tierLabel: 'Plan Pro Industrial',
+    verified: true,
+    category: 'Servicios Profesionales',
+    subcategories: ['Despacho Aduanero', 'Subrégimen Tierra del Fuego', 'Importación Temporal'],
+    province: 'Tierra del Fuego',
+    city: 'Río Grande / Ushuaia',
+    employeeCount: 'Profesional Matriculado',
+    credentialLabel: 'Matrícula ARCA/Aduana TDF-892 · Comex Austral',
+    serviceModality: 'Gestión aduanera en puertos y pasos fronterizos',
+    publicSummary:
+      'Especialista en nacionalización de maquinaria pesada, importación temporal de equipos para yacimientos y operatoria aduanera Ley 19.640 en Tierra del Fuego.',
+    contactName: 'Lic. Esteban Márquez',
+    contactRole: 'Despachante Matriculado',
+    email: 'emarquez@comexaustral.com.ar',
+    phone: '+54 9 2964 41-8890',
+    whatsapp: '+5492964418890',
+    website: 'https://comexaustral.com.ar',
+    certifications: ['Registro Despachantes ARCA', 'OEA Asesor'],
+    paymentTerms: 'Honorarios Mensuales o por Despacho',
+    creditRating: 'AA+ (Matrícula Verificada)',
+    adnComercial: {
+      ofrece: ['Importación Maquinaria', 'Tránsito Aduanero RN 3', 'Subrégimen Industrial'],
+      demanda: ['Transporte Carretero Internacional', 'Depósito Fiscal', 'Seguros Caución'],
+      corredorLogistico: 'RN 3 / San Sebastián - Río Grande - Ushuaia',
+      ciudadBase: 'Río Grande',
+      lat: -53.7877,
+      lng: -67.7095,
+    },
+  },
+  {
+    id: 'serv-ndt-golfo',
+    entityType: 'servicio',
+    name: 'Austral NDT · Ensayos No Destructivos & Calibración',
+    cuit: '30-71330845-2',
+    tier: 'corporativo',
+    tierPriority: 1,
+    tierLabel: 'Plan Corporativo',
+    verified: true,
+    category: 'Servicios',
+    subcategories: ['Ultrasonido Phased Array', 'Gammagrafía Industrial', 'Calibración Válvulas'],
+    province: 'Chubut',
+    city: 'Comodoro Rivadavia / Las Heras',
+    employeeCount: '11-50',
+    credentialLabel: 'Laboratorio Móvil ISO/IEC 17025 · Nivel III ASNT',
+    serviceModality: 'Unidades móviles 24/7 en boca de pozo y planta',
+    publicSummary:
+      'Servicio técnico especializado en inspección de soldaduras en ductos, ultrasonido Phased Array, partículas magnetizables y calibración trazable de válvulas de seguridad.',
+    contactName: 'Ing. Claudio Salgado',
+    contactRole: 'Gerente Técnico de Campo',
+    email: 'csalgado@australndt.com.ar',
+    phone: '+54 9 297 444-6210',
+    whatsapp: '+5492974446210',
+    website: 'https://australndt.com.ar',
+    certifications: ['ARN Radioprotección', 'ASNT Nivel III', 'ISO 9001'],
+    paymentTerms: 'Certificación por Jornada / Contrato Marco 30 días',
+    creditRating: 'AAA (Homologado Operadoras)',
+    adnComercial: {
+      ofrece: ['Ultrasonido Ductos', 'Gammagrafía', 'Calibración PSV In Situ'],
+      demanda: ['Camionetas 4x4 Equipadas', 'EPP Ignífugo', 'Gases de Calibración'],
+      corredorLogistico: 'RN 3 / Comodoro Rivadavia - Pico Truncado - Las Heras',
+      ciudadBase: 'Comodoro Rivadavia (Golfo San Jorge)',
+      lat: -45.8641,
+      lng: -67.4966,
+    },
+  },
+  {
+    id: 'serv-izajes-neuquen',
+    entityType: 'servicio',
+    name: 'Grúas & Izajes Técnicos Vaca Muerta S.R.L.',
+    cuit: '30-71510922-8',
+    tier: 'pro',
+    tierPriority: 2,
+    tierLabel: 'Plan Pro Industrial',
+    verified: true,
+    category: 'Logística',
+    subcategories: ['Grúas Hidráulicas 120tn', 'Montaje Industrial', 'Transporte Sobredimensionado'],
+    province: 'Neuquén',
+    city: 'Añelo / Plottier',
+    employeeCount: '11-50',
+    credentialLabel: 'Habilitación Vialidad Nacional + Certificación Grúas IRAM',
+    serviceModality: 'Cobertura en locación con operador certificado',
+    publicSummary:
+      'Servicio de izajes críticos hasta 120 toneladas, movimiento de tanques, generadores y bombas de fractura con planes de izaje certificados.',
+    contactName: 'Facundo Quiroga',
+    contactRole: 'Coordinador de Despacho',
+    email: 'operaciones@izajesvacamuerta.com.ar',
+    phone: '+54 9 299 470-3321',
+    whatsapp: '+5492994703321',
+    website: 'https://izajesvacamuerta.com.ar',
+    certifications: ['IRAM 3921 Operadores', 'ART Yacimientos', 'VTV/RTO Al Día'],
+    paymentTerms: 'Por Hora Operativa / Abono Mensual',
+    creditRating: 'AA (Flota Auditada)',
+    adnComercial: {
+      ofrece: ['Grúas hasta 120tn', 'Planes de Izaje', 'Carretones Cama Baja'],
+      demanda: ['Eslingas y Grilletes Certificados', 'Mantenimiento Hidráulico', 'Permisos Viales'],
+      corredorLogistico: 'RN 7 / Plottier - Centenario - Añelo',
+      ciudadBase: 'Añelo (Hub Vaca Muerta)',
+      lat: -38.3522,
+      lng: -68.7897,
     },
   },
 ];

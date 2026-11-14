@@ -42,6 +42,11 @@ export const companyProfiles = pgTable('company_profiles', {
   bannerUrl: text('banner_url'),
   presentationUrl: text('presentation_url'),
   
+  // Multi-profile Directory classification (Empresa | Emprendimiento | Profesional | Servicio)
+  entityType: text('entity_type').default('empresa'),
+  credentialLabel: text('credential_label'),
+  serviceModality: text('service_modality'),
+
   // Innovative Trust & AI Features
   trustScore: integer('trust_score').default(50), // 0-100 AI-calculated score based on profile completion and successful transactions
   verificationStatus: text('verification_status').default('unverified'), // unverified, pending, verified (KYC/KYB)

@@ -13,6 +13,9 @@ const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
 
 export default function CompanyProfile() {
   const [formData, setFormData] = useState({
+    entityType: 'empresa',
+    credentialLabel: '',
+    serviceModality: '',
     companyName: '',
     description: '',
     address: '',
@@ -61,6 +64,9 @@ export default function CompanyProfile() {
                 const p = json.profile;
                 setFormData(prev => ({
                   ...prev,
+                  entityType: p.entity_type || 'empresa',
+                  credentialLabel: p.credential_label || '',
+                  serviceModality: p.service_modality || '',
                   companyName: p.company_name || '',
                   description: p.description || '',
                   address: p.address || '',
@@ -90,6 +96,9 @@ export default function CompanyProfile() {
           if (docSnap.exists()) {
             const data = docSnap.data();
             setFormData(prev => ({
+              entityType: data.entityType || prev.entityType || 'empresa',
+              credentialLabel: data.credentialLabel || '',
+              serviceModality: data.serviceModality || '',
               companyName: data.companyName || '',
               description: data.description || '',
               address: data.address || '',
@@ -239,6 +248,9 @@ export default function CompanyProfile() {
       await setDoc(userRef, {
         email: auth.currentUser.email || '',
         updatedAt: new Date().toISOString(),
+        entityType: formData.entityType || 'empresa',
+        credentialLabel: formData.credentialLabel || '',
+        serviceModality: formData.serviceModality || '',
         companyName: formData.companyName || '',
         description: formData.description || '',
         address: formData.address || '',
@@ -303,9 +315,55 @@ export default function CompanyProfile() {
               </div>
 
               <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
+                      Perfil en Directorio B2B
+                    </label>
+                    <select
+                      name="entityType"
+                      value={formData.entityType}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-orange-500/50 outline-none transition-all text-slate-900 dark:text-white"
+                    >
+                      <option value="empresa">Empresa / Proveedora Industrial</option>
+                      <option value="emprendimiento">Emprendimiento / Startup Productiva</option>
+                      <option value="profesional">Profesional Independiente / Consultor</option>
+                      <option value="servicio">Servicio Técnico / Operación en Campo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
+                      Matrícula, Certificación o Estadio
+                    </label>
+                    <input
+                      type="text"
+                      name="credentialLabel"
+                      value={formData.credentialLabel}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-orange-500/50 outline-none transition-all text-slate-900 dark:text-white"
+                      placeholder="Ej. Matrícula RN-4418 / ISO 9001 / Escalado"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
-                    Razón Social / Nombre Comercial
+                    Modalidad y Cobertura Operativa
+                  </label>
+                  <input
+                    type="text"
+                    name="serviceModality"
+                    value={formData.serviceModality}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-orange-500/50 outline-none transition-all text-slate-900 dark:text-white"
+                    placeholder="Ej. Guardia 24/7 en yacimiento / Auditoría remota y en planta"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
+                    Razón Social / Nombre Comercial o Profesional
                   </label>
                   <input
                     type="text"

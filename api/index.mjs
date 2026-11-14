@@ -83,6 +83,10 @@ var init_schema = __esm({
       logoUrl: text("logo_url"),
       bannerUrl: text("banner_url"),
       presentationUrl: text("presentation_url"),
+      // Multi-profile Directory classification (Empresa | Emprendimiento | Profesional | Servicio)
+      entityType: text("entity_type").default("empresa"),
+      credentialLabel: text("credential_label"),
+      serviceModality: text("service_modality"),
       // Innovative Trust & AI Features
       trustScore: integer("trust_score").default(50),
       // 0-100 AI-calculated score based on profile completion and successful transactions
@@ -1165,6 +1169,11 @@ async function ensureProductionTables() {
         ADD COLUMN IF NOT EXISTS next_retry_at timestamptz,
         ADD COLUMN IF NOT EXISTS last_error text,
         ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+      ALTER TABLE IF EXISTS public.company_profiles
+        ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
+        ADD COLUMN IF NOT EXISTS credential_label text,
+        ADD COLUMN IF NOT EXISTS service_modality text;
     `);
     arnTablesEnsured = true;
   } catch (err) {
@@ -1679,6 +1688,7 @@ var init_b2bDirectoryData = __esm({
     B2B_COMPANIES = [
       {
         id: "comp-petrosur",
+        entityType: "empresa",
         name: "PetroSur Ingenier\xEDa & Fluidos S.A.",
         cuit: "30-71489210-9",
         tier: "corporativo",
@@ -1711,6 +1721,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-logistica-austral",
+        entityType: "empresa",
         name: "Log\xEDstica Austral Multimodal S.R.L.",
         cuit: "30-68923415-4",
         tier: "corporativo",
@@ -1743,6 +1754,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-eolica-sur",
+        entityType: "empresa",
         name: "RenovaPatagonia Electromec\xE1nica S.A.",
         cuit: "30-71550932-1",
         tier: "corporativo",
@@ -1775,6 +1787,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-rosario-forja",
+        entityType: "empresa",
         name: "Forja & V\xE1lvulas del Paran\xE1 S.A. (Proveedor Extra-Regional)",
         cuit: "30-70841299-8",
         tier: "corporativo",
@@ -1808,6 +1821,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-metalurgica-andina",
+        entityType: "empresa",
         name: "Metal\xFArgica Golfo San Jorge S.A.",
         cuit: "30-70112984-7",
         tier: "pro",
@@ -1840,6 +1854,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-cordoba-electromec",
+        entityType: "empresa",
         name: "Potencia & Transformadores C\xF3rdoba S.A. (Proveedor Extra-Regional)",
         cuit: "30-69441822-3",
         tier: "pro",
@@ -1873,6 +1888,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-austral-naval",
+        entityType: "empresa",
         name: "Servicios Navales & Pesqueros Australes S.R.L.",
         cuit: "30-71204918-3",
         tier: "pro",
@@ -1905,6 +1921,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-constructora-valle",
+        entityType: "empresa",
         name: "Obras Civiles & Movimiento de Suelos Alto Valle S.A.",
         cuit: "30-69884120-2",
         tier: "pro",
@@ -1937,6 +1954,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-seguridad-epp",
+        entityType: "empresa",
         name: "Seguridad Industrial Sur & EPP S.R.L.",
         cuit: "30-71609211-5",
         tier: "inicial",
@@ -1969,6 +1987,7 @@ var init_b2bDirectoryData = __esm({
       },
       {
         id: "comp-agro-patagonia",
+        entityType: "empresa",
         name: "AgroTecnolog\xEDa Valle Inferior S.A.",
         cuit: "30-70991823-6",
         tier: "inicial",
@@ -1997,6 +2016,216 @@ var init_b2bDirectoryData = __esm({
           ciudadBase: "Viedma (Valle Inferior)",
           lat: -40.8135,
           lng: -62.9967
+        }
+      },
+      {
+        id: "emp-sensores-vaca-muerta",
+        entityType: "emprendimiento",
+        name: "Patagonia IoT & Telemetr\xEDa de Campo (Emprendimiento)",
+        cuit: "30-71834012-4",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Tecnolog\xEDa e Innovaci\xF3n",
+        subcategories: ["Sensores LoRaWAN", "Monitoreo de Tanques", "Telemetr\xEDa Solar"],
+        province: "Neuqu\xE9n",
+        city: "Neuqu\xE9n Capital",
+        employeeCount: "1-10",
+        credentialLabel: "Incubado Polo Tecnol\xF3gico Neuqu\xE9n \xB7 Estadio Escalado",
+        serviceModality: "Despliegue r\xE1pido en yacimientos y plantas",
+        publicSummary: "Emprendimiento de base tecnol\xF3gica dedicado a sensores aut\xF3nomos con panel solar para medici\xF3n de nivel, presi\xF3n y temperatura en bater\xEDas y cisternas remotas.",
+        contactName: "Ing. Tom\xE1s Ben\xEDtez",
+        contactRole: "Co-fundador & Arquitectura IoT",
+        email: "tbenitez@patagoniaiot.com.ar",
+        phone: "+54 9 299 583-1190",
+        whatsapp: "+5492995831190",
+        website: "https://patagoniaiot.com.ar",
+        certifications: ["ENACOM Homologado", "IP67 ATEX Zona 2"],
+        paymentTerms: "Suscripci\xF3n Hardware-as-a-Service o Compra Directa",
+        creditRating: "AA (Emprendimiento Validado)",
+        adnComercial: {
+          ofrece: ["Sensores LoRaWAN", "Telemetr\xEDa de Tanques", "Alertas en Campo"],
+          demanda: ["Gabinetes Estancos", "Bater\xEDas LiFePO4", "Montaje El\xE9ctrico"],
+          corredorLogistico: "RN 22 / Neuqu\xE9n - A\xF1elo",
+          ciudadBase: "Neuqu\xE9n Capital",
+          lat: -38.9516,
+          lng: -68.0591
+        }
+      },
+      {
+        id: "emp-ecored-marina",
+        entityType: "emprendimiento",
+        name: "EcoRed Austral \xB7 Econom\xEDa Circular Pesquera",
+        cuit: "30-71802914-9",
+        tier: "inicial",
+        tierPriority: 3,
+        tierLabel: "Plan Inicial",
+        verified: true,
+        category: "Medio Ambiente y Sustentabilidad",
+        subcategories: ["Reciclaje de Redes", "Pallets Pl\xE1sticos", "Trazabilidad Triple Impacto"],
+        province: "Chubut",
+        city: "Puerto Madryn",
+        employeeCount: "1-10",
+        credentialLabel: "Certificaci\xF3n Triple Impacto \xB7 Planta Piloto Madryn",
+        serviceModality: "Retiro programado en puertos patag\xF3nicos",
+        publicSummary: "Emprendimiento industrial que recupera cajones, cabos y redes pesqueras en desuso para fabricar pellets y pallets pl\xE1sticos industriales resistentes al fr\xEDo extremo.",
+        contactName: "Lic. Camila Herrera",
+        contactRole: "Directora Productiva",
+        email: "cherrera@ecoredaustral.com.ar",
+        phone: "+54 9 280 462-8830",
+        whatsapp: "+5492804628830",
+        website: "https://ecoredaustral.com.ar",
+        certifications: ["Registro Ambiental Chubut", "Triple Impacto"],
+        paymentTerms: "Canje por Gesti\xF3n de Residuo / Cuenta 15 d\xEDas",
+        creditRating: "A+ (Verificado)",
+        adnComercial: {
+          ofrece: ["Pallets Pl\xE1sticos Fr\xEDo", "Certificados de Valorizaci\xF3n", "Recolecci\xF3n Portuaria"],
+          demanda: ["Transporte Retorno Puerto Madryn \u2192 Rawson", "Molienda Industrial"],
+          corredorLogistico: "RN 3 / Puerto Madryn - Rawson",
+          ciudadBase: "Puerto Madryn",
+          lat: -42.7692,
+          lng: -65.0385
+        }
+      },
+      {
+        id: "prof-eia-bariloche",
+        entityType: "profesional",
+        name: "Ing. Amb. Mariana Ledesma \xB7 Consultora Ambiental",
+        cuit: "27-31445908-3",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Medio Ambiente y Sustentabilidad",
+        subcategories: ["Estudios EIA", "Auditor\xEDa ISO 14001", "Gesti\xF3n de Efluentes"],
+        province: "R\xEDo Negro",
+        city: "San Carlos de Bariloche / Alto Valle",
+        employeeCount: "Profesional Matriculado",
+        credentialLabel: "Matr\xEDcula Profesional RN-4418 \xB7 Perito Ambiental",
+        serviceModality: "Auditor\xEDa en campo y direcci\xF3n t\xE9cnica remota",
+        publicSummary: "Ingeniera ambiental matriculada con 14 a\xF1os en evaluaci\xF3n de impacto ambiental, habilitaciones provinciales para locaciones hidrocarbur\xEDferas y planes de cierre.",
+        contactName: "Ing. Mariana Ledesma",
+        contactRole: "Titular & Auditora L\xEDder ISO 14001",
+        email: "mledesma@consultora-andes.com.ar",
+        phone: "+54 9 294 455-7120",
+        whatsapp: "+5492944557120",
+        website: "https://consultora-andes.com.ar",
+        certifications: ["Registro Provincial EIA", "Auditora IRAM ISO 14001"],
+        paymentTerms: "Honorarios por Etapa / Factura A",
+        creditRating: "AAA (Matr\xEDcula Verificada)",
+        adnComercial: {
+          ofrece: ["Estudios de Impacto Ambiental", "Auditor\xEDa ISO 14001", "Habilitaciones"],
+          demanda: ["Muestreo de Suelos Certificado", "Laboratorios Qu\xEDmicos", "Drones LiDAR"],
+          corredorLogistico: "RN 40 / Bariloche - Neuqu\xE9n",
+          ciudadBase: "San Carlos de Bariloche",
+          lat: -41.1335,
+          lng: -71.3103
+        }
+      },
+      {
+        id: "prof-aduanero-ushuaia",
+        entityType: "profesional",
+        name: "Lic. Esteban M\xE1rquez \xB7 Despachante de Aduana & Comex",
+        cuit: "20-28903411-7",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Servicios Profesionales",
+        subcategories: ["Despacho Aduanero", "Subr\xE9gimen Tierra del Fuego", "Importaci\xF3n Temporal"],
+        province: "Tierra del Fuego",
+        city: "R\xEDo Grande / Ushuaia",
+        employeeCount: "Profesional Matriculado",
+        credentialLabel: "Matr\xEDcula ARCA/Aduana TDF-892 \xB7 Comex Austral",
+        serviceModality: "Gesti\xF3n aduanera en puertos y pasos fronterizos",
+        publicSummary: "Especialista en nacionalizaci\xF3n de maquinaria pesada, importaci\xF3n temporal de equipos para yacimientos y operatoria aduanera Ley 19.640 en Tierra del Fuego.",
+        contactName: "Lic. Esteban M\xE1rquez",
+        contactRole: "Despachante Matriculado",
+        email: "emarquez@comexaustral.com.ar",
+        phone: "+54 9 2964 41-8890",
+        whatsapp: "+5492964418890",
+        website: "https://comexaustral.com.ar",
+        certifications: ["Registro Despachantes ARCA", "OEA Asesor"],
+        paymentTerms: "Honorarios Mensuales o por Despacho",
+        creditRating: "AA+ (Matr\xEDcula Verificada)",
+        adnComercial: {
+          ofrece: ["Importaci\xF3n Maquinaria", "Tr\xE1nsito Aduanero RN 3", "Subr\xE9gimen Industrial"],
+          demanda: ["Transporte Carretero Internacional", "Dep\xF3sito Fiscal", "Seguros Cauci\xF3n"],
+          corredorLogistico: "RN 3 / San Sebasti\xE1n - R\xEDo Grande - Ushuaia",
+          ciudadBase: "R\xEDo Grande",
+          lat: -53.7877,
+          lng: -67.7095
+        }
+      },
+      {
+        id: "serv-ndt-golfo",
+        entityType: "servicio",
+        name: "Austral NDT \xB7 Ensayos No Destructivos & Calibraci\xF3n",
+        cuit: "30-71330845-2",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Servicios",
+        subcategories: ["Ultrasonido Phased Array", "Gammagraf\xEDa Industrial", "Calibraci\xF3n V\xE1lvulas"],
+        province: "Chubut",
+        city: "Comodoro Rivadavia / Las Heras",
+        employeeCount: "11-50",
+        credentialLabel: "Laboratorio M\xF3vil ISO/IEC 17025 \xB7 Nivel III ASNT",
+        serviceModality: "Unidades m\xF3viles 24/7 en boca de pozo y planta",
+        publicSummary: "Servicio t\xE9cnico especializado en inspecci\xF3n de soldaduras en ductos, ultrasonido Phased Array, part\xEDculas magnetizables y calibraci\xF3n trazable de v\xE1lvulas de seguridad.",
+        contactName: "Ing. Claudio Salgado",
+        contactRole: "Gerente T\xE9cnico de Campo",
+        email: "csalgado@australndt.com.ar",
+        phone: "+54 9 297 444-6210",
+        whatsapp: "+5492974446210",
+        website: "https://australndt.com.ar",
+        certifications: ["ARN Radioprotecci\xF3n", "ASNT Nivel III", "ISO 9001"],
+        paymentTerms: "Certificaci\xF3n por Jornada / Contrato Marco 30 d\xEDas",
+        creditRating: "AAA (Homologado Operadoras)",
+        adnComercial: {
+          ofrece: ["Ultrasonido Ductos", "Gammagraf\xEDa", "Calibraci\xF3n PSV In Situ"],
+          demanda: ["Camionetas 4x4 Equipadas", "EPP Ign\xEDfugo", "Gases de Calibraci\xF3n"],
+          corredorLogistico: "RN 3 / Comodoro Rivadavia - Pico Truncado - Las Heras",
+          ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
+          lat: -45.8641,
+          lng: -67.4966
+        }
+      },
+      {
+        id: "serv-izajes-neuquen",
+        entityType: "servicio",
+        name: "Gr\xFAas & Izajes T\xE9cnicos Vaca Muerta S.R.L.",
+        cuit: "30-71510922-8",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Log\xEDstica",
+        subcategories: ["Gr\xFAas Hidr\xE1ulicas 120tn", "Montaje Industrial", "Transporte Sobredimensionado"],
+        province: "Neuqu\xE9n",
+        city: "A\xF1elo / Plottier",
+        employeeCount: "11-50",
+        credentialLabel: "Habilitaci\xF3n Vialidad Nacional + Certificaci\xF3n Gr\xFAas IRAM",
+        serviceModality: "Cobertura en locaci\xF3n con operador certificado",
+        publicSummary: "Servicio de izajes cr\xEDticos hasta 120 toneladas, movimiento de tanques, generadores y bombas de fractura con planes de izaje certificados.",
+        contactName: "Facundo Quiroga",
+        contactRole: "Coordinador de Despacho",
+        email: "operaciones@izajesvacamuerta.com.ar",
+        phone: "+54 9 299 470-3321",
+        whatsapp: "+5492994703321",
+        website: "https://izajesvacamuerta.com.ar",
+        certifications: ["IRAM 3921 Operadores", "ART Yacimientos", "VTV/RTO Al D\xEDa"],
+        paymentTerms: "Por Hora Operativa / Abono Mensual",
+        creditRating: "AA (Flota Auditada)",
+        adnComercial: {
+          ofrece: ["Gr\xFAas hasta 120tn", "Planes de Izaje", "Carretones Cama Baja"],
+          demanda: ["Eslingas y Grilletes Certificados", "Mantenimiento Hidr\xE1ulico", "Permisos Viales"],
+          corredorLogistico: "RN 7 / Plottier - Centenario - A\xF1elo",
+          ciudadBase: "A\xF1elo (Hub Vaca Muerta)",
+          lat: -38.3522,
+          lng: -68.7897
         }
       }
     ];
@@ -3628,9 +3857,11 @@ ${mail.text || mail.snippet || ""}`,
       res.setHeader("Cache-Control", "no-store");
       const member = await resolveOptionalMember(req);
       const revealProtected = Boolean(member.authenticated);
+      const requestedEntityType = String(req.query.entityType || "").trim().toLowerCase();
       let dbCompanies = [];
       if (hasDatabaseConfig()) {
         try {
+          await ensureProductionTables();
           const rows = await pool.query(`
             SELECT cp.*, u.email AS user_email
             FROM public.company_profiles cp
@@ -3639,48 +3870,61 @@ ${mail.text || mail.snippet || ""}`,
             ORDER BY cp.trust_score DESC, cp.updated_at DESC
             LIMIT 80
           `);
-          dbCompanies = rows.rows.map((r) => ({
-            id: `db-${r.id}`,
-            name: r.company_name,
-            cuit: r.cuit || "",
-            tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
-            tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
-            tierLabel: (r.trust_score || 50) >= 85 ? "Plan Corporativo" : (r.trust_score || 50) >= 65 ? "Plan Pro Industrial" : "Plan Inicial",
-            verified: r.verification_status === "verified",
-            category: r.industry || "Servicios Industriales",
-            subcategories: Array.isArray(r.services) ? r.services : [],
-            province: r.province || "Chubut",
-            city: r.city || "Comodoro Rivadavia",
-            employeeCount: r.employee_count || "11-50",
-            publicSummary: r.description || "Empresa registrada en la red B2B xPatagonia.",
-            contactName: r.contact_name || "",
-            contactRole: r.contact_role || "",
-            email: r.email || r.user_email || "",
-            phone: r.phone || "",
-            whatsapp: r.whatsapp || "",
-            website: r.website || "",
-            certifications: Array.isArray(r.certifications) ? r.certifications : [],
-            paymentTerms: r.payment_terms || "A convenir",
-            creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
-            adnComercial: {
-              ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
-              demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
-              corredorLogistico: Array.isArray(r.corredores_logisticos) ? r.corredores_logisticos[0] || "Patagonia Sur" : "Patagonia Sur",
-              ciudadBase: r.city || "Patagonia",
-              lat: Number(r.base_lat) || -45.8641,
-              lng: Number(r.base_lng) || -67.4965
-            }
-          }));
+          dbCompanies = rows.rows.map((r) => {
+            const normalizedType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
+              String(r.entity_type || "").toLowerCase()
+            ) ? String(r.entity_type).toLowerCase() : "empresa";
+            return {
+              id: `db-${r.id}`,
+              entityType: normalizedType,
+              name: r.company_name,
+              cuit: r.cuit || "",
+              tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
+              tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
+              tierLabel: (r.trust_score || 50) >= 85 ? "Plan Corporativo" : (r.trust_score || 50) >= 65 ? "Plan Pro Industrial" : "Plan Inicial",
+              verified: r.verification_status === "verified",
+              category: r.industry || "Servicios Industriales",
+              subcategories: Array.isArray(r.services) ? r.services : [],
+              province: r.province || "Chubut",
+              city: r.city || "Comodoro Rivadavia",
+              employeeCount: r.employee_count || (normalizedType === "profesional" ? "Profesional Matriculado" : "11-50"),
+              credentialLabel: r.credential_label || void 0,
+              serviceModality: r.service_modality || void 0,
+              publicSummary: r.description || "Actor registrado en la red B2B xPatagonia.",
+              contactName: r.contact_name || "",
+              contactRole: r.contact_role || "",
+              email: r.email || r.user_email || "",
+              phone: r.phone || "",
+              whatsapp: r.whatsapp || "",
+              website: r.website || "",
+              certifications: Array.isArray(r.certifications) ? r.certifications : [],
+              paymentTerms: r.payment_terms || "A convenir",
+              creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
+              adnComercial: {
+                ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
+                demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
+                corredorLogistico: Array.isArray(r.corredores_logisticos) ? r.corredores_logisticos[0] || "Patagonia Sur" : "Patagonia Sur",
+                ciudadBase: r.city || "Patagonia",
+                lat: Number(r.base_lat) || -45.8641,
+                lng: Number(r.base_lng) || -67.4965
+              }
+            };
+          });
         } catch {
         }
       }
-      const merged = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]).map((c) => {
-        if (revealProtected) return { ...c, protectedMasked: false };
+      const combined = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]);
+      const filteredByType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(requestedEntityType) ? combined.filter((c) => (c.entityType || "empresa") === requestedEntityType) : combined;
+      const merged = filteredByType.map((c) => {
+        const entityType = c.entityType || "empresa";
+        if (revealProtected) return { ...c, entityType, protectedMasked: false };
         return {
           ...c,
+          entityType,
           cuit: "\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022-\u2022",
           contactName: "Reservado para Miembros",
           contactRole: "Suscripci\xF3n Activa",
+          credentialLabel: c.credentialLabel ? "Matr\xEDcula / Credencial \xB7 Verificada (Solo Miembros)" : void 0,
           email: "",
           phone: "",
           whatsapp: "",
@@ -3722,9 +3966,12 @@ ${mail.text || mail.snippet || ""}`,
       await ensureProductionTables();
       const { getOrCreateUser: getOrCreateUser2 } = await Promise.resolve().then(() => (init_users(), users_exports));
       await getOrCreateUser2(req.user.uid, req.user.email || "");
+      const entityType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
+        String(b.entityType || "").toLowerCase()
+      ) ? String(b.entityType).toLowerCase() : "empresa";
       const offers = Array.isArray(b.adnOfrece) ? b.adnOfrece : [];
       const demands = Array.isArray(b.adnDemanda) ? b.adnDemanda : [];
-      const adnText = `${b.companyName || ""} ${b.industry || ""} ${b.description || ""} Ofrece: ${offers.join(", ")} Demanda: ${demands.join(", ")}`;
+      const adnText = `${entityType} ${b.companyName || ""} ${b.industry || ""} ${b.credentialLabel || ""} ${b.description || ""} Ofrece: ${offers.join(", ")} Demanda: ${demands.join(", ")}`;
       const embedding = await generateAdnEmbedding(adnText);
       const upsertParams = [
         req.user.uid,
@@ -3744,14 +3991,17 @@ ${mail.text || mail.snippet || ""}`,
         offers,
         demands,
         Number(b.lat) || -45.8641,
-        Number(b.lng) || -67.4965
+        Number(b.lng) || -67.4965,
+        entityType,
+        b.credentialLabel || "",
+        b.serviceModality || ""
       ];
       await pool.query(
         `INSERT INTO public.company_profiles (
           user_uid, company_name, description, address, province, city, cuit,
           employee_count, email, phone, whatsapp, website, industry, services,
-          adn_ofrece, adn_demanda, base_lat, base_lng, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,now())
+          adn_ofrece, adn_demanda, base_lat, base_lng, entity_type, credential_label, service_modality, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,now())
         ON CONFLICT (user_uid) DO UPDATE SET
           company_name = EXCLUDED.company_name,
           description = EXCLUDED.description,
@@ -3770,6 +4020,9 @@ ${mail.text || mail.snippet || ""}`,
           adn_demanda = EXCLUDED.adn_demanda,
           base_lat = EXCLUDED.base_lat,
           base_lng = EXCLUDED.base_lng,
+          entity_type = EXCLUDED.entity_type,
+          credential_label = EXCLUDED.credential_label,
+          service_modality = EXCLUDED.service_modality,
           updated_at = now()`,
         upsertParams
       );
@@ -3782,7 +4035,7 @@ ${mail.text || mail.snippet || ""}`,
         } catch {
         }
       }
-      res.json({ success: true, embeddingGenerated: Boolean(embedding) });
+      res.json({ success: true, embeddingGenerated: Boolean(embedding), entityType });
     } catch (err) {
       res.status(500).json({ error: formatPgError(err) });
     }
@@ -4647,6 +4900,406 @@ function registerWorkerAndWebhookRoutes(app) {
   );
 }
 
+// src/services/marketService.ts
+var DEFAULT_PREVIOUS_SELL = {
+  "USD BLUE": 1555,
+  "USD MEP": 1535,
+  "USD CCL": 1578,
+  "USD OFIC": 1548,
+  "USD MAY": 1512,
+  "EUR/ARS": 1710,
+  "BRL/ARS": 288
+};
+var prevRatesState = {
+  currencies: { ...DEFAULT_PREVIOUS_SELL },
+  brentPrevClose: 74.12
+};
+var cachedPayload = null;
+var CACHE_TTL_MS = 60 * 1e3;
+function computePctChange(current, baseline) {
+  if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline <= 0) {
+    return { pct: 0, label: "0.00%", isPositive: true };
+  }
+  const raw = (current - baseline) / baseline * 100;
+  const pct = Number(raw.toFixed(2));
+  const isPositive = pct >= 0;
+  return {
+    pct,
+    label: `${isPositive ? "+" : ""}${pct.toFixed(2)}%`,
+    isPositive
+  };
+}
+function computeBrechaBluePct(blueSell, oficialSell) {
+  if (!Number.isFinite(blueSell) || !Number.isFinite(oficialSell) || oficialSell <= 0) return 0;
+  return Number(((blueSell - oficialSell) / oficialSell * 100).toFixed(1));
+}
+function buildMarketAlerts(params) {
+  const alerts = [];
+  if (Math.abs(params.brentChangePct) >= 0.8) {
+    const pos = params.brentChangePct >= 0;
+    alerts.push({
+      id: "alert-brent",
+      symbol: "BRENT",
+      title: `Crudo Brent ${pos ? "al alza" : "en baja"}`,
+      message: `Cotiza USD ${params.brentPrice.toFixed(2)}/bbl (${pos ? "+" : ""}${params.brentChangePct.toFixed(2)}%) \u2014 impacta costos de log\xEDstica y referencia Medanito.`,
+      change: `${pos ? "+" : ""}${params.brentChangePct.toFixed(2)}%`,
+      severity: pos ? "up" : "down",
+      dataMode: params.brentMode
+    });
+  }
+  if (Math.abs(params.btcChange24h) >= 1.5) {
+    const pos = params.btcChange24h >= 0;
+    alerts.push({
+      id: "alert-btc",
+      symbol: "BTC",
+      title: `Bitcoin ${pos ? "repunta" : "retrocede"} en 24h`,
+      message: `Opera en USD $${params.btcUsd.toLocaleString("en-US")} (${pos ? "+" : ""}${params.btcChange24h.toFixed(2)}%).`,
+      change: `${pos ? "+" : ""}${params.btcChange24h.toFixed(2)}%`,
+      severity: pos ? "up" : "down",
+      dataMode: "live"
+    });
+  }
+  const blue = params.currencies.find((c) => c.symbol === "USD BLUE");
+  const mep = params.currencies.find((c) => c.symbol === "USD MEP");
+  if (blue && Math.abs(blue.changePct) >= 0.5) {
+    alerts.push({
+      id: "alert-blue",
+      symbol: "USD BLUE",
+      title: `Movimiento en D\xF3lar Libre`,
+      message: `Venta $${blue.sell.toLocaleString("es-AR")} (${blue.change}) respecto a referencia anterior.`,
+      change: blue.change,
+      severity: blue.isPositive ? "up" : "down",
+      dataMode: blue.dataMode
+    });
+  } else if (mep && Math.abs(mep.changePct) >= 0.5) {
+    alerts.push({
+      id: "alert-mep",
+      symbol: "USD MEP",
+      title: `Variaci\xF3n D\xF3lar MEP (BYMA)`,
+      message: `Venta $${mep.sell.toLocaleString("es-AR")} (${mep.change}).`,
+      change: mep.change,
+      severity: mep.isPositive ? "up" : "down",
+      dataMode: mep.dataMode
+    });
+  }
+  if (params.brechaBluePct >= 10) {
+    alerts.push({
+      id: "alert-brecha",
+      symbol: "BRECHA",
+      title: `Brecha Blue vs Oficial en ${params.brechaBluePct}%`,
+      message: `Seguimiento clave para importaci\xF3n de insumos industriales y facturaci\xF3n B2B.`,
+      change: `${params.brechaBluePct}%`,
+      severity: "info",
+      dataMode: "live"
+    });
+  } else {
+    alerts.push({
+      id: "alert-brecha-comp",
+      symbol: "BRECHA",
+      title: `Brecha Blue / Oficial comprimida (${params.brechaBluePct}%)`,
+      message: `Diferencial cambiario acotado para presupuestar fletes y contratos RFQ en pesos/USD.`,
+      change: `${params.brechaBluePct}%`,
+      severity: "info",
+      dataMode: "live"
+    });
+  }
+  return alerts.slice(0, 3);
+}
+async function fetchLiveBrentQuote() {
+  try {
+    const res = await fetch(
+      "https://query1.finance.yahoo.com/v8/finance/chart/BZ=F?range=2d&interval=1d",
+      {
+        headers: { "User-Agent": "xPatagonia-MarketTerminal/1.0" },
+        signal: AbortSignal.timeout(3500)
+      }
+    );
+    if (res.ok) {
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+      const price = Number(meta?.regularMarketPrice);
+      const prev = Number(meta?.chartPreviousClose || meta?.previousClose || prevRatesState.brentPrevClose || 74.12);
+      if (Number.isFinite(price) && price > 10) {
+        prevRatesState.brentPrevClose = prev;
+        const delta = computePctChange(price, prev);
+        const marketTime = meta?.regularMarketTime ? new Date(meta.regularMarketTime * 1e3).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+        return {
+          price: Number(price.toFixed(2)),
+          prevClose: prev,
+          changePct: delta.pct,
+          changeLabel: delta.label,
+          isPositive: delta.isPositive,
+          dataMode: "live",
+          updatedAt: marketTime,
+          source: "ICE Brent Futures (BZ=F)"
+        };
+      }
+    }
+  } catch {
+  }
+  const fallbackPrice = prevRatesState.brentPrevClose || 74.8;
+  return {
+    price: fallbackPrice,
+    prevClose: fallbackPrice,
+    changePct: 0,
+    changeLabel: "0.00%",
+    isPositive: true,
+    dataMode: "official_reference",
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    source: "ICE Benchmark (Referencia)"
+  };
+}
+async function getMarketSnapshot(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedPayload && now - cachedPayload.timestamp < CACHE_TTL_MS) {
+    return cachedPayload.data;
+  }
+  const [dolaresRes, cotizacionesRes, cgRes, brentData] = await Promise.allSettled([
+    fetch("https://dolarapi.com/v1/dolares", { signal: AbortSignal.timeout(4e3) }),
+    fetch("https://dolarapi.com/v1/cotizaciones", { signal: AbortSignal.timeout(4e3) }),
+    fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,ars&include_24hr_change=true",
+      { signal: AbortSignal.timeout(4e3) }
+    ),
+    fetchLiveBrentQuote()
+  ]);
+  let dolares = [];
+  if (dolaresRes.status === "fulfilled" && dolaresRes.value.ok) {
+    try {
+      dolares = await dolaresRes.value.json();
+    } catch {
+      dolares = [];
+    }
+  }
+  let cotizaciones = [];
+  if (cotizacionesRes.status === "fulfilled" && cotizacionesRes.value.ok) {
+    try {
+      cotizaciones = await cotizacionesRes.value.json();
+    } catch {
+      cotizaciones = [];
+    }
+  }
+  let btc = {
+    usd: 81450,
+    usd_24h_change: 1.25,
+    ars: 125e6,
+    source: "CoinGecko / Coinbase",
+    dataMode: "official_reference",
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (cgRes.status === "fulfilled" && cgRes.value.ok) {
+    try {
+      const cgData = await cgRes.value.json();
+      if (cgData?.bitcoin?.usd) {
+        btc = {
+          usd: cgData.bitcoin.usd,
+          usd_24h_change: Number((cgData.bitcoin.usd_24h_change || 0).toFixed(2)),
+          ars: cgData.bitcoin.ars || Math.round(cgData.bitcoin.usd * 1540),
+          source: "CoinGecko API",
+          dataMode: "live",
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+      }
+    } catch {
+    }
+  } else {
+    try {
+      const cbRes = await fetch("https://api.coinbase.com/v2/prices/spot?currency=USD", {
+        signal: AbortSignal.timeout(2500)
+      });
+      if (cbRes.ok) {
+        const cbData = await cbRes.json();
+        const val = parseFloat(cbData.data?.amount);
+        if (!isNaN(val)) {
+          btc.usd = val;
+          btc.ars = Math.round(val * 1540);
+          btc.source = "Coinbase Spot";
+          btc.dataMode = "live";
+        }
+      }
+    } catch {
+    }
+  }
+  const pickRate = (symbol, name, sourceName, raw, fallbackBuy, fallbackSell) => {
+    const buy = Number(raw?.compra) || fallbackBuy;
+    const sell = Number(raw?.venta) || fallbackSell;
+    const baseline = prevRatesState.currencies[symbol] || sell;
+    const delta = computePctChange(sell, baseline);
+    if (Number.isFinite(sell) && sell > 0 && raw?.venta) {
+      if (Math.abs(delta.pct) >= 3) {
+        prevRatesState.currencies[symbol] = sell;
+      }
+    }
+    const mode = raw?.venta ? "live" : "official_reference";
+    return {
+      symbol,
+      name,
+      buy,
+      sell,
+      change: delta.label,
+      changePct: delta.pct,
+      isPositive: delta.isPositive,
+      source: sourceName,
+      dataMode: mode,
+      updatedAt: raw?.fechaActualizacion || (/* @__PURE__ */ new Date()).toISOString()
+    };
+  };
+  const blueRaw = dolares.find((d) => d.casa === "blue");
+  const oficialRaw = dolares.find((d) => d.casa === "oficial");
+  const mepRaw = dolares.find((d) => d.casa === "bolsa");
+  const cclRaw = dolares.find((d) => d.casa === "contadoconliqui");
+  const mayoristaRaw = dolares.find((d) => d.casa === "mayorista");
+  const eurRaw = cotizaciones.find((c) => c.moneda === "EUR");
+  const brlRaw = cotizaciones.find((c) => c.moneda === "BRL");
+  const currencies = [
+    pickRate("USD BLUE", "D\xF3lar Blue", "DolarApi \xB7 \xC1mbito", blueRaw, 1545, 1565),
+    pickRate("USD MEP", "D\xF3lar Bolsa MEP", "DolarApi \xB7 BYMA", mepRaw, 1520, 1535),
+    pickRate("USD CCL", "Contado con Liqui", "DolarApi \xB7 BYMA", cclRaw, 1570, 1585),
+    pickRate("USD OFIC", "D\xF3lar Oficial", "DolarApi \xB7 BNA / BCRA", oficialRaw, 1500, 1550),
+    pickRate("USD MAY", "D\xF3lar Mayorista", "DolarApi \xB7 MAE", mayoristaRaw, 1495, 1515),
+    pickRate("EUR/ARS", "Euro Oficial", "DolarApi \xB7 Banco Naci\xF3n", eurRaw, 1700, 1715),
+    pickRate("BRL/ARS", "Real Brasile\xF1o", "DolarApi", brlRaw, 275, 288)
+  ];
+  const brent = brentData.status === "fulfilled" ? brentData.value : {
+    price: 74.8,
+    prevClose: 74.8,
+    changePct: 0,
+    changeLabel: "0.00%",
+    isPositive: true,
+    dataMode: "official_reference",
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    source: "ICE Benchmark (Referencia)"
+  };
+  const medanitoEstimated = Number((brent.price * 0.928).toFixed(2));
+  const referenceDateLabel = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const patagonia = [
+    {
+      symbol: "BRENT",
+      name: "Petr\xF3leo Brent Internacional",
+      value: `USD ${brent.price.toFixed(2)}/bbl`,
+      numericValue: brent.price,
+      change: brent.changeLabel,
+      changePct: brent.changePct,
+      isPositive: brent.isPositive,
+      unit: "USD/barril",
+      source: brent.source,
+      sourceUrl: "https://finance.yahoo.com/quote/BZ=F",
+      dataMode: brent.dataMode,
+      updatedAt: brent.updatedAt
+    },
+    {
+      symbol: "MEDANITO",
+      name: "Crudo Medanito Neuqu\xE9n",
+      value: `USD ${medanitoEstimated.toFixed(2)}/bbl`,
+      numericValue: medanitoEstimated,
+      change: brent.changeLabel,
+      changePct: brent.changePct,
+      isPositive: brent.isPositive,
+      unit: "USD/barril (Paridad Brent -7.2%)",
+      source: "Sec. Energ\xEDa / Cuenca Neuquina",
+      dataMode: brent.dataMode === "live" ? "live" : "official_reference",
+      updatedAt: brent.updatedAt
+    },
+    {
+      symbol: "GAS PGY",
+      name: "Gas Natural Cuenca Neuquina",
+      value: "USD 3.52/MMBtu",
+      numericValue: 3.52,
+      change: "Plan Gas.Ar",
+      changePct: 0,
+      isPositive: true,
+      unit: "USD/MMBtu",
+      source: "Plan Gas.Ar \xB7 ENARSA / CAMMESA",
+      dataMode: "official_reference",
+      updatedAt: referenceDateLabel
+    },
+    {
+      symbol: "E\xD3LICA",
+      name: "Potencia E\xF3lica Regional",
+      value: "1.580 MW",
+      numericValue: 1580,
+      change: "FC 51.4%",
+      changePct: 0,
+      isPositive: true,
+      unit: "SADI Patag\xF3nico",
+      source: "CAMMESA \xB7 Parques Chubut / Santa Cruz",
+      dataMode: "official_reference",
+      updatedAt: referenceDateLabel
+    },
+    {
+      symbol: "PESCA",
+      name: "Langostino L1/L2 Congelado",
+      value: "USD 6.85/kg",
+      numericValue: 6.85,
+      change: "FOB Puerto",
+      changePct: 0,
+      isPositive: true,
+      unit: "USD/kg FOB",
+      source: "CAPIP \xB7 C\xE1mara Pesquera Patag\xF3nica",
+      dataMode: "official_reference",
+      updatedAt: referenceDateLabel
+    },
+    {
+      symbol: "LANA",
+      name: "Lana Merino Fina 19.5u",
+      value: "USD 6.45/kg",
+      numericValue: 6.45,
+      change: "Base Peinada",
+      changePct: 0,
+      isPositive: true,
+      unit: "USD/kg Trelew",
+      source: "Federaci\xF3n Lanera Argentina",
+      dataMode: "official_reference",
+      updatedAt: referenceDateLabel
+    },
+    {
+      symbol: "LITIO",
+      name: "Carbonato de Litio Li2CO3",
+      value: "USD 10,850/tn",
+      numericValue: 10850,
+      change: "Grado Bater\xEDa",
+      changePct: 0,
+      isPositive: true,
+      unit: "USD/tonelada",
+      source: "LME / Fastmarkets Ref.",
+      dataMode: "official_reference",
+      updatedAt: referenceDateLabel
+    }
+  ];
+  const blueSell = currencies.find((c) => c.symbol === "USD BLUE")?.sell || 1565;
+  const oficialSell = currencies.find((c) => c.symbol === "USD OFIC")?.sell || 1550;
+  const brechaBluePct = computeBrechaBluePct(blueSell, oficialSell);
+  const alerts = buildMarketAlerts({
+    btcChange24h: btc.usd_24h_change,
+    btcUsd: btc.usd,
+    brentPrice: brent.price,
+    brentChangePct: brent.changePct,
+    brentMode: brent.dataMode,
+    currencies,
+    brechaBluePct
+  });
+  const payload = {
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    brechaBluePct,
+    btc: {
+      symbol: "BTC",
+      name: "Bitcoin",
+      usd: btc.usd,
+      ars: btc.ars,
+      change24h: btc.usd_24h_change,
+      isPositive: btc.usd_24h_change >= 0,
+      source: btc.source,
+      dataMode: btc.dataMode,
+      updatedAt: btc.updatedAt
+    },
+    currencies,
+    patagonia,
+    alerts
+  };
+  cachedPayload = { timestamp: now, data: payload };
+  return payload;
+}
+
 // src/server/createApp.ts
 var cachedSupabaseAdmin = null;
 function getSupabaseAdminClient() {
@@ -5467,116 +6120,11 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
       return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
     }
   });
-  let marketDataCache = null;
-  const MARKET_CACHE_TTL = 60 * 1e3;
   app.get("/api/market-data", async (req, res) => {
-    const now = Date.now();
-    if (marketDataCache && now - marketDataCache.timestamp < MARKET_CACHE_TTL) {
-      return res.json(marketDataCache.data);
-    }
     try {
-      let dolares = [];
-      try {
-        const dolaresRes = await fetch("https://dolarapi.com/v1/dolares", {
-          signal: AbortSignal.timeout(4e3)
-        });
-        if (dolaresRes.ok) {
-          dolares = await dolaresRes.json();
-        }
-      } catch (err) {
-        console.warn("DolarApi dolares fetch warning:", err);
-      }
-      let cotizaciones = [];
-      try {
-        const cotiRes = await fetch("https://dolarapi.com/v1/cotizaciones", {
-          signal: AbortSignal.timeout(4e3)
-        });
-        if (cotiRes.ok) {
-          cotizaciones = await cotiRes.json();
-        }
-      } catch (err) {
-        console.warn("DolarApi cotizaciones fetch warning:", err);
-      }
-      let btc = {
-        usd: 81450,
-        usd_24h_change: 1.25,
-        ars: 125e6,
-        ars_24h_change: 1.18,
-        source: "CoinGecko / Coinbase"
-      };
-      try {
-        const cgRes = await fetch(
-          "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,ars&include_24hr_change=true",
-          { signal: AbortSignal.timeout(4e3) }
-        );
-        if (cgRes.ok) {
-          const cgData = await cgRes.json();
-          if (cgData.bitcoin?.usd) {
-            btc = {
-              usd: cgData.bitcoin.usd,
-              usd_24h_change: Number((cgData.bitcoin.usd_24h_change || 0).toFixed(2)),
-              ars: cgData.bitcoin.ars || Math.round(cgData.bitcoin.usd * 1540),
-              ars_24h_change: Number(
-                (cgData.bitcoin.ars_24h_change || cgData.bitcoin.usd_24h_change || 0).toFixed(2)
-              ),
-              source: "CoinGecko"
-            };
-          }
-        } else {
-          const cbRes = await fetch("https://api.coinbase.com/v2/prices/spot?currency=USD", {
-            signal: AbortSignal.timeout(3e3)
-          });
-          if (cbRes.ok) {
-            const cbData = await cbRes.json();
-            const val = parseFloat(cbData.data?.amount);
-            if (!isNaN(val)) {
-              btc.usd = val;
-              btc.ars = Math.round(val * 1540);
-              btc.source = "Coinbase";
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("BTC fetch warning:", err);
-      }
-      const blue = dolares.find((d) => d.casa === "blue") || { compra: 1545, venta: 1565 };
-      const oficial = dolares.find((d) => d.casa === "oficial") || { compra: 1500, venta: 1550 };
-      const mep = dolares.find((d) => d.casa === "bolsa") || { compra: 1520, venta: 1535 };
-      const ccl = dolares.find((d) => d.casa === "contadoconliqui") || { compra: 1570, venta: 1585 };
-      const mayorista = dolares.find((d) => d.casa === "mayorista") || { compra: 1495, venta: 1515 };
-      const eur = cotizaciones.find((c) => c.moneda === "EUR") || { compra: 1700, venta: 1715 };
-      const brl = cotizaciones.find((c) => c.moneda === "BRL") || { compra: 275, venta: 288 };
-      const payload = {
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        btc: {
-          symbol: "BTC",
-          name: "Bitcoin",
-          usd: btc.usd,
-          ars: btc.ars,
-          change24h: btc.usd_24h_change,
-          isPositive: btc.usd_24h_change >= 0,
-          source: btc.source
-        },
-        currencies: [
-          { symbol: "USD BLUE", name: "D\xF3lar Blue", buy: blue.compra, sell: blue.venta, change: "+0.6%", isPositive: true, source: "DolarApi / \xC1mbito" },
-          { symbol: "USD MEP", name: "D\xF3lar Bolsa MEP", buy: mep.compra, sell: mep.venta, change: "-0.2%", isPositive: false, source: "DolarApi / BVC" },
-          { symbol: "USD CCL", name: "Contado con Liqui", buy: ccl.compra, sell: ccl.venta, change: "+0.4%", isPositive: true, source: "DolarApi / BYMA" },
-          { symbol: "USD OFIC", name: "D\xF3lar Oficial", buy: oficial.compra, sell: oficial.venta, change: "+0.1%", isPositive: true, source: "DolarApi / BCRA" },
-          { symbol: "USD MAY", name: "D\xF3lar Mayorista", buy: mayorista.compra, sell: mayorista.venta, change: "+0.1%", isPositive: true, source: "DolarApi / MAE" },
-          { symbol: "EUR/ARS", name: "Euro Oficial", buy: eur.compra, sell: eur.venta, change: "+0.3%", isPositive: true, source: "DolarApi / Banco Naci\xF3n" },
-          { symbol: "BRL/ARS", name: "Real Brasile\xF1o", buy: brl.compra, sell: brl.venta, change: "-0.1%", isPositive: false, source: "DolarApi" }
-        ],
-        patagonia: [
-          { symbol: "BRENT", name: "Petr\xF3leo Brent Ref.", value: "USD 74.80/bbl", change: "+0.9%", isPositive: true, unit: "USD/barril", source: "ICE Benchmark" },
-          { symbol: "MEDANITO", name: "Crudo Medanito Neuqu\xE9n", value: "USD 69.40/bbl", change: "+1.2%", isPositive: true, unit: "USD/barril", source: "Secretar\xEDa de Energ\xEDa / Cuenca Neuquina" },
-          { symbol: "GAS PGY", name: "Gas Natural Cuenca Neuquina", value: "USD 3.52/MMBtu", change: "+0.4%", isPositive: true, unit: "USD/MMBtu", source: "Plan Gas.Ar / Cammesa" },
-          { symbol: "PESCA", name: "Langostino L1/L2 Congelado", value: "USD 6.85/kg", change: "+1.5%", isPositive: true, unit: "USD/kg FOB", source: "C\xE1mara Pesquera Patag\xF3nica" },
-          { symbol: "E\xD3LICA", name: "Potencia E\xF3lica Activa", value: "1.580 MW", change: "+120 MW", isPositive: true, unit: "Factor 51.2%", source: "CAMMESA / Parques Chubut-Santa Cruz" },
-          { symbol: "LANA", name: "Lana Merino Fina 19.5u", value: "USD 6.45/kg", change: "-0.3%", isPositive: false, unit: "USD/kg base limpia", source: "Federaci\xF3n Lanera Argentina" },
-          { symbol: "LITIO", name: "Carbonato de Litio Li2CO3", value: "USD 10,850/tn", change: "+2.4%", isPositive: true, unit: "USD/tonelada", source: "Mercado Internacional Minero" }
-        ]
-      };
-      marketDataCache = { timestamp: now, data: payload };
+      const force = req.query.refresh === "1" || req.query.refresh === "true";
+      const payload = await getMarketSnapshot(force);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=30");
       res.json(payload);
     } catch (error) {
       console.error("Error generating market data:", error);

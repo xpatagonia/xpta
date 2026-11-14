@@ -371,4 +371,8 @@ ALTER TABLE IF EXISTS public.automation_logs
   ADD COLUMN IF NOT EXISTS last_error text,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
-
+-- 14. Clasificación Multi-Perfil en Directorio B2B (Empresa | Emprendimiento | Profesional | Servicio)
+ALTER TABLE IF EXISTS public.company_profiles
+  ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
+  ADD COLUMN IF NOT EXISTS credential_label text,
+  ADD COLUMN IF NOT EXISTS service_modality text;

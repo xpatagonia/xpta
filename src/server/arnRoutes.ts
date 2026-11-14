@@ -716,10 +716,12 @@ export function registerArnAndModuleRoutes(
       res.setHeader("Cache-Control", "no-store");
       const member = await resolveOptionalMember(req);
       const revealProtected = Boolean(member.authenticated);
+      const requestedEntityType = String(req.query.entityType || "").trim().toLowerCase();
 
       let dbCompanies: any[] = [];
       if (hasDatabaseConfig()) {
         try {
+          await ensureProductionTables();
           const rows = await pool.query(`
             SELECT cp.*, u.email AS user_email
             FROM public.company_profiles cp
@@ -728,57 +730,76 @@ export function registerArnAndModuleRoutes(
             ORDER BY cp.trust_score DESC, cp.updated_at DESC
             LIMIT 80
           `);
-          dbCompanies = rows.rows.map((r: any) => ({
-            id: `db-${r.id}`,
-            name: r.company_name,
-            cuit: r.cuit || "",
-            tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
-            tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
-            tierLabel:
-              (r.trust_score || 50) >= 85
-                ? "Plan Corporativo"
-                : (r.trust_score || 50) >= 65
-                ? "Plan Pro Industrial"
-                : "Plan Inicial",
-            verified: r.verification_status === "verified",
-            category: r.industry || "Servicios Industriales",
-            subcategories: Array.isArray(r.services) ? r.services : [],
-            province: r.province || "Chubut",
-            city: r.city || "Comodoro Rivadavia",
-            employeeCount: r.employee_count || "11-50",
-            publicSummary: r.description || "Empresa registrada en la red B2B xPatagonia.",
-            contactName: r.contact_name || "",
-            contactRole: r.contact_role || "",
-            email: r.email || r.user_email || "",
-            phone: r.phone || "",
-            whatsapp: r.whatsapp || "",
-            website: r.website || "",
-            certifications: Array.isArray(r.certifications) ? r.certifications : [],
-            paymentTerms: r.payment_terms || "A convenir",
-            creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
-            adnComercial: {
-              ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
-              demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
-              corredorLogistico: Array.isArray(r.corredores_logisticos)
-                ? r.corredores_logisticos[0] || "Patagonia Sur"
-                : "Patagonia Sur",
-              ciudadBase: r.city || "Patagonia",
-              lat: Number(r.base_lat) || -45.8641,
-              lng: Number(r.base_lng) || -67.4965,
-            },
-          }));
+          dbCompanies = rows.rows.map((r: any) => {
+            const normalizedType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
+              String(r.entity_type || "").toLowerCase()
+            )
+              ? String(r.entity_type).toLowerCase()
+              : "empresa";
+            return {
+              id: `db-${r.id}`,
+              entityType: normalizedType,
+              name: r.company_name,
+              cuit: r.cuit || "",
+              tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
+              tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
+              tierLabel:
+                (r.trust_score || 50) >= 85
+                  ? "Plan Corporativo"
+                  : (r.trust_score || 50) >= 65
+                  ? "Plan Pro Industrial"
+                  : "Plan Inicial",
+              verified: r.verification_status === "verified",
+              category: r.industry || "Servicios Industriales",
+              subcategories: Array.isArray(r.services) ? r.services : [],
+              province: r.province || "Chubut",
+              city: r.city || "Comodoro Rivadavia",
+              employeeCount:
+                r.employee_count || (normalizedType === "profesional" ? "Profesional Matriculado" : "11-50"),
+              credentialLabel: r.credential_label || undefined,
+              serviceModality: r.service_modality || undefined,
+              publicSummary: r.description || "Actor registrado en la red B2B xPatagonia.",
+              contactName: r.contact_name || "",
+              contactRole: r.contact_role || "",
+              email: r.email || r.user_email || "",
+              phone: r.phone || "",
+              whatsapp: r.whatsapp || "",
+              website: r.website || "",
+              certifications: Array.isArray(r.certifications) ? r.certifications : [],
+              paymentTerms: r.payment_terms || "A convenir",
+              creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
+              adnComercial: {
+                ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
+                demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
+                corredorLogistico: Array.isArray(r.corredores_logisticos)
+                  ? r.corredores_logisticos[0] || "Patagonia Sur"
+                  : "Patagonia Sur",
+                ciudadBase: r.city || "Patagonia",
+                lat: Number(r.base_lat) || -45.8641,
+                lng: Number(r.base_lng) || -67.4965,
+              },
+            };
+          });
         } catch {
           // Optional DB query
         }
       }
 
-      const merged = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]).map((c) => {
-        if (revealProtected) return { ...c, protectedMasked: false };
+      const combined = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]);
+      const filteredByType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(requestedEntityType)
+        ? combined.filter((c) => (c.entityType || "empresa") === requestedEntityType)
+        : combined;
+
+      const merged = filteredByType.map((c) => {
+        const entityType = c.entityType || "empresa";
+        if (revealProtected) return { ...c, entityType, protectedMasked: false };
         return {
           ...c,
+          entityType,
           cuit: "••-••••••••-•",
           contactName: "Reservado para Miembros",
           contactRole: "Suscripción Activa",
+          credentialLabel: c.credentialLabel ? "Matrícula / Credencial · Verificada (Solo Miembros)" : undefined,
           email: "",
           phone: "",
           whatsapp: "",
@@ -825,9 +846,15 @@ export function registerArnAndModuleRoutes(
       const { getOrCreateUser } = await import("../db/users.ts");
       await getOrCreateUser(req.user!.uid, req.user!.email || "");
 
+      const entityType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
+        String(b.entityType || "").toLowerCase()
+      )
+        ? String(b.entityType).toLowerCase()
+        : "empresa";
+
       const offers = Array.isArray(b.adnOfrece) ? b.adnOfrece : [];
       const demands = Array.isArray(b.adnDemanda) ? b.adnDemanda : [];
-      const adnText = `${b.companyName || ""} ${b.industry || ""} ${b.description || ""} Ofrece: ${offers.join(", ")} Demanda: ${demands.join(", ")}`;
+      const adnText = `${entityType} ${b.companyName || ""} ${b.industry || ""} ${b.credentialLabel || ""} ${b.description || ""} Ofrece: ${offers.join(", ")} Demanda: ${demands.join(", ")}`;
       const embedding = await generateAdnEmbedding(adnText);
 
       const upsertParams = [
@@ -849,14 +876,17 @@ export function registerArnAndModuleRoutes(
         demands,
         Number(b.lat) || -45.8641,
         Number(b.lng) || -67.4965,
+        entityType,
+        b.credentialLabel || "",
+        b.serviceModality || "",
       ];
 
       await pool.query(
         `INSERT INTO public.company_profiles (
           user_uid, company_name, description, address, province, city, cuit,
           employee_count, email, phone, whatsapp, website, industry, services,
-          adn_ofrece, adn_demanda, base_lat, base_lng, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,now())
+          adn_ofrece, adn_demanda, base_lat, base_lng, entity_type, credential_label, service_modality, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,now())
         ON CONFLICT (user_uid) DO UPDATE SET
           company_name = EXCLUDED.company_name,
           description = EXCLUDED.description,
@@ -875,6 +905,9 @@ export function registerArnAndModuleRoutes(
           adn_demanda = EXCLUDED.adn_demanda,
           base_lat = EXCLUDED.base_lat,
           base_lng = EXCLUDED.base_lng,
+          entity_type = EXCLUDED.entity_type,
+          credential_label = EXCLUDED.credential_label,
+          service_modality = EXCLUDED.service_modality,
           updated_at = now()`,
         upsertParams
       );
@@ -890,7 +923,7 @@ export function registerArnAndModuleRoutes(
         }
       }
 
-      res.json({ success: true, embeddingGenerated: Boolean(embedding) });
+      res.json({ success: true, embeddingGenerated: Boolean(embedding), entityType });
     } catch (err: any) {
       res.status(500).json({ error: formatPgError(err) });
     }
