@@ -8,6 +8,7 @@ import {
   getCachedSiteSettings,
   SITE_SETTINGS_EVENT,
 } from '../lib/siteSettings';
+import { getApiUrl } from '../lib/apiConfig';
 
 function getYouTubeId(url: string): string | null {
   if (!url) return null;
@@ -131,7 +132,7 @@ export default function Hero() {
 
       setSuggestionsLoading(true);
       try {
-        const res = await fetch('/api/hero-suggestions', { method: 'POST' });
+        const res = await fetch(`${getApiUrl()}/api/hero-suggestions`, { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
           if (data.suggestions && data.suggestions.length > 0) {

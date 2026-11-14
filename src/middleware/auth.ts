@@ -34,26 +34,28 @@ export async function resolveUserRoleAndMembership(uid: string, email?: string) 
   let membershipName = 'Basic';
 
   try {
-    const { db } = await import('../db/index.ts');
-    const { userRoles, roles, userMemberships, memberships } = await import('../db/schema.ts');
-    const { eq } = await import('drizzle-orm');
+    const { db, hasDatabaseConfig } = await import('../db/index.ts');
+    if (hasDatabaseConfig()) {
+      const { userRoles, roles, userMemberships, memberships } = await import('../db/schema.ts');
+      const { eq } = await import('drizzle-orm');
 
-    const roleRows = await db
-      .select()
-      .from(userRoles)
-      .leftJoin(roles, eq(userRoles.roleId, roles.id))
-      .where(eq(userRoles.userId, uid));
-    if (roleRows[0]?.roles?.name) {
-      roleName = roleRows[0].roles.name;
-    }
+      const roleRows = await db
+        .select()
+        .from(userRoles)
+        .leftJoin(roles, eq(userRoles.roleId, roles.id))
+        .where(eq(userRoles.userId, uid));
+      if (roleRows[0]?.roles?.name) {
+        roleName = roleRows[0].roles.name;
+      }
 
-    const memRows = await db
-      .select()
-      .from(userMemberships)
-      .leftJoin(memberships, eq(userMemberships.membershipId, memberships.id))
-      .where(eq(userMemberships.userId, uid));
-    if (memRows[0]?.memberships?.name) {
-      membershipName = memRows[0].memberships.name;
+      const memRows = await db
+        .select()
+        .from(userMemberships)
+        .leftJoin(memberships, eq(userMemberships.membershipId, memberships.id))
+        .where(eq(userMemberships.userId, uid));
+      if (memRows[0]?.memberships?.name) {
+        membershipName = memRows[0].memberships.name;
+      }
     }
   } catch {
     // DB optional in local preview mode

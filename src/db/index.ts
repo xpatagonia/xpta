@@ -4,26 +4,44 @@ import * as schema from './schema.ts';
 
 const { Pool } = pg;
 
+export const hasDatabaseConfig = (): boolean => {
+  return Boolean(
+    process.env.DATABASE_URL ||
+      (process.env.SQL_HOST && process.env.SQL_DB_NAME && process.env.SQL_USER)
+  );
+};
+
 export const createPool = () => {
   if (process.env.DATABASE_URL) {
-    // Corregimos la URL si el usuario pegó arrobas de más (ej. @@@db...)
-    let dbUrl = process.env.DATABASE_URL.replace(/@+db/, '@db');
-    
+    let dbUrl = process.env.DATABASE_URL.replace(/@+db\./, '@db.').trim();
+    let isLocal = false;
+
     try {
       const url = new URL(dbUrl);
-      if (url.hostname === 'db.cjbafuclfgdexapfmyzd.supabase.co') {
-        url.hostname = 'aws-0-us-east-1.pooler.supabase.com';
-        url.port = '6543';
-        url.username = 'postgres.cjbafuclfgdexapfmyzd';
+      isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+
+      // Optional pooler rewrite when SUPABASE_POOLER_HOST is explicitly configured
+      if (process.env.SUPABASE_POOLER_HOST && url.hostname.endsWith('.supabase.co')) {
+        const projectRef = url.hostname.split('.')[1];
+        url.hostname = process.env.SUPABASE_POOLER_HOST;
+        url.port = process.env.SUPABASE_POOLER_PORT || '6543';
+        if (projectRef && !url.username.includes('.')) {
+          url.username = `${url.username}.${projectRef}`;
+        }
         dbUrl = url.toString();
       }
-    } catch (e) {
-      console.warn("Could not parse DATABASE_URL");
+    } catch {
+      console.warn('[XPATAGONIA] Could not parse DATABASE_URL');
     }
+
+    const maxConnections = process.env.VERCEL ? 5 : 10;
 
     return new Pool({
       connectionString: dbUrl,
+      max: maxConnections,
+      idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 15000,
+      ssl: isLocal ? false : { rejectUnauthorized: false },
     });
   }
 
@@ -32,7 +50,15 @@ export const createPool = () => {
     user: process.env.SQL_USER,
     password: process.env.SQL_PASSWORD,
     database: process.env.SQL_DB_NAME,
+    max: process.env.VERCEL ? 5 : 10,
+    idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 15000,
+    ssl:
+      !process.env.SQL_HOST ||
+      process.env.SQL_HOST === 'localhost' ||
+      process.env.SQL_HOST === '127.0.0.1'
+        ? false
+        : { rejectUnauthorized: false },
   });
 };
 

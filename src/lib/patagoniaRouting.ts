@@ -386,14 +386,13 @@ export async function calculatePatagoniaRoute(
   const osrmUrl = getOsrmUrl();
   const apiBase = getApiUrl();
 
-  // 1. Try backend proxy (/api/logistics/route) first if configured, or direct OSRM
-  const tryEndpoints: { url: string; label: RouteCalculationResult['engineUsed'] }[] = [];
-  if (apiBase) {
-    tryEndpoints.push({
+  // 1. Try backend proxy (/api/logistics/route) first (same-origin on Vercel or external API), then direct OSRM
+  const tryEndpoints: { url: string; label: RouteCalculationResult['engineUsed'] }[] = [
+    {
       url: `${apiBase}/api/logistics/route?from=${origin.lng},${origin.lat}&to=${dest.lng},${dest.lat}`,
       label: 'Supermicro OSRM',
-    });
-  }
+    },
+  ];
   if (osrmUrl.includes('rutas.xpatagonia.online')) {
     tryEndpoints.push({
       url: `${osrmUrl}/route/v1/driving/${coordsPath}?overview=full&geometries=geojson`,

@@ -1,0 +1,1184 @@
+import fs from "fs";
+import express from "express";
+import path from "path";
+import crypto from "crypto";
+import cors from "cors";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  requireAuth,
+  requireRoles,
+  resolveUserRoleAndMembership,
+  type AuthRequest,
+} from "../middleware/auth.ts";
+import { getOrCreateUser } from "../db/users.ts";
+import { getUserRfqs, createRfq } from "../db/rfqs.ts";
+import { notifyProvidersForRfq } from "../services/notificationService.ts";
+import { db, hasDatabaseConfig } from "../db/index.ts";
+import { insights, siteSettings, automationLogs } from "../db/schema.ts";
+import { eq, desc } from "drizzle-orm";
+import { fetchEmails, sendEmail } from "../services/emailService.ts";
+
+let cachedSupabaseAdmin: SupabaseClient | null | undefined;
+export function getSupabaseAdminClient(): SupabaseClient | null {
+  if (cachedSupabaseAdmin !== undefined) return cachedSupabaseAdmin;
+  const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  if (
+    (supabaseUrl.startsWith("http://") || supabaseUrl.startsWith("https://")) &&
+    serviceRoleKey.length > 20
+  ) {
+    cachedSupabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } else {
+    cachedSupabaseAdmin = null;
+  }
+  return cachedSupabaseAdmin;
+}
+
+const DEFAULT_HERO_SUGGESTIONS = [
+  "Logística de Frío -25°C",
+  "Válvulas Esféricas API 6D",
+  "Mantenimiento de Parques Eólicos",
+  "Inspección No Destructiva NDT",
+];
+
+const isUsableGeminiKey = (key?: string): key is string => {
+  return Boolean(key && key.trim().length > 10 && !key.includes("MY_GEMINI_API_KEY"));
+};
+
+export function createApiApp() {
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
+  app.use(express.json({ limit: "25mb" }));
+
+  const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
+  const TMP_UPLOADS_DIR = path.join("/tmp", "xpatagonia-uploads");
+  const SITE_SETTINGS_CACHE_FILE = path.join("/tmp", "xpatagonia-site-settings.json");
+
+  for (const dir of [UPLOADS_DIR, TMP_UPLOADS_DIR]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      // ignore read-only dir edge cases (e.g. Vercel serverless filesystem)
+    }
+  }
+  app.use("/uploads", express.static(UPLOADS_DIR));
+  app.use("/uploads", express.static(TMP_UPLOADS_DIR));
+
+  let inMemorySiteSettings: any = null;
+  const inMemoryAutomationLogs: any[] = [];
+
+  async function recordAutomationEvent(
+    direction: "outbound_n8n" | "inbound_odoo",
+    event: string,
+    status: string,
+    payload: any
+  ) {
+    const entry = {
+      id: Date.now(),
+      direction,
+      event,
+      status,
+      payload,
+      createdAt: new Date().toISOString(),
+    };
+    inMemoryAutomationLogs.unshift(entry);
+    if (inMemoryAutomationLogs.length > 50) inMemoryAutomationLogs.pop();
+
+    let persistedInPg = false;
+    if (hasDatabaseConfig()) {
+      try {
+        await db.insert(automationLogs).values({ direction, event, status, payload });
+        persistedInPg = true;
+      } catch {
+        // Optional DB persistence
+      }
+    }
+
+    if (!persistedInPg) {
+      const sbAdmin = getSupabaseAdminClient();
+      if (sbAdmin) {
+        try {
+          await sbAdmin.from("automation_logs").insert({ direction, event, status, payload });
+        } catch {
+          // Optional Supabase REST persistence
+        }
+      }
+    }
+
+    return entry;
+  }
+
+  const allowedOrigins = [
+    "https://xpatagonia.online",
+    "https://www.xpatagonia.online",
+    "https://api.xpatagonia.online",
+    "http://localhost:3000",
+    "http://localhost:5173",
+  ];
+
+  app.use(
+    cors({
+      origin: function (origin, callback) {
+        if (
+          !origin ||
+          allowedOrigins.includes(origin) ||
+          origin.includes(".run.app") ||
+          origin.includes(".onrender.com") ||
+          origin.includes(".vercel.app") ||
+          origin.includes(".pages.dev") ||
+          origin.includes("xpatagonia.online")
+        ) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+    })
+  );
+
+  // ==========================================
+  // HEALTH & DIAGNOSTICS
+  // ==========================================
+  app.get("/api/health", (req, res) => {
+    const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+    const supabaseAnon = (
+      process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      ""
+    ).trim();
+    const geminiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const resendConfigured = Boolean(
+      process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim().length > 5
+    );
+    const smtpConfigured = Boolean(process.env.SMTP_PASSWORD);
+    const imapConfigured = Boolean(process.env.IMAP_PASSWORD);
+
+    res.json({
+      status: "ok",
+      runtime: process.env.VERCEL ? "vercel_serverless" : "node_server",
+      environment: process.env.NODE_ENV || "development",
+      databaseConfigured: hasDatabaseConfig(),
+      supabaseConfigured: Boolean(supabaseUrl && supabaseAnon),
+      supabaseAdminConfigured: Boolean(getSupabaseAdminClient()),
+      geminiConfigured: isUsableGeminiKey(geminiKey),
+      resendConfigured,
+      emailOutboundProvider: resendConfigured
+        ? "resend_https"
+        : smtpConfigured
+        ? "cyberpanel_smtp"
+        : "none",
+      mailHost: process.env.IMAP_HOST || "mail.xpatagonia.online",
+      mailConfigured: Boolean(imapConfigured && (resendConfigured || smtpConfigured)),
+      osrmConfigured: Boolean(process.env.OSRM_BASE_URL),
+      osrmMode: process.env.OSRM_BASE_URL ? "supermicro" : "public_fallback",
+      n8nConfigured: Boolean(process.env.N8N_WEBHOOK_URL),
+      n8nMode: process.env.N8N_WEBHOOK_URL ? "active" : "local_queue",
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ==========================================
+  // AUTH, RBAC & USERS
+  // ==========================================
+  app.post("/api/register-setup", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !req.user.uid || !req.user.email) {
+        res.status(400).json({ error: "Invalid user data" });
+        return;
+      }
+
+      const { cuit, category } = req.body;
+      const { registerUserSetup } = await import("../db/users.ts");
+      const user = await registerUserSetup(req.user.uid, req.user.email, cuit, category);
+      res.json({ user });
+    } catch (error) {
+      console.error("Error setting up new user:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/me/access", requireAuth as any, (req: AuthRequest, res) => {
+    const roleName = req.user?.roleName || "vendor";
+    res.json({
+      uid: req.user?.uid,
+      email: req.user?.email,
+      roleName,
+      membershipName: req.user?.membershipName || "Basic",
+      isAdmin: ["system_admin", "content_editor"].includes(roleName),
+    });
+  });
+
+  app.get(
+    "/api/admin/users",
+    requireAuth as any,
+    requireRoles(["system_admin", "support_operator"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { getAllUsersWithRoles } = await import("../db/users.ts");
+        const users = await getAllUsersWithRoles();
+        res.json(users);
+      } catch (error) {
+        console.error("Error getting users:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/users/:uid/role",
+    requireAuth as any,
+    requireRoles(["system_admin"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { updateUserRole } = await import("../db/users.ts");
+        await updateUserRole(req.params.uid, req.body.role);
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error updating role:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/users/:uid/membership",
+    requireAuth as any,
+    requireRoles(["system_admin", "support_operator"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { updateUserMembership } = await import("../db/users.ts");
+        await updateUserMembership(req.params.uid, req.body.membership);
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error updating membership:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/users/create",
+    requireAuth as any,
+    requireRoles(["system_admin"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { email, password, roleName, membershipName, companyName } = req.body;
+
+        if (!email || !password) {
+          res.status(400).json({ error: "Email and password are required" });
+          return;
+        }
+
+        const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+        const supabaseAnonKey =
+          process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+        const sbAdmin = createClient(supabaseUrl, serviceKey);
+
+        let uid = "";
+
+        if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          const { data, error } = await sbAdmin.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+          });
+          if (error) throw error;
+          uid = data.user.id;
+        } else {
+          const { data, error } = await sbAdmin.auth.signUp({
+            email,
+            password,
+          });
+          if (error) throw error;
+          uid = data.user?.id || "";
+        }
+
+        if (!uid) {
+          throw new Error("Failed to get user ID after creation");
+        }
+
+        const { getOrCreateUser: ensureUser, updateUserRole, updateUserMembership } =
+          await import("../db/users.ts");
+        await ensureUser(uid, email);
+        await updateUserRole(uid, roleName);
+        await updateUserMembership(uid, membershipName);
+
+        const { companyProfiles } = await import("../db/schema.ts");
+        if (companyName) {
+          await db.update(companyProfiles).set({ companyName }).where(eq(companyProfiles.userId, uid));
+        }
+
+        res.json({ success: true, uid });
+      } catch (error: any) {
+        console.error("Error creating internal user:", error);
+        res.status(500).json({ error: error.message || "Internal server error" });
+      }
+    }
+  );
+
+  app.post("/api/sync-user", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !req.user.uid || !req.user.email) {
+        res.status(400).json({ error: "Invalid user data" });
+        return;
+      }
+
+      const user = await getOrCreateUser(req.user.uid, req.user.email);
+      res.json({ user });
+    } catch (error) {
+      console.error("Error syncing user:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ==========================================
+  // RFQS & EMAILS (RESEND + CYBERPANEL IMAP)
+  // ==========================================
+  app.get("/api/rfqs", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !req.user.uid || !req.user.email) {
+        res.status(400).json({ error: "Invalid user data" });
+        return;
+      }
+      const user = await getOrCreateUser(req.user.uid, req.user.email);
+      const userRfqs = await getUserRfqs(user.uid);
+      res.json(userRfqs);
+    } catch (error) {
+      console.error("Error fetching RFQs:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/rfqs", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !req.user.uid || !req.user.email) {
+        res.status(400).json({ error: "Invalid user data" });
+        return;
+      }
+      const user = await getOrCreateUser(req.user.uid, req.user.email);
+      const newRfq = await createRfq(user.uid, req.body);
+
+      notifyProvidersForRfq(newRfq.category, newRfq.title, newRfq.id).catch((err) => {
+        console.error("Failed to notify providers:", err);
+      });
+
+      res.json(newRfq);
+    } catch (error) {
+      console.error("Error creating RFQ:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/emails", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      const emails = await fetchEmails();
+      res.json(emails);
+    } catch (error: any) {
+      console.error("Error fetching emails:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch emails" });
+    }
+  });
+
+  app.post("/api/emails/send", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      const { to, subject, text, html } = req.body;
+      if (!to || !subject || (!text && !html)) {
+        res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
+        return;
+      }
+      const result = await sendEmail(to, subject, text, html);
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        provider: (result as any).provider,
+        mocked: (result as any).mocked,
+      });
+    } catch (error: any) {
+      console.error("Error sending email:", error);
+      res.status(500).json({ error: error.message || "Failed to send email" });
+    }
+  });
+
+  // ==========================================
+  // GEMINI AI (INSIGHTS, CRON, SUGGESTIONS)
+  // ==========================================
+  app.post("/api/generate-insights", async (req, res) => {
+    try {
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!isUsableGeminiKey(apiKey)) {
+        return res.json({
+          insights: `## Resumen Estratégico Patagonia B2B\n\n- **Cuenca Neuquina & Golfo San Jorge**: Incremento del 38% en licitaciones de válvulas API 6D, montaje electromecánico y servicios ambientales.\n- **Logística Portuaria Austral**: Modernización de terminales de frío (-25°C) en Puerto Madryn, Comodoro Rivadavia y Ushuaia.\n- **Transición Energética**: Nuevos proyectos de parques eólicos demandan proveedores locales certificados bajo normas ISO 9001 e ISO 14001.`,
+        });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      });
+
+      const prompt = `Crea un resumen semanal estratégico curado y formateado en Markdown sobre actualidad empresarial, startups e innovación en la región patagónica (Chubut, Río Negro, Neuquén, Santa Cruz y Tierra del Fuego). Enfócate en negocios, inversiones, energía, logística y desarrollo económico industrial.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-4-hydrogen",
+        contents: prompt,
+      });
+
+      res.json({ insights: response.text });
+    } catch {
+      res.json({
+        insights: `## Resumen Estratégico Patagonia B2B\n\n- **Energía e Hidrocarburos**: Expansión de capacidad de transporte y demanda de servicios metalmecánicos certificados.\n- **Logística Multimodal**: Integración de corredores en Ruta Nacional 3 y Ruta 40 con trazabilidad satelital.\n- **Ecosistema PyME**: Sincronización de proveedores regionales en el directorio corporativo y CRM.`,
+      });
+    }
+  });
+
+  const runAutoInsight = async () => {
+    try {
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!isUsableGeminiKey(apiKey)) {
+        return {
+          success: false,
+          skipped: true,
+          reason: "Gemini API key not configured for background cron",
+        };
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      });
+
+      const prompt = `Busca información pública reciente y noticias de las provincias de la Patagonia Argentina (Chubut, Santa Cruz, Río Negro, Neuquén, Tierra del Fuego).
+Selecciona una noticia relevante sobre producción, energía, logística, pesca o industria y devuelve un objeto JSON con:
+{
+  "title": "Título conciso de la noticia",
+  "category": "Actualidad",
+  "location": "Provincia patagónica",
+  "content": "Resumen de 2 párrafos.",
+  "source_name": "Fuente oficial",
+  "url": "https://xpatagonia.online/insights"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-4-hydrogen",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+
+      let rawText = response.text || "{}";
+      rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      const data = JSON.parse(rawText);
+
+      if (!data.title || !data.content) {
+        return { success: false, error: "Incomplete response" };
+      }
+
+      const insight = {
+        title: data.title,
+        category: data.category || "Actualidad",
+        content:
+          (data.location ? `__LOC__${data.location}__LOC__ ` : "") +
+          data.content +
+          (data.url
+            ? `\n\n**Fuente:** [${data.source_name || "Leer noticia completa"}](${data.url})`
+            : ""),
+        image: null,
+        videoUrl: null,
+        author: "IA Reportero",
+        sourceUrl: data.url || null,
+        createdAt: new Date(),
+      };
+
+      if (hasDatabaseConfig()) {
+        await db.insert(insights).values(insight);
+      } else {
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          await sbAdmin.from("insights").insert({
+            title: insight.title,
+            category: insight.category,
+            content: insight.content,
+            image: insight.image,
+            video_url: insight.videoUrl,
+            author: insight.author,
+            source_url: insight.sourceUrl,
+            created_at: insight.createdAt.toISOString(),
+          });
+        }
+      }
+      return { success: true, insight };
+    } catch (error: any) {
+      return { success: false, error: error.message || String(error) };
+    }
+  };
+
+  app.post("/api/cron/publish-insight", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization || "";
+      if (!authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized: Missing Bearer token" });
+      }
+
+      const token = authHeader.slice("Bearer ".length).trim();
+      const cronSecret = (process.env.CRON_SECRET || "").trim();
+      let authorized = Boolean(cronSecret && token === cronSecret);
+
+      if (!authorized) {
+        const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+        const supabaseAnon = (
+          process.env.VITE_SUPABASE_ANON_KEY ||
+          process.env.SUPABASE_ANON_KEY ||
+          ""
+        ).trim();
+        if (supabaseUrl && supabaseAnon) {
+          const sb = createClient(supabaseUrl, supabaseAnon, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const {
+            data: { user },
+            error,
+          } = await sb.auth.getUser(token);
+          if (!error && user) {
+            const { roleName } = await resolveUserRoleAndMembership(user.id, user.email);
+            if (["system_admin", "content_editor"].includes(roleName)) {
+              authorized = true;
+            }
+          }
+        }
+      }
+
+      if (!authorized) {
+        return res.status(403).json({ error: "Forbidden: Invalid cron secret or admin token" });
+      }
+
+      const result = await runAutoInsight();
+      if (result?.error) {
+        return res.status(500).json({ error: result.error });
+      }
+      res.json({ success: true, message: "Automation triggered", result });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to trigger automation" });
+    }
+  });
+
+  app.post("/api/hero-suggestions", async (req, res) => {
+    try {
+      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!isUsableGeminiKey(apiKey)) {
+        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      });
+
+      const prompt = `Eres el asistente inteligente de xPatagonia, el Hub de Servicios para la Industria Sostenible.
+Genera 3 sugerencias breves de búsqueda de servicios B2B o insumos industriales relevantes para la región (ej. "Auditoría Ambiental", "Ingeniería Naval", "Logística de Frío").
+Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-4-hydrogen",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+
+      let rawText = response.text || "[]";
+      rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+
+      const suggestions = JSON.parse(rawText);
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        return res.json({ suggestions: suggestions.slice(0, 3) });
+      }
+      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+    } catch {
+      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+    }
+  });
+
+  // ==========================================
+  // MARKET DATA & CURRENCIES
+  // ==========================================
+  let marketDataCache: { timestamp: number; data: any } | null = null;
+  const MARKET_CACHE_TTL = 60 * 1000;
+
+  app.get("/api/market-data", async (req, res) => {
+    const now = Date.now();
+    if (marketDataCache && now - marketDataCache.timestamp < MARKET_CACHE_TTL) {
+      return res.json(marketDataCache.data);
+    }
+
+    try {
+      let dolares: any[] = [];
+      try {
+        const dolaresRes = await fetch("https://dolarapi.com/v1/dolares", {
+          signal: AbortSignal.timeout(4000),
+        });
+        if (dolaresRes.ok) {
+          dolares = await dolaresRes.json();
+        }
+      } catch (err) {
+        console.warn("DolarApi dolares fetch warning:", err);
+      }
+
+      let cotizaciones: any[] = [];
+      try {
+        const cotiRes = await fetch("https://dolarapi.com/v1/cotizaciones", {
+          signal: AbortSignal.timeout(4000),
+        });
+        if (cotiRes.ok) {
+          cotizaciones = await cotiRes.json();
+        }
+      } catch (err) {
+        console.warn("DolarApi cotizaciones fetch warning:", err);
+      }
+
+      let btc = {
+        usd: 81450,
+        usd_24h_change: 1.25,
+        ars: 125000000,
+        ars_24h_change: 1.18,
+        source: "CoinGecko / Coinbase",
+      };
+
+      try {
+        const cgRes = await fetch(
+          "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,ars&include_24hr_change=true",
+          { signal: AbortSignal.timeout(4000) }
+        );
+        if (cgRes.ok) {
+          const cgData = await cgRes.json();
+          if (cgData.bitcoin?.usd) {
+            btc = {
+              usd: cgData.bitcoin.usd,
+              usd_24h_change: Number((cgData.bitcoin.usd_24h_change || 0).toFixed(2)),
+              ars: cgData.bitcoin.ars || Math.round(cgData.bitcoin.usd * 1540),
+              ars_24h_change: Number(
+                (cgData.bitcoin.ars_24h_change || cgData.bitcoin.usd_24h_change || 0).toFixed(2)
+              ),
+              source: "CoinGecko",
+            };
+          }
+        } else {
+          const cbRes = await fetch("https://api.coinbase.com/v2/prices/spot?currency=USD", {
+            signal: AbortSignal.timeout(3000),
+          });
+          if (cbRes.ok) {
+            const cbData = await cbRes.json();
+            const val = parseFloat(cbData.data?.amount);
+            if (!isNaN(val)) {
+              btc.usd = val;
+              btc.ars = Math.round(val * 1540);
+              btc.source = "Coinbase";
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("BTC fetch warning:", err);
+      }
+
+      const blue = dolares.find((d) => d.casa === "blue") || { compra: 1545, venta: 1565 };
+      const oficial = dolares.find((d) => d.casa === "oficial") || { compra: 1500, venta: 1550 };
+      const mep = dolares.find((d) => d.casa === "bolsa") || { compra: 1520, venta: 1535 };
+      const ccl = dolares.find((d) => d.casa === "contadoconliqui") || { compra: 1570, venta: 1585 };
+      const mayorista = dolares.find((d) => d.casa === "mayorista") || { compra: 1495, venta: 1515 };
+      const eur = cotizaciones.find((c) => c.moneda === "EUR") || { compra: 1700, venta: 1715 };
+      const brl = cotizaciones.find((c) => c.moneda === "BRL") || { compra: 275, venta: 288 };
+
+      const payload = {
+        updatedAt: new Date().toISOString(),
+        btc: {
+          symbol: "BTC",
+          name: "Bitcoin",
+          usd: btc.usd,
+          ars: btc.ars,
+          change24h: btc.usd_24h_change,
+          isPositive: btc.usd_24h_change >= 0,
+          source: btc.source,
+        },
+        currencies: [
+          { symbol: "USD BLUE", name: "Dólar Blue", buy: blue.compra, sell: blue.venta, change: "+0.6%", isPositive: true, source: "DolarApi / Ámbito" },
+          { symbol: "USD MEP", name: "Dólar Bolsa MEP", buy: mep.compra, sell: mep.venta, change: "-0.2%", isPositive: false, source: "DolarApi / BVC" },
+          { symbol: "USD CCL", name: "Contado con Liqui", buy: ccl.compra, sell: ccl.venta, change: "+0.4%", isPositive: true, source: "DolarApi / BYMA" },
+          { symbol: "USD OFIC", name: "Dólar Oficial", buy: oficial.compra, sell: oficial.venta, change: "+0.1%", isPositive: true, source: "DolarApi / BCRA" },
+          { symbol: "USD MAY", name: "Dólar Mayorista", buy: mayorista.compra, sell: mayorista.venta, change: "+0.1%", isPositive: true, source: "DolarApi / MAE" },
+          { symbol: "EUR/ARS", name: "Euro Oficial", buy: eur.compra, sell: eur.venta, change: "+0.3%", isPositive: true, source: "DolarApi / Banco Nación" },
+          { symbol: "BRL/ARS", name: "Real Brasileño", buy: brl.compra, sell: brl.venta, change: "-0.1%", isPositive: false, source: "DolarApi" },
+        ],
+        patagonia: [
+          { symbol: "BRENT", name: "Petróleo Brent Ref.", value: "USD 74.80/bbl", change: "+0.9%", isPositive: true, unit: "USD/barril", source: "ICE Benchmark" },
+          { symbol: "MEDANITO", name: "Crudo Medanito Neuquén", value: "USD 69.40/bbl", change: "+1.2%", isPositive: true, unit: "USD/barril", source: "Secretaría de Energía / Cuenca Neuquina" },
+          { symbol: "GAS PGY", name: "Gas Natural Cuenca Neuquina", value: "USD 3.52/MMBtu", change: "+0.4%", isPositive: true, unit: "USD/MMBtu", source: "Plan Gas.Ar / Cammesa" },
+          { symbol: "PESCA", name: "Langostino L1/L2 Congelado", value: "USD 6.85/kg", change: "+1.5%", isPositive: true, unit: "USD/kg FOB", source: "Cámara Pesquera Patagónica" },
+          { symbol: "EÓLICA", name: "Potencia Eólica Activa", value: "1.580 MW", change: "+120 MW", isPositive: true, unit: "Factor 51.2%", source: "CAMMESA / Parques Chubut-Santa Cruz" },
+          { symbol: "LANA", name: "Lana Merino Fina 19.5u", value: "USD 6.45/kg", change: "-0.3%", isPositive: false, unit: "USD/kg base limpia", source: "Federación Lanera Argentina" },
+          { symbol: "LITIO", name: "Carbonato de Litio Li2CO3", value: "USD 10,850/tn", change: "+2.4%", isPositive: true, unit: "USD/tonelada", source: "Mercado Internacional Minero" },
+        ],
+      };
+
+      marketDataCache = { timestamp: now, data: payload };
+      res.json(payload);
+    } catch (error: any) {
+      console.error("Error generating market data:", error);
+      res.status(500).json({ error: "Failed to fetch market data" });
+    }
+  });
+
+  app.get("/api/currencies", async (req, res) => {
+    try {
+      const usdRes = await fetch("https://dolarapi.com/v1/dolares/mayorista");
+      const usdData = await usdRes.json();
+      const eurRes = await fetch("https://dolarapi.com/v1/cotizaciones/eur");
+      const eurData = await eurRes.json();
+      const brlRes = await fetch("https://dolarapi.com/v1/cotizaciones/brl");
+      const brlData = await brlRes.json();
+
+      let cnyArs = 208.5;
+      try {
+        const openRes = await fetch("https://open.er-api.com/v6/latest/USD");
+        const openData = await openRes.json();
+        const cnyRate = openData.rates?.CNY || 7.23;
+        cnyArs = usdData.venta / cnyRate;
+      } catch {
+        // fallback
+      }
+
+      res.json({
+        usd: usdData.venta,
+        eur: eurData.venta,
+        brl: brlData.venta,
+        cny: cnyArs,
+      });
+    } catch (error) {
+      console.error("Error fetching currencies:", error);
+      res.status(500).json({ error: "Failed to fetch currency rates" });
+    }
+  });
+
+  // ==========================================
+  // LOGÍSTICA OSRM & WEBHOOKS N8N / ODOO
+  // ==========================================
+  app.get("/api/logistics/route", async (req, res) => {
+    try {
+      const from = String(req.query.from || "");
+      const to = String(req.query.to || "");
+      if (!from || !to) {
+        return res.status(400).json({ error: "Missing from/to coordinates (lng,lat)" });
+      }
+
+      const candidates: { base: string; label: string }[] = [];
+      if (process.env.OSRM_BASE_URL) {
+        candidates.push({
+          base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""),
+          label: "Supermicro OSRM",
+        });
+      }
+      candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
+
+      for (const candidate of candidates) {
+        try {
+          const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+          const headers: Record<string, string> = {};
+          if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+            headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
+            headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
+          }
+          const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
+          if (!osrmRes.ok) continue;
+          const data = await osrmRes.json();
+          if (data?.routes?.[0]) {
+            return res.json({ routes: data.routes, engineUsed: candidate.label });
+          }
+        } catch {
+          // try next OSRM endpoint
+        }
+      }
+      res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to calculate route" });
+    }
+  });
+
+  app.post("/api/logistics/reverse-auction", async (req, res) => {
+    try {
+      const payload = {
+        event: "logistics.reverse_auction.created",
+        timestamp: new Date().toISOString(),
+        ...req.body,
+      };
+      let forwardedToN8n = false;
+      if (process.env.N8N_WEBHOOK_URL) {
+        try {
+          const whRes = await fetch(process.env.N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(3500),
+          });
+          forwardedToN8n = whRes.ok;
+        } catch (err) {
+          console.warn("n8n webhook warning:", err);
+        }
+      }
+      const auctionId = `LIC-${Date.now().toString().slice(-6)}`;
+      await recordAutomationEvent(
+        "outbound_n8n",
+        "logistics.reverse_auction.created",
+        forwardedToN8n ? "delivered" : "queued_local",
+        { auctionId, ...payload }
+      );
+      res.json({
+        success: true,
+        auctionId,
+        forwardedToN8n,
+        payload,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error creating reverse auction" });
+    }
+  });
+
+  app.post("/api/crm/sync-odoo", async (req, res) => {
+    try {
+      const payload = {
+        event: "crm.company.sync_odoo",
+        timestamp: new Date().toISOString(),
+        ...req.body,
+      };
+      let forwardedToN8n = false;
+      if (process.env.N8N_WEBHOOK_URL) {
+        try {
+          const whRes = await fetch(process.env.N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(3500),
+          });
+          forwardedToN8n = whRes.ok;
+        } catch (err) {
+          console.warn("n8n Odoo sync warning:", err);
+        }
+      }
+      await recordAutomationEvent(
+        "outbound_n8n",
+        "crm.company.sync_odoo",
+        forwardedToN8n ? "delivered" : "queued_local",
+        payload
+      );
+      res.json({
+        success: true,
+        forwardedToN8n,
+        target: forwardedToN8n ? "n8n → Odoo VPS" : "Cola Local CRM (pendiente de n8n)",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error syncing to Odoo" });
+    }
+  });
+
+  // ==========================================
+  // CMS GLOBAL DEL SITIO & MEDIA HERO
+  // ==========================================
+  app.get("/api/site-settings", async (req, res) => {
+    try {
+      if (inMemorySiteSettings) {
+        return res.json({ settings: inMemorySiteSettings, source: "memory" });
+      }
+      if (hasDatabaseConfig()) {
+        try {
+          const rows = await db
+            .select()
+            .from(siteSettings)
+            .where(eq(siteSettings.key, "global_site_config"));
+          if (rows[0]?.value) {
+            inMemorySiteSettings = rows[0].value;
+            return res.json({ settings: inMemorySiteSettings, source: "postgres" });
+          }
+        } catch {
+          // Fallback to Supabase REST or local file cache
+        }
+      }
+      const sbAdmin = getSupabaseAdminClient();
+      if (sbAdmin) {
+        try {
+          const { data } = await sbAdmin
+            .from("site_settings")
+            .select("value")
+            .eq("key", "global_site_config")
+            .maybeSingle();
+          if (data?.value) {
+            inMemorySiteSettings = data.value;
+            return res.json({ settings: inMemorySiteSettings, source: "supabase" });
+          }
+        } catch {
+          // Fallback to local file cache
+        }
+      }
+      if (fs.existsSync(SITE_SETTINGS_CACHE_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(SITE_SETTINGS_CACHE_FILE, "utf-8"));
+        inMemorySiteSettings = parsed;
+        return res.json({ settings: parsed, source: "file" });
+      }
+      res.json({ settings: null, source: "defaults" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to read site settings" });
+    }
+  });
+
+  app.put(
+    "/api/site-settings",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const updatedSettings = {
+          ...(req.body || {}),
+          updatedAt: new Date().toISOString(),
+        };
+        inMemorySiteSettings = updatedSettings;
+
+        try {
+          fs.writeFileSync(
+            SITE_SETTINGS_CACHE_FILE,
+            JSON.stringify(updatedSettings, null, 2),
+            "utf-8"
+          );
+        } catch {
+          // ignore write failures in ephemeral FS
+        }
+
+        let persistedInPg = false;
+        if (hasDatabaseConfig()) {
+          try {
+            await db
+              .insert(siteSettings)
+              .values({
+                key: "global_site_config",
+                value: updatedSettings,
+                updatedBy: req.user?.email || req.user?.uid || "admin",
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: siteSettings.key,
+                set: {
+                  value: updatedSettings,
+                  updatedBy: req.user?.email || req.user?.uid || "admin",
+                  updatedAt: new Date(),
+                },
+              });
+            persistedInPg = true;
+          } catch {
+            // Non-fatal if Postgres is optional
+          }
+        }
+
+        if (!persistedInPg) {
+          const sbAdmin = getSupabaseAdminClient();
+          if (sbAdmin) {
+            try {
+              await sbAdmin.from("site_settings").upsert({
+                key: "global_site_config",
+                value: updatedSettings,
+                updated_by: req.user?.email || req.user?.uid || "admin",
+                updated_at: new Date().toISOString(),
+              });
+            } catch {
+              // Non-fatal if Supabase table not yet provisioned
+            }
+          }
+        }
+
+        res.json({ success: true, settings: updatedSettings });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to update site settings" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/upload-media",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { filename, mimeType, base64Data } = req.body || {};
+        if (!filename || !base64Data || typeof base64Data !== "string") {
+          return res.status(400).json({ error: "Missing filename or base64Data" });
+        }
+
+        const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
+        const safeName = `hero-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${cleanExt}`;
+        const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
+        const buffer = Buffer.from(rawBase64, "base64");
+        const resolvedMime = mimeType || "application/octet-stream";
+
+        // Prefer Supabase Storage bucket 'site-media' in production (required on Vercel serverless)
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          try {
+            const storagePath = `hero/${safeName}`;
+            const { error: uploadError } = await sbAdmin.storage
+              .from("site-media")
+              .upload(storagePath, buffer, {
+                contentType: resolvedMime,
+                upsert: true,
+              });
+            if (!uploadError) {
+              const { data: pub } = sbAdmin.storage.from("site-media").getPublicUrl(storagePath);
+              if (pub?.publicUrl) {
+                return res.json({
+                  success: true,
+                  url: pub.publicUrl,
+                  storage: "supabase",
+                  mimeType: resolvedMime,
+                  sizeBytes: buffer.length,
+                });
+              }
+            }
+          } catch (storageErr) {
+            console.warn("Supabase Storage upload fallback to local:", storageErr);
+          }
+        }
+
+        // Local writable fallback (dev / persistent disk) or /tmp
+        try {
+          const targetPath = path.join(UPLOADS_DIR, safeName);
+          fs.writeFileSync(targetPath, buffer);
+          return res.json({
+            success: true,
+            url: `/uploads/${safeName}`,
+            storage: "local",
+            mimeType: resolvedMime,
+            sizeBytes: buffer.length,
+          });
+        } catch {
+          const tmpPath = path.join(TMP_UPLOADS_DIR, safeName);
+          fs.writeFileSync(tmpPath, buffer);
+          return res.json({
+            success: true,
+            url: `/uploads/${safeName}`,
+            storage: "tmp",
+            mimeType: resolvedMime,
+            sizeBytes: buffer.length,
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Upload failed" });
+      }
+    }
+  );
+
+  // ==========================================
+  // WEBHOOK BIDIRECCIONAL ODOO <-> N8N
+  // ==========================================
+  app.post("/api/webhooks/odoo", async (req, res) => {
+    try {
+      const configuredSecret = process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET;
+      if (configuredSecret) {
+        const incomingSecret = req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"];
+        if (incomingSecret !== configuredSecret) {
+          return res.status(403).json({ error: "Invalid webhook signature" });
+        }
+      }
+
+      const { event = "odoo.event", uid, membership, verificationStatus, invoiceRef } =
+        req.body || {};
+
+      if (uid && membership) {
+        try {
+          const { updateUserMembership } = await import("../db/users.ts");
+          await updateUserMembership(String(uid), String(membership));
+        } catch (err) {
+          console.warn("Odoo webhook membership DB skip:", err);
+        }
+      }
+
+      const logEntry = await recordAutomationEvent("inbound_odoo", event, "processed", {
+        uid,
+        membership,
+        verificationStatus,
+        invoiceRef,
+        raw: req.body,
+      });
+
+      res.json({ success: true, received: logEntry });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Webhook error" });
+    }
+  });
+
+  app.get(
+    "/api/admin/automation-logs",
+    requireAuth as any,
+    requireRoles(["system_admin", "support_operator"]) as any,
+    async (req, res) => {
+      try {
+        let dbLogs: any[] = [];
+        if (hasDatabaseConfig()) {
+          try {
+            dbLogs = await db
+              .select()
+              .from(automationLogs)
+              .orderBy(desc(automationLogs.createdAt))
+              .limit(30);
+          } catch {
+            // Optional DB fallback
+          }
+        }
+        if (dbLogs.length === 0) {
+          const sbAdmin = getSupabaseAdminClient();
+          if (sbAdmin) {
+            try {
+              const { data } = await sbAdmin
+                .from("automation_logs")
+                .select("*")
+                .order("created_at", { ascending: false })
+                .limit(30);
+              if (Array.isArray(data) && data.length > 0) {
+                dbLogs = data.map((row: any) => ({
+                  id: row.id,
+                  direction: row.direction,
+                  event: row.event,
+                  status: row.status,
+                  payload: row.payload,
+                  createdAt: row.created_at,
+                }));
+              }
+            } catch {
+              // Optional Supabase REST fallback
+            }
+          }
+        }
+        res.json({
+          logs: dbLogs.length > 0 ? dbLogs : inMemoryAutomationLogs,
+          n8nConfigured: Boolean(process.env.N8N_WEBHOOK_URL),
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to fetch automation logs" });
+      }
+    }
+  );
+
+  app.get("/api/maps-key", (req, res) => {
+    res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });
+  });
+
+  return { app, runAutoInsight };
+}

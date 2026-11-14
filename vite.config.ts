@@ -26,6 +26,14 @@ export default defineConfig(({ mode }) => {
     ''
   ).trim();
 
+  const apiUrl = (
+    env.VITE_API_URL ||
+    process.env.VITE_API_URL ||
+    env.VITE_API_BASE_URL ||
+    process.env.VITE_API_BASE_URL ||
+    ''
+  ).trim();
+
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -45,6 +53,8 @@ export default defineConfig(({ mode }) => {
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(
         env.GOOGLE_MAPS_PLATFORM_KEY || process.env.GOOGLE_MAPS_PLATFORM_KEY || ''
       ),
+      'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl),
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiUrl),
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
     },

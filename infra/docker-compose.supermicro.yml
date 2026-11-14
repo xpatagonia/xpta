@@ -3,12 +3,12 @@ version: "3.8"
 services:
   # 1. Backend Node de xpatagonia.online (API + CyberPanel IMAP/SMTP + Proxies OSRM/n8n)
   xpatagonia-api:
-    image: node:20-alpine
+    image: node:22-alpine
     container_name: xpatagonia-api
     working_dir: /app
     volumes:
       - ../:/app
-    command: sh -c "npm ci --omit=dev && npm run build && NODE_ENV=production node --import tsx server.ts"
+    command: sh -c "npm ci --omit=dev && npm run build && NODE_ENV=production npm start"
     env_file:
       - ../.env
     environment:

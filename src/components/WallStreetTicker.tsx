@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, ArrowDownRight, RefreshCw, Pause, Play, ExternalLink, ShieldCheck, Zap, Activity } from 'lucide-react';
+import { getApiUrl } from '../lib/apiConfig';
 
 export interface MarketItem {
   id: string;
@@ -194,7 +195,7 @@ export default function WallStreetTicker() {
       // 1. Try server backend endpoint first
       let success = false;
       try {
-        const res = await fetch('/api/market-data', { signal: AbortSignal.timeout(3500) });
+        const res = await fetch(`${getApiUrl()}/api/market-data`, { signal: AbortSignal.timeout(3500) });
         if (res.ok) {
           const data = await res.json();
           if (data && data.btc && data.currencies) {

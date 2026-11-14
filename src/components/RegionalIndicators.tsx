@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import WallStreetTicker from './WallStreetTicker';
+import { getApiUrl } from '../lib/apiConfig';
 
 interface MarketDataState {
   btc: {
@@ -73,7 +74,7 @@ export default function RegionalIndicators() {
       // 1. Try our backend cache route
       let backendLoaded = false;
       try {
-        const res = await fetch('/api/market-data', { signal: AbortSignal.timeout(3500) });
+        const res = await fetch(`${getApiUrl()}/api/market-data`, { signal: AbortSignal.timeout(3500) });
         if (res.ok) {
           const data = await res.json();
           if (data && data.btc && data.currencies) {
