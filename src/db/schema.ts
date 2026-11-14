@@ -264,7 +264,31 @@ export const automationLogs = pgTable('automation_logs', {
   event: text('event').notNull(),
   status: text('status').notNull().default('processed'),
   payload: jsonb('payload').default('{}'),
+  attempts: integer('attempts').notNull().default(0),
+  nextRetryAt: timestamp('next_retry_at'),
+  lastError: text('last_error'),
+  updatedAt: timestamp('updated_at').defaultNow(),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const processedEmailUids = pgTable('processed_email_uids', {
+  id: serial('id').primaryKey(),
+  mailbox: text('mailbox').notNull().default('INBOX'),
+  emailUid: text('email_uid').notNull(),
+  senderEmail: text('sender_email'),
+  subject: text('subject'),
+  organizationId: integer('organization_id'),
+  arnOpportunityId: integer('arn_opportunity_id'),
+  processedAt: timestamp('processed_at').defaultNow(),
+});
+
+export const fleetExpiryAlerts = pgTable('fleet_expiry_alerts', {
+  id: serial('id').primaryKey(),
+  vehicleId: integer('vehicle_id').notNull(),
+  alertType: text('alert_type').notNull(), // 'vtv' | 'insurance'
+  expiryDate: text('expiry_date').notNull(),
+  notifiedEmail: text('notified_email'),
+  sentAt: timestamp('sent_at').defaultNow(),
 });
 
 // ==========================================

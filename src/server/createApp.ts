@@ -17,6 +17,8 @@ import { db, pool, hasDatabaseConfig, formatPgError } from "../db/index.ts";
 import { insights, siteSettings, automationLogs, contacts } from "../db/schema.ts";
 import { eq, desc } from "drizzle-orm";
 import { registerArnAndModuleRoutes, runArnPipelineForEvent } from "./arnRoutes.ts";
+import { registerWorkerAndWebhookRoutes } from "./workerAndWebhookRoutes.ts";
+import { computeNextRetryDate } from "../services/vpsWorkerService.ts";
 
 let cachedSupabaseAdmin: SupabaseClient | null = null;
 export function getSupabaseAdminClient(): SupabaseClient | null {
@@ -92,12 +94,49 @@ export function createApiApp() {
     status: string,
     payload: any
   ) {
+    let resolvedStatus = status;
+    let attempts = 0;
+    let nextRetryAt: Date | null = null;
+    let lastError: string | null = null;
+
+    const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+    if (direction === "outbound_n8n" && n8nUrl && status !== "processed") {
+      try {
+        const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+        const fwRes = await fetch(n8nUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(sharedSecret ? { "x-n8n-secret": sharedSecret } : {}),
+          },
+          body: JSON.stringify({ event, direction, payload, timestamp: new Date().toISOString() }),
+          signal: AbortSignal.timeout(5000),
+        });
+        if (fwRes.ok) {
+          resolvedStatus = "processed";
+        } else {
+          resolvedStatus = "retry_pending";
+          attempts = 1;
+          nextRetryAt = computeNextRetryDate(1);
+          lastError = `n8n HTTP ${fwRes.status}`;
+        }
+      } catch (fwErr: any) {
+        resolvedStatus = "retry_pending";
+        attempts = 1;
+        nextRetryAt = computeNextRetryDate(1);
+        lastError = fwErr?.message || "n8n unreachable";
+      }
+    } else if (direction === "outbound_n8n" && !n8nUrl && status === "local_queue") {
+      nextRetryAt = computeNextRetryDate(1);
+    }
+
     const entry = {
       id: Date.now(),
       direction,
       event,
-      status,
+      status: resolvedStatus,
       payload,
+      attempts,
       createdAt: new Date().toISOString(),
     };
     inMemoryAutomationLogs.unshift(entry);
@@ -106,7 +145,15 @@ export function createApiApp() {
     let persistedInPg = false;
     if (hasDatabaseConfig()) {
       try {
-        await db.insert(automationLogs).values({ direction, event, status, payload });
+        await db.insert(automationLogs).values({
+          direction,
+          event,
+          status: resolvedStatus,
+          payload,
+          attempts,
+          nextRetryAt,
+          lastError,
+        });
         persistedInPg = true;
       } catch {
         // Optional DB persistence
@@ -117,7 +164,12 @@ export function createApiApp() {
       const sbAdmin = getSupabaseAdminClient();
       if (sbAdmin) {
         try {
-          await sbAdmin.from("automation_logs").insert({ direction, event, status, payload });
+          await sbAdmin.from("automation_logs").insert({
+            direction,
+            event,
+            status: resolvedStatus,
+            payload,
+          });
         } catch {
           // Optional Supabase REST persistence
         }
@@ -1555,6 +1607,7 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   });
 
   registerArnAndModuleRoutes(app, recordAutomationEvent);
+  registerWorkerAndWebhookRoutes(app);
 
   return { app, runAutoInsight };
 }

@@ -196,6 +196,9 @@ test('ARN IA and private B2B module endpoints strictly enforce Bearer authentica
     { method: 'POST', path: '/api/fleet/vehicles', body: { name: 'Scania G410', plate: 'AF-123-BC' } },
     { method: 'POST', path: '/api/fleet/drivers', body: { fullName: 'Juan Perez' } },
     { method: 'POST', path: '/api/logistics/contracts', body: { loadId: '1', agreedPriceArs: 500000 } },
+    { method: 'POST', path: '/api/webhooks/n8n/imap-inbound', body: { uid: '123', from: 'a@b.com', text: 'RFQ' } },
+    { method: 'POST', path: '/api/webhooks/n8n/retry-queue', body: { limit: 10 } },
+    { method: 'POST', path: '/api/webhooks/n8n/fleet-alerts', body: { daysThreshold: 15 } },
   ];
 
   for (const reqSpec of guardedRequests) {

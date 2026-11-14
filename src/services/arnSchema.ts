@@ -261,6 +261,47 @@ export async function ensureProductionTables(): Promise<void> {
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
+
+      CREATE TABLE IF NOT EXISTS public.processed_email_uids (
+        id serial PRIMARY KEY,
+        mailbox text NOT NULL DEFAULT 'INBOX',
+        email_uid text NOT NULL,
+        sender_email text,
+        subject text,
+        organization_id integer,
+        arn_opportunity_id integer,
+        processed_at timestamptz DEFAULT now(),
+        UNIQUE (mailbox, email_uid)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.fleet_expiry_alerts (
+        id serial PRIMARY KEY,
+        vehicle_id integer NOT NULL,
+        alert_type text NOT NULL,
+        expiry_date text NOT NULL,
+        notified_email text,
+        sent_at timestamptz DEFAULT now(),
+        UNIQUE (vehicle_id, alert_type, expiry_date)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.automation_logs (
+        id bigserial PRIMARY KEY,
+        direction text NOT NULL,
+        event text NOT NULL,
+        status text NOT NULL DEFAULT 'processed',
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+        attempts integer NOT NULL DEFAULT 0,
+        next_retry_at timestamptz,
+        last_error text,
+        updated_at timestamptz DEFAULT now(),
+        created_at timestamptz DEFAULT now()
+      );
+
+      ALTER TABLE IF EXISTS public.automation_logs
+        ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS next_retry_at timestamptz,
+        ADD COLUMN IF NOT EXISTS last_error text,
+        ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
     `);
     arnTablesEnsured = true;
   } catch (err) {

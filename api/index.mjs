@@ -19,6 +19,7 @@ __export(schema_exports, {
   companyProfiles: () => companyProfiles,
   contacts: () => contacts,
   fleetDrivers: () => fleetDrivers,
+  fleetExpiryAlerts: () => fleetExpiryAlerts,
   fleetVehicles: () => fleetVehicles,
   insights: () => insights,
   inventoryItems: () => inventoryItems,
@@ -29,6 +30,7 @@ __export(schema_exports, {
   orgMembers: () => orgMembers,
   organizations: () => organizations,
   permissions: () => permissions,
+  processedEmailUids: () => processedEmailUids,
   products: () => products,
   rfqs: () => rfqs,
   rolePermissions: () => rolePermissions,
@@ -39,7 +41,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
-var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts;
+var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, processedEmailUids, fleetExpiryAlerts, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts;
 var init_schema = __esm({
   "src/db/schema.ts"() {
     users = pgTable("users", {
@@ -288,7 +290,30 @@ var init_schema = __esm({
       event: text("event").notNull(),
       status: text("status").notNull().default("processed"),
       payload: jsonb("payload").default("{}"),
+      attempts: integer("attempts").notNull().default(0),
+      nextRetryAt: timestamp("next_retry_at"),
+      lastError: text("last_error"),
+      updatedAt: timestamp("updated_at").defaultNow(),
       createdAt: timestamp("created_at").defaultNow()
+    });
+    processedEmailUids = pgTable("processed_email_uids", {
+      id: serial("id").primaryKey(),
+      mailbox: text("mailbox").notNull().default("INBOX"),
+      emailUid: text("email_uid").notNull(),
+      senderEmail: text("sender_email"),
+      subject: text("subject"),
+      organizationId: integer("organization_id"),
+      arnOpportunityId: integer("arn_opportunity_id"),
+      processedAt: timestamp("processed_at").defaultNow()
+    });
+    fleetExpiryAlerts = pgTable("fleet_expiry_alerts", {
+      id: serial("id").primaryKey(),
+      vehicleId: integer("vehicle_id").notNull(),
+      alertType: text("alert_type").notNull(),
+      // 'vtv' | 'insurance'
+      expiryDate: text("expiry_date").notNull(),
+      notifiedEmail: text("notified_email"),
+      sentAt: timestamp("sent_at").defaultNow()
     });
     arnRules = pgTable("arn_rules", {
       userId: text("user_uid").primaryKey(),
@@ -498,6 +523,93 @@ var init_db = __esm({
       console.error("Unexpected error on idle SQL pool client:", err);
     });
     db = drizzle(pool, { schema: schema_exports });
+  }
+});
+
+// src/middleware/auth.ts
+import { createClient } from "@supabase/supabase-js";
+async function resolveUserRoleAndMembership(uid, email) {
+  let roleName = "vendor";
+  let membershipName = "Basic";
+  try {
+    const { db: db3, hasDatabaseConfig: hasDatabaseConfig2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+    if (hasDatabaseConfig2()) {
+      const { userRoles: userRoles2, roles: roles2, userMemberships: userMemberships2, memberships: memberships2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const { eq: eq5 } = await import("drizzle-orm");
+      const roleRows = await db3.select().from(userRoles2).leftJoin(roles2, eq5(userRoles2.roleId, roles2.id)).where(eq5(userRoles2.userId, uid));
+      if (roleRows[0]?.roles?.name) {
+        roleName = roleRows[0].roles.name;
+      }
+      const memRows = await db3.select().from(userMemberships2).leftJoin(memberships2, eq5(userMemberships2.membershipId, memberships2.id)).where(eq5(userMemberships2.userId, uid));
+      if (memRows[0]?.memberships?.name) {
+        membershipName = memRows[0].memberships.name;
+      }
+    }
+  } catch {
+  }
+  if (email && BOOTSTRAP_ADMINS.includes(email.toLowerCase()) && roleName === "vendor") {
+    roleName = "system_admin";
+  }
+  return { roleName, membershipName };
+}
+var rawUrl, rawKey, isSupabaseConfigured, supabase, BOOTSTRAP_ADMINS, requireAuth, requireRoles;
+var init_auth = __esm({
+  "src/middleware/auth.ts"() {
+    rawUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+    rawKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
+    isSupabaseConfigured = (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) && rawKey.length > 20 && !rawKey.includes("placeholder");
+    supabase = isSupabaseConfigured ? createClient(rawUrl, rawKey) : null;
+    BOOTSTRAP_ADMINS = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com,admin@xpatagonia.com").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    requireAuth = async (req, res, next) => {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized: Missing token" });
+        return;
+      }
+      if (!supabase) {
+        res.status(503).json({ error: "Authentication service not configured in this environment" });
+        return;
+      }
+      const token = authHeader.split("Bearer ")[1];
+      try {
+        const {
+          data: { user },
+          error
+        } = await supabase.auth.getUser(token);
+        if (error || !user) {
+          res.status(401).json({ error: "Unauthorized: Invalid token" });
+          return;
+        }
+        const { roleName, membershipName } = await resolveUserRoleAndMembership(user.id, user.email);
+        req.user = {
+          ...user,
+          uid: user.id,
+          roleName,
+          membershipName
+        };
+        next();
+      } catch (error) {
+        console.error("Error verifying Supabase ID token:", error);
+        res.status(401).json({ error: "Unauthorized: Invalid token" });
+        return;
+      }
+    };
+    requireRoles = (allowedRoles) => {
+      return async (req, res, next) => {
+        if (!req.user) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        const email = (req.user.email || "").toLowerCase();
+        const userRole = req.user.roleName || "vendor";
+        const isBootstrapAdmin = BOOTSTRAP_ADMINS.includes(email);
+        if (allowedRoles.includes(userRole) || isBootstrapAdmin) {
+          next();
+          return;
+        }
+        res.status(403).json({ error: `Forbidden: Requires role ${allowedRoles.join(" or ")}` });
+      };
+    };
   }
 });
 
@@ -753,249 +865,7 @@ var init_emailService = __esm({
   }
 });
 
-// src/server/vercelEntry.ts
-import "dotenv/config";
-
-// src/server/createApp.ts
-import fs from "fs";
-import express from "express";
-import path from "path";
-import crypto2 from "crypto";
-import cors from "cors";
-import { createClient as createClient4 } from "@supabase/supabase-js";
-
-// src/middleware/auth.ts
-import { createClient } from "@supabase/supabase-js";
-var rawUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-var rawKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
-var isSupabaseConfigured = (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) && rawKey.length > 20 && !rawKey.includes("placeholder");
-var supabase = isSupabaseConfigured ? createClient(rawUrl, rawKey) : null;
-var BOOTSTRAP_ADMINS = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com,admin@xpatagonia.com").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-async function resolveUserRoleAndMembership(uid, email) {
-  let roleName = "vendor";
-  let membershipName = "Basic";
-  try {
-    const { db: db3, hasDatabaseConfig: hasDatabaseConfig2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    if (hasDatabaseConfig2()) {
-      const { userRoles: userRoles2, roles: roles2, userMemberships: userMemberships2, memberships: memberships2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq5 } = await import("drizzle-orm");
-      const roleRows = await db3.select().from(userRoles2).leftJoin(roles2, eq5(userRoles2.roleId, roles2.id)).where(eq5(userRoles2.userId, uid));
-      if (roleRows[0]?.roles?.name) {
-        roleName = roleRows[0].roles.name;
-      }
-      const memRows = await db3.select().from(userMemberships2).leftJoin(memberships2, eq5(userMemberships2.membershipId, memberships2.id)).where(eq5(userMemberships2.userId, uid));
-      if (memRows[0]?.memberships?.name) {
-        membershipName = memRows[0].memberships.name;
-      }
-    }
-  } catch {
-  }
-  if (email && BOOTSTRAP_ADMINS.includes(email.toLowerCase()) && roleName === "vendor") {
-    roleName = "system_admin";
-  }
-  return { roleName, membershipName };
-}
-var requireAuth = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Unauthorized: Missing token" });
-    return;
-  }
-  if (!supabase) {
-    res.status(503).json({ error: "Authentication service not configured in this environment" });
-    return;
-  }
-  const token = authHeader.split("Bearer ")[1];
-  try {
-    const {
-      data: { user },
-      error
-    } = await supabase.auth.getUser(token);
-    if (error || !user) {
-      res.status(401).json({ error: "Unauthorized: Invalid token" });
-      return;
-    }
-    const { roleName, membershipName } = await resolveUserRoleAndMembership(user.id, user.email);
-    req.user = {
-      ...user,
-      uid: user.id,
-      roleName,
-      membershipName
-    };
-    next();
-  } catch (error) {
-    console.error("Error verifying Supabase ID token:", error);
-    res.status(401).json({ error: "Unauthorized: Invalid token" });
-    return;
-  }
-};
-var requireRoles = (allowedRoles) => {
-  return async (req, res, next) => {
-    if (!req.user) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    const email = (req.user.email || "").toLowerCase();
-    const userRole = req.user.roleName || "vendor";
-    const isBootstrapAdmin = BOOTSTRAP_ADMINS.includes(email);
-    if (allowedRoles.includes(userRole) || isBootstrapAdmin) {
-      next();
-      return;
-    }
-    res.status(403).json({ error: `Forbidden: Requires role ${allowedRoles.join(" or ")}` });
-  };
-};
-
-// src/server/createApp.ts
-init_users();
-
-// src/db/rfqs.ts
-init_db();
-init_schema();
-import { and, eq as eq2, desc } from "drizzle-orm";
-async function getUserRfqs(userId) {
-  return await db.select().from(rfqs).where(eq2(rfqs.userId, userId)).orderBy(desc(rfqs.createdAt));
-}
-async function createRfq(userId, data) {
-  const result = await db.insert(rfqs).values({
-    userId,
-    title: data.title,
-    category: data.category,
-    priority: data.priority,
-    description: data.description
-  }).returning();
-  return result[0];
-}
-async function updateRfqStatus(rfqId, userId, status) {
-  const result = await db.update(rfqs).set({ status }).where(and(eq2(rfqs.id, rfqId), eq2(rfqs.userId, userId))).returning();
-  return result[0] || null;
-}
-
-// src/services/notificationService.ts
-init_db();
-init_schema();
-init_emailService();
-import { eq as eq3, ilike, or } from "drizzle-orm";
-async function notifyProvidersForRfq(rfqCategory, rfqTitle, rfqId) {
-  const matchedProviders = [];
-  const seenEmails = /* @__PURE__ */ new Set();
-  if (hasDatabaseConfig()) {
-    try {
-      const profiles = await db.select({
-        userId: companyProfiles.userId,
-        companyName: companyProfiles.companyName,
-        email: companyProfiles.email,
-        industry: companyProfiles.industry
-      }).from(companyProfiles).where(
-        or(
-          eq3(companyProfiles.industry, rfqCategory),
-          ilike(companyProfiles.industry, `%${rfqCategory}%`)
-        )
-      ).limit(20);
-      for (const p of profiles) {
-        if (p.email && !seenEmails.has(p.email.toLowerCase())) {
-          seenEmails.add(p.email.toLowerCase());
-          matchedProviders.push({
-            uid: p.userId,
-            name: p.companyName || p.email,
-            email: p.email,
-            category: p.industry || rfqCategory
-          });
-        }
-      }
-      if (matchedProviders.length === 0) {
-        const userRows = await db.select({
-          uid: users.uid,
-          email: users.email,
-          category: users.category
-        }).from(users).where(ilike(users.category, `%${rfqCategory}%`)).limit(20);
-        for (const u of userRows) {
-          if (u.email && !seenEmails.has(u.email.toLowerCase())) {
-            seenEmails.add(u.email.toLowerCase());
-            matchedProviders.push({
-              uid: u.uid,
-              name: u.email,
-              email: u.email,
-              category: u.category || rfqCategory
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[notifyProvidersForRfq] DB query warning:", err);
-    }
-  }
-  const opsEmails = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  for (const adminEmail of opsEmails) {
-    if (!seenEmails.has(adminEmail.toLowerCase())) {
-      seenEmails.add(adminEmail.toLowerCase());
-      matchedProviders.push({
-        uid: "ops-admin",
-        name: "Mesa de Operaciones xPatagonia",
-        email: adminEmail,
-        category: rfqCategory
-      });
-    }
-  }
-  let sentCount = 0;
-  const hasOutboundEmail = Boolean(process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD);
-  if (hasOutboundEmail && matchedProviders.length > 0) {
-    for (const provider of matchedProviders) {
-      try {
-        await sendEmail(
-          provider.email,
-          `Nueva Oportunidad B2B #${rfqId} (${rfqCategory}) - ${rfqTitle}`,
-          `Hola ${provider.name},
-
-Se ha publicado una nueva Solicitud de Cotizaci\xF3n (RFQ #${rfqId}) en la categor\xEDa "${rfqCategory}":
-
-${rfqTitle}
-
-Ingresa a https://xpatagonia.online/dashboard para revisar especificaciones y enviar tu propuesta.`,
-          `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:20px;">
-            <h2 style="color:#111827;">Nueva Oportunidad B2B #${rfqId}</h2>
-            <p>Hola <strong>${provider.name}</strong>,</p>
-            <p>Se public\xF3 una nueva solicitud de cotizaci\xF3n compatible con tu rubro (<strong>${rfqCategory}</strong>):</p>
-            <p style="padding:12px 16px;background:#f8fafc;border-left:4px solid #f97316;font-weight:600;">${rfqTitle}</p>
-            <p><a href="https://xpatagonia.online/dashboard" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Ver Solicitud en xPatagonia</a></p>
-          </div>`
-        );
-        sentCount++;
-      } catch (err) {
-        console.warn(`[notifyProvidersForRfq] Failed sending to ${provider.email}:`, err);
-      }
-    }
-  }
-  if (hasDatabaseConfig()) {
-    try {
-      await db.insert(automationLogs).values({
-        direction: "outbound_n8n",
-        event: "rfq.providers_notified",
-        status: sentCount > 0 ? "delivered" : "processed",
-        payload: { rfqId, rfqCategory, matchedCount: matchedProviders.length, sentCount }
-      });
-    } catch {
-    }
-  }
-  return {
-    success: true,
-    providersMatched: matchedProviders.length,
-    providersNotified: sentCount
-  };
-}
-
-// src/server/createApp.ts
-init_db();
-init_schema();
-import { eq as eq4, desc as desc2 } from "drizzle-orm";
-
-// src/server/arnRoutes.ts
-init_db();
-import { createClient as createClient3 } from "@supabase/supabase-js";
-
 // src/services/arnSchema.ts
-init_db();
-var arnTablesEnsured = false;
 async function ensureProductionTables() {
   if (arnTablesEnsured || !hasDatabaseConfig()) return;
   try {
@@ -1254,23 +1124,63 @@ async function ensureProductionTables() {
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
+
+      CREATE TABLE IF NOT EXISTS public.processed_email_uids (
+        id serial PRIMARY KEY,
+        mailbox text NOT NULL DEFAULT 'INBOX',
+        email_uid text NOT NULL,
+        sender_email text,
+        subject text,
+        organization_id integer,
+        arn_opportunity_id integer,
+        processed_at timestamptz DEFAULT now(),
+        UNIQUE (mailbox, email_uid)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.fleet_expiry_alerts (
+        id serial PRIMARY KEY,
+        vehicle_id integer NOT NULL,
+        alert_type text NOT NULL,
+        expiry_date text NOT NULL,
+        notified_email text,
+        sent_at timestamptz DEFAULT now(),
+        UNIQUE (vehicle_id, alert_type, expiry_date)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.automation_logs (
+        id bigserial PRIMARY KEY,
+        direction text NOT NULL,
+        event text NOT NULL,
+        status text NOT NULL DEFAULT 'processed',
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+        attempts integer NOT NULL DEFAULT 0,
+        next_retry_at timestamptz,
+        last_error text,
+        updated_at timestamptz DEFAULT now(),
+        created_at timestamptz DEFAULT now()
+      );
+
+      ALTER TABLE IF EXISTS public.automation_logs
+        ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS next_retry_at timestamptz,
+        ADD COLUMN IF NOT EXISTS last_error text,
+        ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
     `);
     arnTablesEnsured = true;
   } catch (err) {
     console.warn("[ARN_SCHEMA] Table bootstrap skipped or deferred:", err);
   }
 }
+var arnTablesEnsured;
+var init_arnSchema = __esm({
+  "src/services/arnSchema.ts"() {
+    init_db();
+    arnTablesEnsured = false;
+  }
+});
 
 // src/services/arnAiService.ts
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
-var DEFAULT_ARN_POLICY = {
-  mode: "hybrid",
-  autoApproveMaxUsd: 1500,
-  minConfidenceScore: 82,
-  autoSendEmails: false,
-  autoCreateLogistics: true,
-  autoReserveInventory: true
-};
 function evaluateHybridDecision(rule, actionType, estimatedAmountUsd, confidenceScore) {
   if (rule.mode === "manual") {
     return {
@@ -1506,9 +1416,19 @@ ${JSON.stringify(contextSnapshot, null, 2)}`,
     return `No se pudo consultar al Copiloto ARN en este momento (${err?.message || "error temporal"}).`;
   }
 }
-
-// src/lib/supabase.ts
-import { createClient as createClient2 } from "@supabase/supabase-js";
+var DEFAULT_ARN_POLICY;
+var init_arnAiService = __esm({
+  "src/services/arnAiService.ts"() {
+    DEFAULT_ARN_POLICY = {
+      mode: "hybrid",
+      autoApproveMaxUsd: 1500,
+      minConfidenceScore: 82,
+      autoSendEmails: false,
+      autoCreateLogistics: true,
+      autoReserveInventory: true
+    };
+  }
+});
 
 // src/lib/apiConfig.ts
 function sanitizeApiBaseUrl(rawUrl2) {
@@ -1533,11 +1453,17 @@ function readDefineApiUrl() {
     return "";
   }
 }
-var getApiUrl = () => {
-  return sanitizeApiBaseUrl(readDefineApiUrl());
-};
+var getApiUrl;
+var init_apiConfig = __esm({
+  "src/lib/apiConfig.ts"() {
+    getApiUrl = () => {
+      return sanitizeApiBaseUrl(readDefineApiUrl());
+    };
+  }
+});
 
 // src/lib/supabase.ts
+import { createClient as createClient2 } from "@supabase/supabase-js";
 function readBuildSupabaseUrl() {
   try {
     if (typeof __XPATAGONIA_SUPABASE_URL__ !== "undefined" && __XPATAGONIA_SUPABASE_URL__) {
@@ -1656,12 +1582,6 @@ function buildClient(url, key) {
     return null;
   }
 }
-var initialUrl = readBuildSupabaseUrl();
-var initialKey = readBuildSupabaseAnonKey();
-var isSupabaseConfigured2 = isValidSupabaseConfig(initialUrl, initialKey);
-var activeClient = buildClient(initialUrl, initialKey) || createResilientFallbackClient();
-var SUPABASE_READY_EVENT = "xpatagonia:supabase-ready";
-var runtimeBootstrapPromise = null;
 async function ensureSupabaseConfigured() {
   if (isSupabaseConfigured2) return true;
   if (typeof window === "undefined") return false;
@@ -1693,13 +1613,32 @@ async function ensureSupabaseConfigured() {
   })();
   return runtimeBootstrapPromise;
 }
-if (typeof window !== "undefined" && !isSupabaseConfigured2) {
-  void ensureSupabaseConfigured();
-}
-var supabase2 = new Proxy({}, {
-  get(_target, prop) {
-    const value = activeClient[prop];
-    return typeof value === "function" ? value.bind(activeClient) : value;
+var initialUrl, initialKey, isSupabaseConfigured2, activeClient, SUPABASE_READY_EVENT, runtimeBootstrapPromise, supabase2;
+var init_supabase = __esm({
+  "src/lib/supabase.ts"() {
+    init_apiConfig();
+    initialUrl = readBuildSupabaseUrl();
+    initialKey = readBuildSupabaseAnonKey();
+    isSupabaseConfigured2 = isValidSupabaseConfig(initialUrl, initialKey);
+    activeClient = buildClient(initialUrl, initialKey) || createResilientFallbackClient();
+    SUPABASE_READY_EVENT = "xpatagonia:supabase-ready";
+    runtimeBootstrapPromise = null;
+    if (typeof window !== "undefined" && !isSupabaseConfigured2) {
+      void ensureSupabaseConfigured();
+    }
+    supabase2 = new Proxy({}, {
+      get(_target, prop) {
+        const value = activeClient[prop];
+        return typeof value === "function" ? value.bind(activeClient) : value;
+      }
+    });
+  }
+});
+
+// src/lib/db.ts
+var init_db2 = __esm({
+  "src/lib/db.ts"() {
+    init_supabase();
   }
 });
 
@@ -1713,332 +1652,13 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+var init_patagoniaRouting = __esm({
+  "src/lib/patagoniaRouting.ts"() {
+    init_apiConfig();
+  }
+});
 
 // src/lib/b2bDirectoryData.ts
-var B2B_COMPANIES = [
-  {
-    id: "comp-petrosur",
-    name: "PetroSur Ingenier\xEDa & Fluidos S.A.",
-    cuit: "30-71489210-9",
-    tier: "corporativo",
-    tierPriority: 1,
-    tierLabel: "Plan Corporativo",
-    verified: true,
-    category: "Hidrocarburos (Oil & Gas)",
-    subcategories: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa de Pozos"],
-    province: "Neuqu\xE9n",
-    city: "A\xF1elo / Neuqu\xE9n Capital",
-    employeeCount: "201-500",
-    publicSummary: "Ingenier\xEDa de superficie, provisi\xF3n de v\xE1lvulas de alta presi\xF3n y mantenimiento integral para yacimientos en Cuenca Neuquina y Golfo San Jorge.",
-    contactName: "Ing. Carlos Mendoza",
-    contactRole: "Director Comercial & Licitaciones",
-    email: "cmendoza@petrosur-b2b.com.ar",
-    phone: "+54 9 299 482-9100",
-    whatsapp: "+5492994829100",
-    website: "https://petrosur-b2b.com.ar",
-    certifications: ["ISO 9001", "ISO 14001", "API Spec Q1"],
-    paymentTerms: "Cuenta Corriente 30/60 d\xEDas \u2022 Factura A / MiPyME",
-    creditRating: "AAA+ (Riesgo Corporativo Auditado)",
-    adnComercial: {
-      ofrece: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa"],
-      demanda: ["Mecanizado CNC", "Bridas Forjadas", "Flete Pesado desde Rosario"],
-      corredorLogistico: "RN 22 / A\xF1elo (Vaca Muerta)",
-      ciudadBase: "A\xF1elo (Hub Vaca Muerta)",
-      lat: -38.3522,
-      lng: -68.7897
-    }
-  },
-  {
-    id: "comp-logistica-austral",
-    name: "Log\xEDstica Austral Multimodal S.R.L.",
-    cuit: "30-68923415-4",
-    tier: "corporativo",
-    tierPriority: 1,
-    tierLabel: "Plan Corporativo",
-    verified: true,
-    category: "Log\xEDstica",
-    subcategories: ["Cargas Especiales", "Cadena de Fr\xEDo -25\xB0C", "Dep\xF3sito Fiscal"],
-    province: "Chubut",
-    city: "Comodoro Rivadavia / Puerto Madryn",
-    employeeCount: "51-200",
-    publicSummary: "Operador log\xEDstico patag\xF3nico con flota propia de carretones, transporte refrigerado para exportaci\xF3n pesquera y bases operativas en Ruta 3 y Ruta 40.",
-    contactName: "Lic. Valeria Albornoz",
-    contactRole: "Gerente de Operaciones B2B",
-    email: "valbornoz@logisticaaustral.com.ar",
-    phone: "+54 9 297 431-8820",
-    whatsapp: "+5492974318820",
-    website: "https://logisticaaustral.com.ar",
-    certifications: ["ISO 9001", "SENASA Hab. Fr\xEDo", "Cargas Peligrosas IMO"],
-    paymentTerms: "Transferencia / Echeq 30 d\xEDas \u2022 Convenio Flota",
-    creditRating: "AA+ (Cumplimiento Verificado)",
-    adnComercial: {
-      ofrece: ["Flete LTL Consolidado", "Retorno Vac\xEDo RN 3", "Cadena de Fr\xEDo -25\xB0C"],
-      demanda: ["Cargas Norte \u2192 Sur", "Insumos de Flota", "Paletizado Isot\xE9rmico"],
-      corredorLogistico: "Ruta Nacional 3 (Buenos Aires \u2194 Ushuaia)",
-      ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
-      lat: -45.8641,
-      lng: -67.4966
-    }
-  },
-  {
-    id: "comp-eolica-sur",
-    name: "RenovaPatagonia Electromec\xE1nica S.A.",
-    cuit: "30-71550932-1",
-    tier: "corporativo",
-    tierPriority: 1,
-    tierLabel: "Plan Corporativo",
-    verified: true,
-    category: "Energ\xEDas Renovables",
-    subcategories: ["Subestaciones", "Mantenimiento Aerogeneradores", "Paneles Industriales"],
-    province: "Santa Cruz",
-    city: "R\xEDo Gallegos / Pico Truncado",
-    employeeCount: "51-200",
-    publicSummary: "Montaje electromec\xE1nico de parques e\xF3licos, tendido de l\xEDneas de media y alta tensi\xF3n e integraci\xF3n de sistemas h\xEDbridos industriales.",
-    contactName: "Ing. Mart\xEDn Echeverr\xEDa",
-    contactRole: "Jefe de Desarrollo de Negocios",
-    email: "mecheverria@renovapatagonia.com.ar",
-    phone: "+54 9 2966 55-1490",
-    whatsapp: "+5492966551490",
-    website: "https://renovapatagonia.com.ar",
-    certifications: ["ISO 45001", "IRAM", "CAMMESA Homologado"],
-    paymentTerms: "Certificaci\xF3n por Avance de Obra \u2022 15/45 d\xEDas",
-    creditRating: "AAA (Proveedor Homologado)",
-    adnComercial: {
-      ofrece: ["Subestaciones MT/AT", "Tableros SCADA", "Montaje E\xF3lico"],
-      demanda: ["Transformadores desde C\xF3rdoba", "Carretones Especiales", "EPP Altura"],
-      corredorLogistico: "RN 3 / Pico Truncado - R\xEDo Gallegos",
-      ciudadBase: "R\xEDo Gallegos",
-      lat: -51.6226,
-      lng: -69.2181
-    }
-  },
-  {
-    id: "comp-rosario-forja",
-    name: "Forja & V\xE1lvulas del Paran\xE1 S.A. (Proveedor Extra-Regional)",
-    cuit: "30-70841299-8",
-    tier: "corporativo",
-    tierPriority: 1,
-    tierLabel: "Plan Corporativo",
-    verified: true,
-    category: "Metal\xFArgica",
-    subcategories: ["Bridas Forjadas ANSI", "Mecanizado CNC Pesado", "V\xE1lvulas de Proceso"],
-    province: "Santa Fe (Env\xEDo Patagonia)",
-    city: "Rosario, Santa Fe \u2192 Corredor Sur",
-    employeeCount: "51-200",
-    publicSummary: "Fabricante santafesino de bridas forjadas, cuerpos de v\xE1lvulas API y repuestos mecanizados CNC con despacho consolidado LTL hacia Cuenca Neuquina y Golfo San Jorge.",
-    contactName: "Ing. Federico Brizuela",
-    contactRole: "Gerente de Cuentas Patag\xF3nicas",
-    email: "fbrizuela@forjaparana.com.ar",
-    phone: "+54 9 341 590-4410",
-    whatsapp: "+5493415904410",
-    website: "https://forjaparana.com.ar",
-    certifications: ["ISO 9001", "API 6A / 6D", "ASME VIII"],
-    paymentTerms: "Cuenta Corriente 45 d\xEDas \u2022 Flete Consolidado LTL",
-    creditRating: "AA+ (Exportador / Proveedor Industrial)",
-    adnComercial: {
-      ofrece: ["Bridas Forjadas", "Mecanizado CNC", "Cuerpos API 6D"],
-      demanda: ["Flete Consolidado Rosario \u2192 A\xF1elo", "Dep\xF3sito Cross-Docking Neuqu\xE9n"],
-      corredorLogistico: "Rosario \u2192 RN 152 \u2192 Neuqu\xE9n / A\xF1elo",
-      ciudadBase: "Rosario (Polo Industrial)",
-      lat: -32.9442,
-      lng: -60.6505,
-      isExtraRegional: true
-    }
-  },
-  {
-    id: "comp-metalurgica-andina",
-    name: "Metal\xFArgica Golfo San Jorge S.A.",
-    cuit: "30-70112984-7",
-    tier: "pro",
-    tierPriority: 2,
-    tierLabel: "Plan Pro Industrial",
-    verified: true,
-    category: "Metal\xFArgica",
-    subcategories: ["Mecanizado CNC", "Estructuras Met\xE1licas", "Tanques API"],
-    province: "Chubut",
-    city: "Parque Industrial Comodoro Rivadavia",
-    employeeCount: "11-50",
-    publicSummary: "Fabricaci\xF3n de estructuras met\xE1licas pesadas, skids de bombeo, recipientes sometidos a presi\xF3n y torner\xEDa CNC de precisi\xF3n.",
-    contactName: "T\xE9c. Roberto Mansilla",
-    contactRole: "Responsable de Presupuestos",
-    email: "cotizaciones@metalgolfo.com.ar",
-    phone: "+54 9 297 492-3310",
-    whatsapp: "+5492974923310",
-    website: "https://metalgolfo.com.ar",
-    certifications: ["ISO 9001", "Soldadura Calificada ASME IX"],
-    paymentTerms: "50% Anticipo / 50% Contra Entrega (Echeq 30 d\xEDas)",
-    creditRating: "AA (Verificado en Red)",
-    adnComercial: {
-      ofrece: ["Mecanizado CNC", "Skids de Bombeo", "Tanques API"],
-      demanda: ["Chapa Naval / Acero F24", "Electrodos Especiales", "Flete LTL"],
-      corredorLogistico: "RN 3 / Cuenca Golfo San Jorge",
-      ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
-      lat: -45.8641,
-      lng: -67.4966
-    }
-  },
-  {
-    id: "comp-cordoba-electromec",
-    name: "Potencia & Transformadores C\xF3rdoba S.A. (Proveedor Extra-Regional)",
-    cuit: "30-69441822-3",
-    tier: "pro",
-    tierPriority: 2,
-    tierLabel: "Plan Pro Industrial",
-    verified: true,
-    category: "Equipamiento Industrial",
-    subcategories: ["Transformadores MT", "Celdas de Media Tensi\xF3n", "Grupos Electr\xF3genos"],
-    province: "C\xF3rdoba (Env\xEDo Patagonia)",
-    city: "C\xF3rdoba Capital \u2192 Corredor Patag\xF3nico",
-    employeeCount: "51-200",
-    publicSummary: "Ingenier\xEDa el\xE9ctrica industrial desde C\xF3rdoba para parques e\xF3licos, yacimientos y plantas pesqueras en Patagonia con despacho por carga consolidada.",
-    contactName: "Ing. Marcos Villagra",
-    contactRole: "Director Comercial Regional",
-    email: "mvillagra@potenciacba.com.ar",
-    phone: "+54 9 351 478-9200",
-    whatsapp: "+5493514789200",
-    website: "https://potenciacba.com.ar",
-    certifications: ["ISO 9001", "IRAM 2250"],
-    paymentTerms: "Anticipo 30% + Echeq 30/60 d\xEDas",
-    creditRating: "AA (Verificado en Red)",
-    adnComercial: {
-      ofrece: ["Transformadores MT", "Grupos Electr\xF3genos", "Celdas El\xE9ctricas"],
-      demanda: ["Carret\xF3n C\xF3rdoba \u2192 Santa Cruz", "Flete Retorno Vac\xEDo RN 40/RN 3"],
-      corredorLogistico: "C\xF3rdoba \u2192 RN 158 / RN 35 \u2192 Patagonia",
-      ciudadBase: "C\xF3rdoba Capital (Parque Industrial)",
-      lat: -31.4201,
-      lng: -64.1888,
-      isExtraRegional: true
-    }
-  },
-  {
-    id: "comp-austral-naval",
-    name: "Servicios Navales & Pesqueros Australes S.R.L.",
-    cuit: "30-71204918-3",
-    tier: "pro",
-    tierPriority: 2,
-    tierLabel: "Plan Pro Industrial",
-    verified: true,
-    category: "Industria Pesquera",
-    subcategories: ["Refrigeraci\xF3n Naval", "Insumos de Planta", "Envases Exportaci\xF3n"],
-    province: "Tierra del Fuego",
-    city: "Ushuaia / R\xEDo Grande",
-    employeeCount: "11-50",
-    publicSummary: "Provisi\xF3n de equipamiento frigor\xEDfico para buques factor\xEDa, repuestos navales y packaging isot\xE9rmico para plantas procesadoras.",
-    contactName: "Hern\xE1n Giordano",
-    contactRole: "Socio Gerente Comercial",
-    email: "hgiordano@navalesaustrales.com.ar",
-    phone: "+54 9 2901 61-2040",
-    whatsapp: "+5492901612040",
-    website: "https://navalesaustrales.com.ar",
-    certifications: ["Prefectura Naval Reg.", "SENASA"],
-    paymentTerms: "Cuenta Corriente 30 d\xEDas \u2022 USD Oficial",
-    creditRating: "AA (Verificado en Red)",
-    adnComercial: {
-      ofrece: ["Refrigeraci\xF3n Industrial", "Packaging Isot\xE9rmico", "Repuestos Navales"],
-      demanda: ["Cadena de Fr\xEDo -25\xB0C hacia Buenos Aires", "Gases Refrigerantes"],
-      corredorLogistico: "RN 3 / Canal Beagle \u2192 Puerto Madryn / CABA",
-      ciudadBase: "Ushuaia (Puerto Austral)",
-      lat: -54.8019,
-      lng: -68.303
-    }
-  },
-  {
-    id: "comp-constructora-valle",
-    name: "Obras Civiles & Movimiento de Suelos Alto Valle S.A.",
-    cuit: "30-69884120-2",
-    tier: "pro",
-    tierPriority: 2,
-    tierLabel: "Plan Pro Industrial",
-    verified: true,
-    category: "Construcci\xF3n",
-    subcategories: ["Locaciones Petroleras", "Hormig\xF3n Elaborado", "Naves Industriales"],
-    province: "R\xEDo Negro",
-    city: "Cipolletti / General Roca",
-    employeeCount: "51-200",
-    publicSummary: "Construcci\xF3n de plateas industriales, apertura de trazas, movimiento de suelos con flota Caterpillar y montaje de galpones llave en mano.",
-    contactName: "Arq. Luc\xEDa Ferreyra",
-    contactRole: "Gerencia T\xE9cnica & Licitaciones",
-    email: "lferreyra@obrasaltovalle.com.ar",
-    phone: "+54 9 299 512-7740",
-    whatsapp: "+5492995127740",
-    website: "https://obrasaltovalle.com.ar",
-    certifications: ["Registro Nacional de Constructores", "ISO 9001"],
-    paymentTerms: "Certificaci\xF3n Quincenal / Mensual",
-    creditRating: "AA (Verificado en Red)",
-    adnComercial: {
-      ofrece: ["Locaciones Petroleras", "Naves Industriales", "Hormig\xF3n Elaborado"],
-      demanda: ["Estructuras Met\xE1licas", "Indumentaria Ign\xEDfuga", "Alquiler de Maquinaria"],
-      corredorLogistico: "RN 22 / Alto Valle \u2192 Vaca Muerta",
-      ciudadBase: "Cipolletti / General Roca (Alto Valle)",
-      lat: -38.9339,
-      lng: -67.9903
-    }
-  },
-  {
-    id: "comp-seguridad-epp",
-    name: "Seguridad Industrial Sur & EPP S.R.L.",
-    cuit: "30-71609211-5",
-    tier: "inicial",
-    tierPriority: 3,
-    tierLabel: "Plan Inicial",
-    verified: false,
-    category: "Seguridad e Higiene (EPP)",
-    subcategories: ["Indumentaria Ign\xEDfuga", "Detectores de Gases", "Calzado Dielectrico"],
-    province: "Neuqu\xE9n",
-    city: "Neuqu\xE9n Capital",
-    employeeCount: "1-10",
-    publicSummary: "Distribuci\xF3n mayorista de indumentaria ign\xEDfuga certificada, protecci\xF3n respiratoria y elementos de seguridad en altura.",
-    contactName: "Diego Quiroga",
-    contactRole: "Ventas Corporativas",
-    email: "ventas@eppsur.com.ar",
-    phone: "+54 9 299 419-0023",
-    whatsapp: "+5492994190023",
-    website: "https://eppsur.com.ar",
-    certifications: ["Sello IRAM"],
-    paymentTerms: "Contado / Transferencia / Echeq 15 d\xEDas",
-    creditRating: "A (Inicial)",
-    adnComercial: {
-      ofrece: ["Indumentaria Ign\xEDfuga", "EPP Altura", "Detectores de Gases"],
-      demanda: ["Log\xEDstica \xDAltima Milla Vaca Muerta", "Stock T\xE9rmico"],
-      corredorLogistico: "RN 22 / Neuqu\xE9n - A\xF1elo",
-      ciudadBase: "Neuqu\xE9n Capital (Parque Industrial)",
-      lat: -38.9516,
-      lng: -68.0591
-    }
-  },
-  {
-    id: "comp-agro-patagonia",
-    name: "AgroTecnolog\xEDa Valle Inferior S.A.",
-    cuit: "30-70991823-6",
-    tier: "inicial",
-    tierPriority: 3,
-    tierLabel: "Plan Inicial",
-    verified: false,
-    category: "Agroindustria",
-    subcategories: ["Riego Automatizado", "Insumos Ganaderos", "Telemetr\xEDa Rural"],
-    province: "R\xEDo Negro",
-    city: "Viedma",
-    employeeCount: "11-50",
-    publicSummary: "Sistemas de riego por pivote central, bombas solares sumergibles e insumos para establecimientos ovinos y bovinos.",
-    contactName: "Ing. Agr. Sof\xEDa Peralta",
-    contactRole: "Asesora T\xE9cnica Comercial",
-    email: "speralta@agrovalle.com.ar",
-    phone: "+54 9 2920 44-8910",
-    whatsapp: "+5492920448910",
-    website: "https://agrovalle.com.ar",
-    certifications: ["INTI"],
-    paymentTerms: "Canje Cereal / Tarjetas Agro / 30 d\xEDas",
-    creditRating: "A (Inicial)",
-    adnComercial: {
-      ofrece: ["Bombas Solares", "Riego Automatizado", "Telemetr\xEDa Rural"],
-      demanda: ["Retorno Vac\xEDo Viedma \u2192 Buenos Aires", "Tableros Solares"],
-      corredorLogistico: "RN 3 / Viedma - Bah\xEDa Blanca",
-      ciudadBase: "Viedma (Valle Inferior)",
-      lat: -40.8135,
-      lng: -62.9967
-    }
-  }
-];
 function sortCompaniesBySubscriptionTier(items) {
   return [...items].sort((a, b) => {
     const prioA = a.tierPriority ?? 3;
@@ -2050,48 +1670,340 @@ function sortCompaniesBySubscriptionTier(items) {
     return (a.name || "").localeCompare(b.name || "");
   });
 }
-
-// src/server/saasAndFleetRoutes.ts
-init_db();
-import crypto from "crypto";
+var B2B_COMPANIES;
+var init_b2bDirectoryData = __esm({
+  "src/lib/b2bDirectoryData.ts"() {
+    init_db2();
+    init_apiConfig();
+    init_patagoniaRouting();
+    B2B_COMPANIES = [
+      {
+        id: "comp-petrosur",
+        name: "PetroSur Ingenier\xEDa & Fluidos S.A.",
+        cuit: "30-71489210-9",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Hidrocarburos (Oil & Gas)",
+        subcategories: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa de Pozos"],
+        province: "Neuqu\xE9n",
+        city: "A\xF1elo / Neuqu\xE9n Capital",
+        employeeCount: "201-500",
+        publicSummary: "Ingenier\xEDa de superficie, provisi\xF3n de v\xE1lvulas de alta presi\xF3n y mantenimiento integral para yacimientos en Cuenca Neuquina y Golfo San Jorge.",
+        contactName: "Ing. Carlos Mendoza",
+        contactRole: "Director Comercial & Licitaciones",
+        email: "cmendoza@petrosur-b2b.com.ar",
+        phone: "+54 9 299 482-9100",
+        whatsapp: "+5492994829100",
+        website: "https://petrosur-b2b.com.ar",
+        certifications: ["ISO 9001", "ISO 14001", "API Spec Q1"],
+        paymentTerms: "Cuenta Corriente 30/60 d\xEDas \u2022 Factura A / MiPyME",
+        creditRating: "AAA+ (Riesgo Corporativo Auditado)",
+        adnComercial: {
+          ofrece: ["V\xE1lvulas API 6D", "Montaje de Ductos", "Telemetr\xEDa"],
+          demanda: ["Mecanizado CNC", "Bridas Forjadas", "Flete Pesado desde Rosario"],
+          corredorLogistico: "RN 22 / A\xF1elo (Vaca Muerta)",
+          ciudadBase: "A\xF1elo (Hub Vaca Muerta)",
+          lat: -38.3522,
+          lng: -68.7897
+        }
+      },
+      {
+        id: "comp-logistica-austral",
+        name: "Log\xEDstica Austral Multimodal S.R.L.",
+        cuit: "30-68923415-4",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Log\xEDstica",
+        subcategories: ["Cargas Especiales", "Cadena de Fr\xEDo -25\xB0C", "Dep\xF3sito Fiscal"],
+        province: "Chubut",
+        city: "Comodoro Rivadavia / Puerto Madryn",
+        employeeCount: "51-200",
+        publicSummary: "Operador log\xEDstico patag\xF3nico con flota propia de carretones, transporte refrigerado para exportaci\xF3n pesquera y bases operativas en Ruta 3 y Ruta 40.",
+        contactName: "Lic. Valeria Albornoz",
+        contactRole: "Gerente de Operaciones B2B",
+        email: "valbornoz@logisticaaustral.com.ar",
+        phone: "+54 9 297 431-8820",
+        whatsapp: "+5492974318820",
+        website: "https://logisticaaustral.com.ar",
+        certifications: ["ISO 9001", "SENASA Hab. Fr\xEDo", "Cargas Peligrosas IMO"],
+        paymentTerms: "Transferencia / Echeq 30 d\xEDas \u2022 Convenio Flota",
+        creditRating: "AA+ (Cumplimiento Verificado)",
+        adnComercial: {
+          ofrece: ["Flete LTL Consolidado", "Retorno Vac\xEDo RN 3", "Cadena de Fr\xEDo -25\xB0C"],
+          demanda: ["Cargas Norte \u2192 Sur", "Insumos de Flota", "Paletizado Isot\xE9rmico"],
+          corredorLogistico: "Ruta Nacional 3 (Buenos Aires \u2194 Ushuaia)",
+          ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
+          lat: -45.8641,
+          lng: -67.4966
+        }
+      },
+      {
+        id: "comp-eolica-sur",
+        name: "RenovaPatagonia Electromec\xE1nica S.A.",
+        cuit: "30-71550932-1",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Energ\xEDas Renovables",
+        subcategories: ["Subestaciones", "Mantenimiento Aerogeneradores", "Paneles Industriales"],
+        province: "Santa Cruz",
+        city: "R\xEDo Gallegos / Pico Truncado",
+        employeeCount: "51-200",
+        publicSummary: "Montaje electromec\xE1nico de parques e\xF3licos, tendido de l\xEDneas de media y alta tensi\xF3n e integraci\xF3n de sistemas h\xEDbridos industriales.",
+        contactName: "Ing. Mart\xEDn Echeverr\xEDa",
+        contactRole: "Jefe de Desarrollo de Negocios",
+        email: "mecheverria@renovapatagonia.com.ar",
+        phone: "+54 9 2966 55-1490",
+        whatsapp: "+5492966551490",
+        website: "https://renovapatagonia.com.ar",
+        certifications: ["ISO 45001", "IRAM", "CAMMESA Homologado"],
+        paymentTerms: "Certificaci\xF3n por Avance de Obra \u2022 15/45 d\xEDas",
+        creditRating: "AAA (Proveedor Homologado)",
+        adnComercial: {
+          ofrece: ["Subestaciones MT/AT", "Tableros SCADA", "Montaje E\xF3lico"],
+          demanda: ["Transformadores desde C\xF3rdoba", "Carretones Especiales", "EPP Altura"],
+          corredorLogistico: "RN 3 / Pico Truncado - R\xEDo Gallegos",
+          ciudadBase: "R\xEDo Gallegos",
+          lat: -51.6226,
+          lng: -69.2181
+        }
+      },
+      {
+        id: "comp-rosario-forja",
+        name: "Forja & V\xE1lvulas del Paran\xE1 S.A. (Proveedor Extra-Regional)",
+        cuit: "30-70841299-8",
+        tier: "corporativo",
+        tierPriority: 1,
+        tierLabel: "Plan Corporativo",
+        verified: true,
+        category: "Metal\xFArgica",
+        subcategories: ["Bridas Forjadas ANSI", "Mecanizado CNC Pesado", "V\xE1lvulas de Proceso"],
+        province: "Santa Fe (Env\xEDo Patagonia)",
+        city: "Rosario, Santa Fe \u2192 Corredor Sur",
+        employeeCount: "51-200",
+        publicSummary: "Fabricante santafesino de bridas forjadas, cuerpos de v\xE1lvulas API y repuestos mecanizados CNC con despacho consolidado LTL hacia Cuenca Neuquina y Golfo San Jorge.",
+        contactName: "Ing. Federico Brizuela",
+        contactRole: "Gerente de Cuentas Patag\xF3nicas",
+        email: "fbrizuela@forjaparana.com.ar",
+        phone: "+54 9 341 590-4410",
+        whatsapp: "+5493415904410",
+        website: "https://forjaparana.com.ar",
+        certifications: ["ISO 9001", "API 6A / 6D", "ASME VIII"],
+        paymentTerms: "Cuenta Corriente 45 d\xEDas \u2022 Flete Consolidado LTL",
+        creditRating: "AA+ (Exportador / Proveedor Industrial)",
+        adnComercial: {
+          ofrece: ["Bridas Forjadas", "Mecanizado CNC", "Cuerpos API 6D"],
+          demanda: ["Flete Consolidado Rosario \u2192 A\xF1elo", "Dep\xF3sito Cross-Docking Neuqu\xE9n"],
+          corredorLogistico: "Rosario \u2192 RN 152 \u2192 Neuqu\xE9n / A\xF1elo",
+          ciudadBase: "Rosario (Polo Industrial)",
+          lat: -32.9442,
+          lng: -60.6505,
+          isExtraRegional: true
+        }
+      },
+      {
+        id: "comp-metalurgica-andina",
+        name: "Metal\xFArgica Golfo San Jorge S.A.",
+        cuit: "30-70112984-7",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Metal\xFArgica",
+        subcategories: ["Mecanizado CNC", "Estructuras Met\xE1licas", "Tanques API"],
+        province: "Chubut",
+        city: "Parque Industrial Comodoro Rivadavia",
+        employeeCount: "11-50",
+        publicSummary: "Fabricaci\xF3n de estructuras met\xE1licas pesadas, skids de bombeo, recipientes sometidos a presi\xF3n y torner\xEDa CNC de precisi\xF3n.",
+        contactName: "T\xE9c. Roberto Mansilla",
+        contactRole: "Responsable de Presupuestos",
+        email: "cotizaciones@metalgolfo.com.ar",
+        phone: "+54 9 297 492-3310",
+        whatsapp: "+5492974923310",
+        website: "https://metalgolfo.com.ar",
+        certifications: ["ISO 9001", "Soldadura Calificada ASME IX"],
+        paymentTerms: "50% Anticipo / 50% Contra Entrega (Echeq 30 d\xEDas)",
+        creditRating: "AA (Verificado en Red)",
+        adnComercial: {
+          ofrece: ["Mecanizado CNC", "Skids de Bombeo", "Tanques API"],
+          demanda: ["Chapa Naval / Acero F24", "Electrodos Especiales", "Flete LTL"],
+          corredorLogistico: "RN 3 / Cuenca Golfo San Jorge",
+          ciudadBase: "Comodoro Rivadavia (Golfo San Jorge)",
+          lat: -45.8641,
+          lng: -67.4966
+        }
+      },
+      {
+        id: "comp-cordoba-electromec",
+        name: "Potencia & Transformadores C\xF3rdoba S.A. (Proveedor Extra-Regional)",
+        cuit: "30-69441822-3",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Equipamiento Industrial",
+        subcategories: ["Transformadores MT", "Celdas de Media Tensi\xF3n", "Grupos Electr\xF3genos"],
+        province: "C\xF3rdoba (Env\xEDo Patagonia)",
+        city: "C\xF3rdoba Capital \u2192 Corredor Patag\xF3nico",
+        employeeCount: "51-200",
+        publicSummary: "Ingenier\xEDa el\xE9ctrica industrial desde C\xF3rdoba para parques e\xF3licos, yacimientos y plantas pesqueras en Patagonia con despacho por carga consolidada.",
+        contactName: "Ing. Marcos Villagra",
+        contactRole: "Director Comercial Regional",
+        email: "mvillagra@potenciacba.com.ar",
+        phone: "+54 9 351 478-9200",
+        whatsapp: "+5493514789200",
+        website: "https://potenciacba.com.ar",
+        certifications: ["ISO 9001", "IRAM 2250"],
+        paymentTerms: "Anticipo 30% + Echeq 30/60 d\xEDas",
+        creditRating: "AA (Verificado en Red)",
+        adnComercial: {
+          ofrece: ["Transformadores MT", "Grupos Electr\xF3genos", "Celdas El\xE9ctricas"],
+          demanda: ["Carret\xF3n C\xF3rdoba \u2192 Santa Cruz", "Flete Retorno Vac\xEDo RN 40/RN 3"],
+          corredorLogistico: "C\xF3rdoba \u2192 RN 158 / RN 35 \u2192 Patagonia",
+          ciudadBase: "C\xF3rdoba Capital (Parque Industrial)",
+          lat: -31.4201,
+          lng: -64.1888,
+          isExtraRegional: true
+        }
+      },
+      {
+        id: "comp-austral-naval",
+        name: "Servicios Navales & Pesqueros Australes S.R.L.",
+        cuit: "30-71204918-3",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Industria Pesquera",
+        subcategories: ["Refrigeraci\xF3n Naval", "Insumos de Planta", "Envases Exportaci\xF3n"],
+        province: "Tierra del Fuego",
+        city: "Ushuaia / R\xEDo Grande",
+        employeeCount: "11-50",
+        publicSummary: "Provisi\xF3n de equipamiento frigor\xEDfico para buques factor\xEDa, repuestos navales y packaging isot\xE9rmico para plantas procesadoras.",
+        contactName: "Hern\xE1n Giordano",
+        contactRole: "Socio Gerente Comercial",
+        email: "hgiordano@navalesaustrales.com.ar",
+        phone: "+54 9 2901 61-2040",
+        whatsapp: "+5492901612040",
+        website: "https://navalesaustrales.com.ar",
+        certifications: ["Prefectura Naval Reg.", "SENASA"],
+        paymentTerms: "Cuenta Corriente 30 d\xEDas \u2022 USD Oficial",
+        creditRating: "AA (Verificado en Red)",
+        adnComercial: {
+          ofrece: ["Refrigeraci\xF3n Industrial", "Packaging Isot\xE9rmico", "Repuestos Navales"],
+          demanda: ["Cadena de Fr\xEDo -25\xB0C hacia Buenos Aires", "Gases Refrigerantes"],
+          corredorLogistico: "RN 3 / Canal Beagle \u2192 Puerto Madryn / CABA",
+          ciudadBase: "Ushuaia (Puerto Austral)",
+          lat: -54.8019,
+          lng: -68.303
+        }
+      },
+      {
+        id: "comp-constructora-valle",
+        name: "Obras Civiles & Movimiento de Suelos Alto Valle S.A.",
+        cuit: "30-69884120-2",
+        tier: "pro",
+        tierPriority: 2,
+        tierLabel: "Plan Pro Industrial",
+        verified: true,
+        category: "Construcci\xF3n",
+        subcategories: ["Locaciones Petroleras", "Hormig\xF3n Elaborado", "Naves Industriales"],
+        province: "R\xEDo Negro",
+        city: "Cipolletti / General Roca",
+        employeeCount: "51-200",
+        publicSummary: "Construcci\xF3n de plateas industriales, apertura de trazas, movimiento de suelos con flota Caterpillar y montaje de galpones llave en mano.",
+        contactName: "Arq. Luc\xEDa Ferreyra",
+        contactRole: "Gerencia T\xE9cnica & Licitaciones",
+        email: "lferreyra@obrasaltovalle.com.ar",
+        phone: "+54 9 299 512-7740",
+        whatsapp: "+5492995127740",
+        website: "https://obrasaltovalle.com.ar",
+        certifications: ["Registro Nacional de Constructores", "ISO 9001"],
+        paymentTerms: "Certificaci\xF3n Quincenal / Mensual",
+        creditRating: "AA (Verificado en Red)",
+        adnComercial: {
+          ofrece: ["Locaciones Petroleras", "Naves Industriales", "Hormig\xF3n Elaborado"],
+          demanda: ["Estructuras Met\xE1licas", "Indumentaria Ign\xEDfuga", "Alquiler de Maquinaria"],
+          corredorLogistico: "RN 22 / Alto Valle \u2192 Vaca Muerta",
+          ciudadBase: "Cipolletti / General Roca (Alto Valle)",
+          lat: -38.9339,
+          lng: -67.9903
+        }
+      },
+      {
+        id: "comp-seguridad-epp",
+        name: "Seguridad Industrial Sur & EPP S.R.L.",
+        cuit: "30-71609211-5",
+        tier: "inicial",
+        tierPriority: 3,
+        tierLabel: "Plan Inicial",
+        verified: false,
+        category: "Seguridad e Higiene (EPP)",
+        subcategories: ["Indumentaria Ign\xEDfuga", "Detectores de Gases", "Calzado Dielectrico"],
+        province: "Neuqu\xE9n",
+        city: "Neuqu\xE9n Capital",
+        employeeCount: "1-10",
+        publicSummary: "Distribuci\xF3n mayorista de indumentaria ign\xEDfuga certificada, protecci\xF3n respiratoria y elementos de seguridad en altura.",
+        contactName: "Diego Quiroga",
+        contactRole: "Ventas Corporativas",
+        email: "ventas@eppsur.com.ar",
+        phone: "+54 9 299 419-0023",
+        whatsapp: "+5492994190023",
+        website: "https://eppsur.com.ar",
+        certifications: ["Sello IRAM"],
+        paymentTerms: "Contado / Transferencia / Echeq 15 d\xEDas",
+        creditRating: "A (Inicial)",
+        adnComercial: {
+          ofrece: ["Indumentaria Ign\xEDfuga", "EPP Altura", "Detectores de Gases"],
+          demanda: ["Log\xEDstica \xDAltima Milla Vaca Muerta", "Stock T\xE9rmico"],
+          corredorLogistico: "RN 22 / Neuqu\xE9n - A\xF1elo",
+          ciudadBase: "Neuqu\xE9n Capital (Parque Industrial)",
+          lat: -38.9516,
+          lng: -68.0591
+        }
+      },
+      {
+        id: "comp-agro-patagonia",
+        name: "AgroTecnolog\xEDa Valle Inferior S.A.",
+        cuit: "30-70991823-6",
+        tier: "inicial",
+        tierPriority: 3,
+        tierLabel: "Plan Inicial",
+        verified: false,
+        category: "Agroindustria",
+        subcategories: ["Riego Automatizado", "Insumos Ganaderos", "Telemetr\xEDa Rural"],
+        province: "R\xEDo Negro",
+        city: "Viedma",
+        employeeCount: "11-50",
+        publicSummary: "Sistemas de riego por pivote central, bombas solares sumergibles e insumos para establecimientos ovinos y bovinos.",
+        contactName: "Ing. Agr. Sof\xEDa Peralta",
+        contactRole: "Asesora T\xE9cnica Comercial",
+        email: "speralta@agrovalle.com.ar",
+        phone: "+54 9 2920 44-8910",
+        whatsapp: "+5492920448910",
+        website: "https://agrovalle.com.ar",
+        certifications: ["INTI"],
+        paymentTerms: "Canje Cereal / Tarjetas Agro / 30 d\xEDas",
+        creditRating: "A (Inicial)",
+        adnComercial: {
+          ofrece: ["Bombas Solares", "Riego Automatizado", "Telemetr\xEDa Rural"],
+          demanda: ["Retorno Vac\xEDo Viedma \u2192 Buenos Aires", "Tableros Solares"],
+          corredorLogistico: "RN 3 / Viedma - Bah\xEDa Blanca",
+          ciudadBase: "Viedma (Valle Inferior)",
+          lat: -40.8135,
+          lng: -62.9967
+        }
+      }
+    ];
+  }
+});
 
 // src/services/saasPlans.ts
-var SAAS_PLANS = {
-  gratis: {
-    slug: "gratis",
-    membershipLabel: "Basic",
-    displayName: "Plan Gratis / Inicial",
-    seatLimit: 2,
-    priceMonthlyArs: 0,
-    priceLabel: "Gratis (hasta 2 usuarios)",
-    tier: 1
-  },
-  pro: {
-    slug: "pro",
-    membershipLabel: "Pro Industria",
-    displayName: "Plan Pro Industria",
-    seatLimit: 5,
-    priceMonthlyArs: 65e3,
-    priceLabel: "$65.000 ARS/mes",
-    tier: 2
-  },
-  corporativo: {
-    slug: "corporativo",
-    membershipLabel: "Corporativo",
-    displayName: "Plan Corporativo",
-    seatLimit: 10,
-    priceMonthlyArs: 14e4,
-    priceLabel: "$140.000 ARS/mes",
-    tier: 3
-  }
-};
-var LOGISTICS_MEMBERSHIP = {
-  slug: "logistica_flota",
-  displayName: "Membres\xEDa Log\xEDstica & Control de Flota",
-  priceMonthlyArs: 95e3,
-  priceLabel: "$95.000 ARS/mes",
-  seatLimit: 10
-};
 function resolvePlanConfig(input) {
   const normalized = String(input || "gratis").trim().toLowerCase();
   if (normalized === "corporativo" || normalized === "enterprise" || normalized.includes("corporativo")) {
@@ -2122,8 +2034,50 @@ function canAccessLogisticsSuite(params) {
   if (params.roleName === "system_admin") return true;
   return false;
 }
+var SAAS_PLANS, LOGISTICS_MEMBERSHIP;
+var init_saasPlans = __esm({
+  "src/services/saasPlans.ts"() {
+    SAAS_PLANS = {
+      gratis: {
+        slug: "gratis",
+        membershipLabel: "Basic",
+        displayName: "Plan Gratis / Inicial",
+        seatLimit: 2,
+        priceMonthlyArs: 0,
+        priceLabel: "Gratis (hasta 2 usuarios)",
+        tier: 1
+      },
+      pro: {
+        slug: "pro",
+        membershipLabel: "Pro Industria",
+        displayName: "Plan Pro Industria",
+        seatLimit: 5,
+        priceMonthlyArs: 65e3,
+        priceLabel: "$65.000 ARS/mes",
+        tier: 2
+      },
+      corporativo: {
+        slug: "corporativo",
+        membershipLabel: "Corporativo",
+        displayName: "Plan Corporativo",
+        seatLimit: 10,
+        priceMonthlyArs: 14e4,
+        priceLabel: "$140.000 ARS/mes",
+        tier: 3
+      }
+    };
+    LOGISTICS_MEMBERSHIP = {
+      slug: "logistica_flota",
+      displayName: "Membres\xEDa Log\xEDstica & Control de Flota",
+      priceMonthlyArs: 95e3,
+      priceLabel: "$95.000 ARS/mes",
+      seatLimit: 10
+    };
+  }
+});
 
 // src/server/saasAndFleetRoutes.ts
+import crypto from "crypto";
 async function resolveTenantContext(uid, email, membershipName, roleName) {
   if (!hasDatabaseConfig()) return null;
   await ensureProductionTables();
@@ -3056,8 +3010,25 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
     }
   });
 }
+var init_saasAndFleetRoutes = __esm({
+  "src/server/saasAndFleetRoutes.ts"() {
+    init_db();
+    init_auth();
+    init_arnSchema();
+    init_saasPlans();
+  }
+});
 
 // src/server/arnRoutes.ts
+var arnRoutes_exports = {};
+__export(arnRoutes_exports, {
+  executeArnAction: () => executeArnAction,
+  getUserArnRule: () => getUserArnRule,
+  registerArnAndModuleRoutes: () => registerArnAndModuleRoutes,
+  runArnPipelineForEvent: () => runArnPipelineForEvent,
+  validateArgentineCuit: () => validateArgentineCuit
+});
+import { createClient as createClient3 } from "@supabase/supabase-js";
 function validateArgentineCuit(cuit) {
   const clean = String(cuit || "").replace(/\D/g, "");
   if (clean.length !== 11) return false;
@@ -4073,6 +4044,608 @@ ${mail.text || mail.snippet || ""}`,
     recordAutomationEvent
   });
 }
+var init_arnRoutes = __esm({
+  "src/server/arnRoutes.ts"() {
+    init_db();
+    init_auth();
+    init_arnSchema();
+    init_arnAiService();
+    init_b2bDirectoryData();
+    init_patagoniaRouting();
+    init_saasAndFleetRoutes();
+  }
+});
+
+// src/server/vercelEntry.ts
+import "dotenv/config";
+
+// src/server/createApp.ts
+init_auth();
+init_users();
+import fs from "fs";
+import express from "express";
+import path from "path";
+import crypto2 from "crypto";
+import cors from "cors";
+import { createClient as createClient4 } from "@supabase/supabase-js";
+
+// src/db/rfqs.ts
+init_db();
+init_schema();
+import { and, eq as eq2, desc } from "drizzle-orm";
+async function getUserRfqs(userId) {
+  return await db.select().from(rfqs).where(eq2(rfqs.userId, userId)).orderBy(desc(rfqs.createdAt));
+}
+async function createRfq(userId, data) {
+  const result = await db.insert(rfqs).values({
+    userId,
+    title: data.title,
+    category: data.category,
+    priority: data.priority,
+    description: data.description
+  }).returning();
+  return result[0];
+}
+async function updateRfqStatus(rfqId, userId, status) {
+  const result = await db.update(rfqs).set({ status }).where(and(eq2(rfqs.id, rfqId), eq2(rfqs.userId, userId))).returning();
+  return result[0] || null;
+}
+
+// src/services/notificationService.ts
+init_db();
+init_schema();
+init_emailService();
+import { eq as eq3, ilike, or } from "drizzle-orm";
+async function notifyProvidersForRfq(rfqCategory, rfqTitle, rfqId) {
+  const matchedProviders = [];
+  const seenEmails = /* @__PURE__ */ new Set();
+  if (hasDatabaseConfig()) {
+    try {
+      const profiles = await db.select({
+        userId: companyProfiles.userId,
+        companyName: companyProfiles.companyName,
+        email: companyProfiles.email,
+        industry: companyProfiles.industry
+      }).from(companyProfiles).where(
+        or(
+          eq3(companyProfiles.industry, rfqCategory),
+          ilike(companyProfiles.industry, `%${rfqCategory}%`)
+        )
+      ).limit(20);
+      for (const p of profiles) {
+        if (p.email && !seenEmails.has(p.email.toLowerCase())) {
+          seenEmails.add(p.email.toLowerCase());
+          matchedProviders.push({
+            uid: p.userId,
+            name: p.companyName || p.email,
+            email: p.email,
+            category: p.industry || rfqCategory
+          });
+        }
+      }
+      if (matchedProviders.length === 0) {
+        const userRows = await db.select({
+          uid: users.uid,
+          email: users.email,
+          category: users.category
+        }).from(users).where(ilike(users.category, `%${rfqCategory}%`)).limit(20);
+        for (const u of userRows) {
+          if (u.email && !seenEmails.has(u.email.toLowerCase())) {
+            seenEmails.add(u.email.toLowerCase());
+            matchedProviders.push({
+              uid: u.uid,
+              name: u.email,
+              email: u.email,
+              category: u.category || rfqCategory
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[notifyProvidersForRfq] DB query warning:", err);
+    }
+  }
+  const opsEmails = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  for (const adminEmail of opsEmails) {
+    if (!seenEmails.has(adminEmail.toLowerCase())) {
+      seenEmails.add(adminEmail.toLowerCase());
+      matchedProviders.push({
+        uid: "ops-admin",
+        name: "Mesa de Operaciones xPatagonia",
+        email: adminEmail,
+        category: rfqCategory
+      });
+    }
+  }
+  let sentCount = 0;
+  const hasOutboundEmail = Boolean(process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD);
+  if (hasOutboundEmail && matchedProviders.length > 0) {
+    for (const provider of matchedProviders) {
+      try {
+        await sendEmail(
+          provider.email,
+          `Nueva Oportunidad B2B #${rfqId} (${rfqCategory}) - ${rfqTitle}`,
+          `Hola ${provider.name},
+
+Se ha publicado una nueva Solicitud de Cotizaci\xF3n (RFQ #${rfqId}) en la categor\xEDa "${rfqCategory}":
+
+${rfqTitle}
+
+Ingresa a https://xpatagonia.online/dashboard para revisar especificaciones y enviar tu propuesta.`,
+          `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:20px;">
+            <h2 style="color:#111827;">Nueva Oportunidad B2B #${rfqId}</h2>
+            <p>Hola <strong>${provider.name}</strong>,</p>
+            <p>Se public\xF3 una nueva solicitud de cotizaci\xF3n compatible con tu rubro (<strong>${rfqCategory}</strong>):</p>
+            <p style="padding:12px 16px;background:#f8fafc;border-left:4px solid #f97316;font-weight:600;">${rfqTitle}</p>
+            <p><a href="https://xpatagonia.online/dashboard" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Ver Solicitud en xPatagonia</a></p>
+          </div>`
+        );
+        sentCount++;
+      } catch (err) {
+        console.warn(`[notifyProvidersForRfq] Failed sending to ${provider.email}:`, err);
+      }
+    }
+  }
+  if (hasDatabaseConfig()) {
+    try {
+      await db.insert(automationLogs).values({
+        direction: "outbound_n8n",
+        event: "rfq.providers_notified",
+        status: sentCount > 0 ? "delivered" : "processed",
+        payload: { rfqId, rfqCategory, matchedCount: matchedProviders.length, sentCount }
+      });
+    } catch {
+    }
+  }
+  return {
+    success: true,
+    providersMatched: matchedProviders.length,
+    providersNotified: sentCount
+  };
+}
+
+// src/server/createApp.ts
+init_db();
+init_schema();
+init_arnRoutes();
+import { eq as eq4, desc as desc2 } from "drizzle-orm";
+
+// src/services/vpsWorkerService.ts
+init_db();
+init_arnSchema();
+init_emailService();
+var RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
+function extractOrgAliasId(toHeader) {
+  const raw = String(toHeader || "");
+  const match = raw.match(/\+org(\d+)@/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+function extractEmailAddress(rawHeader) {
+  const raw = String(rawHeader || "").trim();
+  const match = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  const email = match ? match[0].toLowerCase() : "";
+  const cleanedName = raw.replace(/<[^>]+>/g, "").replace(/["']/g, "").trim();
+  return {
+    email,
+    name: cleanedName || email || "Contacto Entrante"
+  };
+}
+function computeNextRetryDate(attempts, now = /* @__PURE__ */ new Date()) {
+  const idx = Math.max(0, Number(attempts) - 1);
+  if (attempts <= 0) return new Date(now.getTime() + 6e4);
+  if (idx >= RETRY_BACKOFF_MINUTES.length) return null;
+  return new Date(now.getTime() + RETRY_BACKOFF_MINUTES[idx] * 6e4);
+}
+function parseExpiryDaysRemaining(dateStr, referenceDate = /* @__PURE__ */ new Date()) {
+  const raw = String(dateStr || "").trim();
+  if (!raw) return null;
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let targetUtc;
+  if (ymd) {
+    targetUtc = Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  } else {
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    targetUtc = Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+  }
+  const refUtc = Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate()
+  );
+  return Math.floor((targetUtc - refUtc) / 864e5);
+}
+async function resolveEmailTenantTarget(params) {
+  const fallbackUid = String(process.env.WORKER_DEFAULT_OWNER_UID || "system-arn-bootstrap").trim();
+  if (!hasDatabaseConfig()) {
+    return { ownerUid: fallbackUid, organizationId: null };
+  }
+  await ensureProductionTables();
+  const aliasOrgId = extractOrgAliasId(params.toHeader);
+  if (aliasOrgId) {
+    const orgRes = await pool.query(
+      `SELECT id, owner_uid FROM public.organizations WHERE id = $1 LIMIT 1`,
+      [aliasOrgId]
+    );
+    if (orgRes.rows?.[0]) {
+      return {
+        ownerUid: orgRes.rows[0].owner_uid,
+        organizationId: Number(orgRes.rows[0].id)
+      };
+    }
+  }
+  if (params.senderEmail) {
+    const contactRes = await pool.query(
+      `SELECT user_uid, organization_id FROM public.contacts
+       WHERE LOWER(email) = LOWER($1)
+       ORDER BY last_arn_sync_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [params.senderEmail]
+    );
+    if (contactRes.rows?.[0]) {
+      return {
+        ownerUid: contactRes.rows[0].user_uid || fallbackUid,
+        organizationId: contactRes.rows[0].organization_id ? Number(contactRes.rows[0].organization_id) : null
+      };
+    }
+  }
+  const adminEmail = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",")[0].trim().toLowerCase();
+  const adminOrgRes = await pool.query(
+    `SELECT o.id, o.owner_uid
+     FROM public.organizations o
+     LEFT JOIN public.users u ON u.uid = o.owner_uid
+     ORDER BY (LOWER(COALESCE(u.email, '')) = $1) DESC, o.id ASC
+     LIMIT 1`,
+    [adminEmail]
+  );
+  if (adminOrgRes.rows?.[0]) {
+    return {
+      ownerUid: adminOrgRes.rows[0].owner_uid,
+      organizationId: Number(adminOrgRes.rows[0].id)
+    };
+  }
+  const userRes = await pool.query(
+    `SELECT uid FROM public.users WHERE LOWER(email) = $1 LIMIT 1`,
+    [adminEmail]
+  );
+  return {
+    ownerUid: userRes.rows?.[0]?.uid || fallbackUid,
+    organizationId: null
+  };
+}
+async function dispatchAutomationWebhook(direction, event, payload) {
+  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+  let status = "local_queue";
+  let attempts = 0;
+  let nextRetryAt = null;
+  let lastError = null;
+  let forwarded = false;
+  if (n8nUrl) {
+    try {
+      const response = await fetch(n8nUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
+        },
+        body: JSON.stringify({ event, direction, payload, timestamp: (/* @__PURE__ */ new Date()).toISOString() }),
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (response.ok) {
+        status = "processed";
+        forwarded = true;
+      } else {
+        attempts = 1;
+        status = "retry_pending";
+        nextRetryAt = computeNextRetryDate(attempts);
+        lastError = `n8n HTTP ${response.status}`;
+      }
+    } catch (err) {
+      attempts = 1;
+      status = "retry_pending";
+      nextRetryAt = computeNextRetryDate(attempts);
+      lastError = err?.message || "n8n connection error";
+    }
+  } else {
+    attempts = 0;
+    status = "local_queue";
+    nextRetryAt = computeNextRetryDate(1);
+  }
+  let logId;
+  if (hasDatabaseConfig()) {
+    await ensureProductionTables();
+    const res = await pool.query(
+      `INSERT INTO public.automation_logs (
+        direction, event, status, payload, attempts, next_retry_at, last_error, updated_at
+      ) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,now())
+      RETURNING id`,
+      [direction, event, status, JSON.stringify(payload || {}), attempts, nextRetryAt, lastError]
+    );
+    logId = res.rows?.[0]?.id ? Number(res.rows[0].id) : void 0;
+  }
+  return { status, forwarded, logId };
+}
+async function flushAutomationRetryQueue(limit = 20) {
+  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+  if (!n8nUrl) {
+    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0, skippedNoUrl: true };
+  }
+  if (!hasDatabaseConfig()) {
+    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0 };
+  }
+  await ensureProductionTables();
+  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+  const pendingRes = await pool.query(
+    `SELECT * FROM public.automation_logs
+     WHERE direction = 'outbound_n8n'
+       AND status IN ('retry_pending', 'local_queue')
+       AND (next_retry_at IS NULL OR next_retry_at <= now())
+     ORDER BY created_at ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(50, limit))]
+  );
+  const rows = pendingRes.rows || [];
+  let succeeded = 0;
+  let rescheduled = 0;
+  let deadLettered = 0;
+  for (const row of rows) {
+    try {
+      const response = await fetch(n8nUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
+        },
+        body: JSON.stringify({
+          event: row.event,
+          direction: row.direction,
+          payload: row.payload || {},
+          retryAttempt: Number(row.attempts || 0) + 1,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        }),
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (response.ok) {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'processed', last_error = NULL, next_retry_at = NULL, updated_at = now()
+           WHERE id = $1`,
+          [row.id]
+        );
+        succeeded += 1;
+        continue;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      const nextAttempts = Number(row.attempts || 0) + 1;
+      const nextRetry = computeNextRetryDate(nextAttempts);
+      if (!nextRetry) {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'dead_letter', attempts = $1, next_retry_at = NULL, last_error = $2, updated_at = now()
+           WHERE id = $3`,
+          [nextAttempts, err?.message || "Max retries exceeded", row.id]
+        );
+        deadLettered += 1;
+      } else {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'retry_pending', attempts = $1, next_retry_at = $2, last_error = $3, updated_at = now()
+           WHERE id = $4`,
+          [nextAttempts, nextRetry, err?.message || "Retry scheduled", row.id]
+        );
+        rescheduled += 1;
+      }
+    }
+  }
+  return { checked: rows.length, succeeded, rescheduled, deadLettered };
+}
+async function processInboundEmailWithArn(mail) {
+  if (!hasDatabaseConfig()) {
+    return { skipped: true, reason: "no_database" };
+  }
+  await ensureProductionTables();
+  const mailbox = String(mail.mailbox || "INBOX").trim() || "INBOX";
+  const emailUid = String(mail.uid || "").trim();
+  if (!emailUid) {
+    return { skipped: true, reason: "missing_uid" };
+  }
+  const sender = extractEmailAddress(mail.from);
+  const subject = String(mail.subject || "(Sin asunto)").slice(0, 300);
+  const lockRes = await pool.query(
+    `INSERT INTO public.processed_email_uids (mailbox, email_uid, sender_email, subject)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (mailbox, email_uid) DO NOTHING
+     RETURNING id`,
+    [mailbox, emailUid, sender.email || null, subject]
+  );
+  if (!lockRes.rows?.[0]) {
+    return { skipped: true, reason: "duplicate_uid" };
+  }
+  try {
+    const tenant = await resolveEmailTenantTarget({
+      senderEmail: sender.email,
+      toHeader: mail.to
+    });
+    const { runArnPipelineForEvent: runArnPipelineForEvent2 } = await Promise.resolve().then(() => (init_arnRoutes(), arnRoutes_exports));
+    const result = await runArnPipelineForEvent2({
+      ownerUid: tenant.ownerUid,
+      organizationId: tenant.organizationId,
+      source: "email_imap_worker",
+      companyName: sender.name,
+      contactName: sender.name,
+      contactEmail: sender.email,
+      rawText: `Asunto: ${subject}
+
+${String(mail.text || "").slice(0, 3500)}`,
+      metadata: {
+        emailUid,
+        mailbox,
+        toHeader: mail.to || null,
+        emailDate: mail.date || (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+    await pool.query(
+      `UPDATE public.processed_email_uids
+       SET organization_id = $1, arn_opportunity_id = $2
+       WHERE id = $3`,
+      [tenant.organizationId, result.opportunity?.id || null, lockRes.rows[0].id]
+    );
+    await dispatchAutomationWebhook("outbound_n8n", "arn.imap.opportunity_created", {
+      emailUid,
+      senderEmail: sender.email,
+      organizationId: tenant.organizationId,
+      opportunityId: result.opportunity?.id || null,
+      linkedContactId: result.linkedContactId || null,
+      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
+    });
+    return {
+      skipped: false,
+      opportunityId: result.opportunity?.id ? Number(result.opportunity.id) : void 0,
+      linkedContactId: result.linkedContactId ?? null,
+      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
+    };
+  } catch (err) {
+    await pool.query(`DELETE FROM public.processed_email_uids WHERE id = $1`, [lockRes.rows[0].id]).catch(() => {
+    });
+    throw err;
+  }
+}
+async function checkAndNotifyFleetExpiries(daysThreshold = 15) {
+  if (!hasDatabaseConfig()) {
+    return { scanned: 0, alertsSent: 0 };
+  }
+  await ensureProductionTables();
+  const res = await pool.query(
+    `SELECT fv.*, o.name AS org_name, u.email AS owner_email
+     FROM public.fleet_vehicles fv
+     LEFT JOIN public.organizations o ON o.id = fv.organization_id
+     LEFT JOIN public.users u ON u.uid = fv.owner_uid
+     WHERE COALESCE(fv.vtv_expiry, '') <> '' OR COALESCE(fv.insurance_expiry, '') <> ''`
+  );
+  const vehicles = res.rows || [];
+  let alertsSent = 0;
+  for (const v of vehicles) {
+    const recipient = String(v.owner_email || "").trim();
+    if (!recipient) continue;
+    const checks = [
+      { type: "vtv", label: "VTV / Verificaci\xF3n T\xE9cnica", dateVal: v.vtv_expiry },
+      { type: "insurance", label: "Seguro Automotor / Carga", dateVal: v.insurance_expiry }
+    ];
+    for (const chk of checks) {
+      if (!chk.dateVal) continue;
+      const daysLeft = parseExpiryDaysRemaining(chk.dateVal);
+      if (daysLeft === null || daysLeft > daysThreshold) continue;
+      const claim = await pool.query(
+        `INSERT INTO public.fleet_expiry_alerts (vehicle_id, alert_type, expiry_date, notified_email)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (vehicle_id, alert_type, expiry_date) DO NOTHING
+         RETURNING id`,
+        [v.id, chk.type, chk.dateVal, recipient]
+      );
+      if (!claim.rows?.[0]) continue;
+      const statusText = daysLeft < 0 ? `VENCIDA hace ${Math.abs(daysLeft)} d\xEDas (${chk.dateVal})` : daysLeft === 0 ? `VENCE HOY (${chk.dateVal})` : `vence en ${daysLeft} d\xEDas (${chk.dateVal})`;
+      try {
+        await sendEmail(
+          recipient,
+          `[Alerta Flota xPatagonia] ${v.name} (${v.plate}): ${chk.label} ${statusText}`,
+          `Hola,
+
+La unidad ${v.name} (Dominio ${v.plate}) de ${v.org_name || "tu flota"} registra su ${chk.label} ${statusText}.
+
+Ingres\xE1 al Panel de Log\xEDstica & Control de Flota en https://www.xpatagonia.online/dashboard?area=fleet para actualizar la documentaci\xF3n y mantener la habilitaci\xF3n operativa.`
+        );
+        alertsSent += 1;
+      } catch (err) {
+        await pool.query(`DELETE FROM public.fleet_expiry_alerts WHERE id = $1`, [claim.rows[0].id]).catch(() => {
+        });
+        console.warn("[FleetAlert] No se pudo enviar alerta:", err);
+      }
+    }
+  }
+  return { scanned: vehicles.length, alertsSent };
+}
+
+// src/server/workerAndWebhookRoutes.ts
+function extractIncomingSecret(req) {
+  const authHeader = String(req.headers.authorization || "");
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice("Bearer ".length).trim();
+  }
+  const headerSecret = req.headers["x-n8n-secret"] || req.headers["x-cron-secret"] || req.headers["x-worker-secret"] || "";
+  return String(headerSecret).trim();
+}
+function requireWebhookSecret(req, res, next) {
+  const token = extractIncomingSecret(req);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized: Missing worker/n8n Bearer or secret header" });
+  }
+  const configuredSecrets = [
+    process.env.CRON_SECRET,
+    process.env.N8N_SHARED_SECRET,
+    process.env.ODOO_WEBHOOK_SECRET
+  ].map((s) => String(s || "").trim()).filter(Boolean);
+  if (configuredSecrets.length === 0 || !configuredSecrets.includes(token)) {
+    return res.status(403).json({ error: "Forbidden: Invalid worker/n8n secret" });
+  }
+  next();
+}
+function registerWorkerAndWebhookRoutes(app) {
+  app.post(
+    "/api/webhooks/n8n/imap-inbound",
+    requireWebhookSecret,
+    async (req, res) => {
+      try {
+        const b = req.body || {};
+        const uid = String(b.uid || b.messageId || b.id || "").trim();
+        if (!uid) {
+          return res.status(400).json({ error: "Se requiere uid o messageId del correo entrante." });
+        }
+        const result = await processInboundEmailWithArn({
+          uid,
+          mailbox: String(b.mailbox || "INBOX"),
+          from: String(b.from || ""),
+          to: String(b.to || ""),
+          subject: String(b.subject || "(Sin asunto)"),
+          text: String(b.text || b.body || b.snippet || ""),
+          date: b.date ? String(b.date) : void 0
+        });
+        res.json({ success: true, ...result });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Error procesando correo entrante IMAP" });
+      }
+    }
+  );
+  app.post(
+    "/api/webhooks/n8n/retry-queue",
+    requireWebhookSecret,
+    async (req, res) => {
+      try {
+        const limit = Number(req.body?.limit || 20);
+        const summary = await flushAutomationRetryQueue(limit);
+        res.json({ success: true, ...summary });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Error ejecutando cola de reintentos" });
+      }
+    }
+  );
+  app.post(
+    "/api/webhooks/n8n/fleet-alerts",
+    requireWebhookSecret,
+    async (req, res) => {
+      try {
+        const days = Number(req.body?.daysThreshold || 15);
+        const summary = await checkAndNotifyFleetExpiries(days);
+        res.json({ success: true, ...summary });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Error verificando alertas de flota" });
+      }
+    }
+  );
+}
 
 // src/server/createApp.ts
 var cachedSupabaseAdmin = null;
@@ -4117,12 +4690,47 @@ function createApiApp() {
   }
   const inMemoryAutomationLogs = [];
   async function recordAutomationEvent(direction, event, status, payload) {
+    let resolvedStatus = status;
+    let attempts = 0;
+    let nextRetryAt = null;
+    let lastError = null;
+    const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+    if (direction === "outbound_n8n" && n8nUrl && status !== "processed") {
+      try {
+        const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+        const fwRes = await fetch(n8nUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
+          },
+          body: JSON.stringify({ event, direction, payload, timestamp: (/* @__PURE__ */ new Date()).toISOString() }),
+          signal: AbortSignal.timeout(5e3)
+        });
+        if (fwRes.ok) {
+          resolvedStatus = "processed";
+        } else {
+          resolvedStatus = "retry_pending";
+          attempts = 1;
+          nextRetryAt = computeNextRetryDate(1);
+          lastError = `n8n HTTP ${fwRes.status}`;
+        }
+      } catch (fwErr) {
+        resolvedStatus = "retry_pending";
+        attempts = 1;
+        nextRetryAt = computeNextRetryDate(1);
+        lastError = fwErr?.message || "n8n unreachable";
+      }
+    } else if (direction === "outbound_n8n" && !n8nUrl && status === "local_queue") {
+      nextRetryAt = computeNextRetryDate(1);
+    }
     const entry = {
       id: Date.now(),
       direction,
       event,
-      status,
+      status: resolvedStatus,
       payload,
+      attempts,
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     inMemoryAutomationLogs.unshift(entry);
@@ -4130,7 +4738,15 @@ function createApiApp() {
     let persistedInPg = false;
     if (hasDatabaseConfig()) {
       try {
-        await db.insert(automationLogs).values({ direction, event, status, payload });
+        await db.insert(automationLogs).values({
+          direction,
+          event,
+          status: resolvedStatus,
+          payload,
+          attempts,
+          nextRetryAt,
+          lastError
+        });
         persistedInPg = true;
       } catch {
       }
@@ -4139,7 +4755,12 @@ function createApiApp() {
       const sbAdmin = getSupabaseAdminClient();
       if (sbAdmin) {
         try {
-          await sbAdmin.from("automation_logs").insert({ direction, event, status, payload });
+          await sbAdmin.from("automation_logs").insert({
+            direction,
+            event,
+            status: resolvedStatus,
+            payload
+          });
         } catch {
         }
       }
@@ -5355,6 +5976,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
     res.json({ key: process.env.GOOGLE_MAPS_PLATFORM_KEY || "" });
   });
   registerArnAndModuleRoutes(app, recordAutomationEvent);
+  registerWorkerAndWebhookRoutes(app);
   return { app, runAutoInsight };
 }
 

@@ -1,0 +1,17 @@
+services:
+  xpatagonia-worker:
+    build:
+      context: ../..
+      dockerfile: infra/vps-worker/Dockerfile.worker
+    container_name: xpatagonia-vps-worker
+    restart: unless-stopped
+    env_file:
+      - .env.worker
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Argentina/Buenos_Aires
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

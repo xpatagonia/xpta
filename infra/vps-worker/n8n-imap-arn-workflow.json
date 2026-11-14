@@ -1,0 +1,158 @@
+{
+  "name": "xPatagonia - ARN IA IMAP + Flota + Reintentos (Vercel)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "trigger-retry-queue",
+      "name": "Cada 2m - Flush Reintentos Odoo",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.xpatagonia.online/api/webhooks/n8n/retry-queue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{$env.N8N_SHARED_SECRET}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"limit\": 20 }"
+      },
+      "id": "http-retry-queue",
+      "name": "Ejecutar Cola Reintentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "trigger-fleet-alerts",
+      "name": "Cada 6h - Alertas VTV y Seguros",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.xpatagonia.online/api/webhooks/n8n/fleet-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{$env.N8N_SHARED_SECRET}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"daysThreshold\": 15 }"
+      },
+      "id": "http-fleet-alerts",
+      "name": "Chequear Vencimientos Flota",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 420]
+    },
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "options": {}
+      },
+      "id": "imap-email-trigger",
+      "name": "Email Trigger (IMAP mail.xpatagonia.online)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [240, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.xpatagonia.online/api/webhooks/n8n/imap-inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{$env.N8N_SHARED_SECRET}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ uid: $json.metadata?.uid || $json.messageId || $json.date, mailbox: 'INBOX', from: $json.from, to: $json.to, subject: $json.subject, text: $json.text || $json.textPlain || '', date: $json.date }) }}"
+      },
+      "id": "http-imap-inbound",
+      "name": "Enviar Correo a ARN IA + CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 640]
+    }
+  ],
+  "connections": {
+    "Cada 2m - Flush Reintentos Odoo": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Cola Reintentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cada 6h - Alertas VTV y Seguros": {
+      "main": [
+        [
+          {
+            "node": "Chequear Vencimientos Flota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Trigger (IMAP mail.xpatagonia.online)": {
+      "main": [
+        [
+          {
+            "node": "Enviar Correo a ARN IA + CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
