@@ -8,6 +8,7 @@ import {
   fetchSiteSettings,
   persistSiteSettings,
 } from '../src/lib/siteSettings.ts';
+import { sanitizeApiBaseUrl } from '../src/lib/apiConfig.ts';
 
 const originalWindow = (globalThis as any).window;
 const originalLocalStorage = (globalThis as any).localStorage;
@@ -146,4 +147,11 @@ test('fetchSiteSettings fetches authoritative remote config with cache: no-store
 
   // Restore default in session memory for isolation
   publishSessionSiteSettings(DEFAULT_SITE_SETTINGS);
+});
+
+test('sanitizeApiBaseUrl rejects legacy onrender.com URLs and localhost on HTTPS production', () => {
+  assert.equal(sanitizeApiBaseUrl('https://xpatagoniaonline.onrender.com/'), '');
+  assert.equal(sanitizeApiBaseUrl('https://api.xpatagonia.online/'), 'https://api.xpatagonia.online');
+  (globalThis as any).window = { location: { protocol: 'https:' } };
+  assert.equal(sanitizeApiBaseUrl('http://localhost:3000'), '');
 });

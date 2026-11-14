@@ -26,15 +26,14 @@ export default defineConfig(({ mode }) => {
     ''
   ).trim();
 
-  const apiUrl = (
+  const rawApiUrl = (
     env.VITE_API_URL ||
     process.env.VITE_API_URL ||
     env.VITE_API_BASE_URL ||
     process.env.VITE_API_BASE_URL ||
-    env.API_BASE_URL ||
-    process.env.API_BASE_URL ||
     ''
   ).trim();
+  const apiUrl = /onrender\.com/i.test(rawApiUrl) ? '' : rawApiUrl;
 
   return {
     plugins: [react(), tailwindcss()],

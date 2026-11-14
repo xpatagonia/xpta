@@ -1,5 +1,19 @@
 declare const __XPATAGONIA_API_URL__: string | undefined;
 
+export function sanitizeApiBaseUrl(rawUrl: string): string {
+  const cleaned = (rawUrl || '').trim().replace(/\/+$/, '');
+  if (!cleaned) return '';
+  if (/onrender\.com/i.test(cleaned)) return '';
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.protocol === 'https:' &&
+    /^http:\/\/(localhost|127\.0\.0\.1)/i.test(cleaned)
+  ) {
+    return '';
+  }
+  return cleaned;
+}
+
 function readDefineApiUrl(): string {
   try {
     if (typeof __XPATAGONIA_API_URL__ !== 'undefined' && __XPATAGONIA_API_URL__) {
@@ -16,7 +30,7 @@ function readDefineApiUrl(): string {
 }
 
 export const getApiUrl = (): string => {
-  return readDefineApiUrl().replace(/\/+$/, '');
+  return sanitizeApiBaseUrl(readDefineApiUrl());
 };
 
 export const getOsrmUrl = (): string => {
