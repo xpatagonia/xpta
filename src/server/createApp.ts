@@ -16,7 +16,6 @@ import { notifyProvidersForRfq } from "../services/notificationService.ts";
 import { db, hasDatabaseConfig } from "../db/index.ts";
 import { insights, siteSettings, automationLogs } from "../db/schema.ts";
 import { eq, desc } from "drizzle-orm";
-import { fetchEmails, sendEmail } from "../services/emailService.ts";
 
 let cachedSupabaseAdmin: SupabaseClient | null | undefined;
 export function getSupabaseAdminClient(): SupabaseClient | null {
@@ -383,6 +382,7 @@ export function createApiApp() {
 
   app.get("/api/emails", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const { fetchEmails } = await import("../services/emailService.ts");
       const emails = await fetchEmails();
       res.json(emails);
     } catch (error: any) {
@@ -398,6 +398,7 @@ export function createApiApp() {
         res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
         return;
       }
+      const { sendEmail } = await import("../services/emailService.ts");
       const result = await sendEmail(to, subject, text, html);
       res.json({
         success: true,
