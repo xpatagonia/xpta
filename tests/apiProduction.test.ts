@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApiApp } from '../src/server/createApp.ts';
 import { resolveUserRoleAndMembership } from '../src/middleware/auth.ts';
+import { formatPgError } from '../src/db/index.ts';
 
 let server: http.Server;
 let baseUrl = '';
@@ -151,4 +152,23 @@ test('resolveUserRoleAndMembership promotes bootstrap admin emails and defaults 
     'proveedor@empresa.example'
   );
   assert.equal(regularAccess.roleName, 'vendor');
+});
+
+test('formatPgError unwraps Drizzle cause codes into actionable messages without dumping query params', () => {
+  assert.match(
+    formatPgError({ message: 'Failed query', cause: { code: '42P01', message: 'relation "site_settings" does not exist' } }),
+    /42P01/
+  );
+  assert.match(
+    formatPgError({ message: 'Failed query', cause: { code: '28P01', message: 'password authentication failed for user postgres' } }),
+    /Contraseña incorrecta/
+  );
+  assert.match(
+    formatPgError({ message: 'Failed query', cause: { message: 'Tenant or user not found' } }),
+    /Pooler/
+  );
+  assert.match(
+    formatPgError({ message: 'Failed query', cause: { code: 'ENETUNREACH', message: 'connect ENETUNREACH' } }),
+    /Transaction Pooler/
+  );
 });

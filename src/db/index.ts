@@ -4,16 +4,43 @@ import * as schema from './schema.ts';
 
 const { Pool } = pg;
 
+function cleanEnvUrl(raw?: string): string {
+  return (raw || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
 export const hasDatabaseConfig = (): boolean => {
   return Boolean(
-    process.env.DATABASE_URL ||
+    cleanEnvUrl(process.env.DATABASE_URL) ||
       (process.env.SQL_HOST && process.env.SQL_DB_NAME && process.env.SQL_USER)
   );
 };
 
+export function formatPgError(err: any): string {
+  const cause = err?.cause || err;
+  const code = cause?.code || err?.code;
+  const msg = String(cause?.message || err?.message || err || 'Unknown Postgres error');
+  const detail = cause?.detail ? ` (${cause.detail})` : '';
+
+  if (code === '42P01') {
+    return `Tabla inexistente en Postgres (42P01): ${msg}`;
+  }
+  if (code === '28P01' || /password authentication failed/i.test(msg)) {
+    return `Contraseña incorrecta en DATABASE_URL (28P01): verificá tu password de Postgres en Vercel.`;
+  }
+  if (/Tenant or user not found/i.test(msg)) {
+    return `Usuario/Proyecto inválido en Supabase Pooler ("Tenant or user not found"): verificá que el usuario sea postgres.<PROJECT_REF> en DATABASE_URL.`;
+  }
+  if (code === 'ENETUNREACH' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT') {
+    return `No se pudo conectar a Postgres (${code}: ${msg}). Si usás Supabase en Vercel, debés usar la URI del Transaction Pooler (puerto 6543, host *.pooler.supabase.com), no el host directo db.*.supabase.co:5432.`;
+  }
+
+  return `${code ? `[${code}] ` : ''}${msg}${detail}`;
+}
+
 export const createPool = () => {
-  if (process.env.DATABASE_URL) {
-    let dbUrl = process.env.DATABASE_URL.replace(/@+db\./, '@db.').trim();
+  const rawDbUrl = cleanEnvUrl(process.env.DATABASE_URL);
+  if (rawDbUrl) {
+    let dbUrl = rawDbUrl.replace(/@+db\./, '@db.').trim();
     let isLocal = false;
 
     try {
@@ -62,7 +89,7 @@ export const createPool = () => {
   });
 };
 
-const pool = createPool();
+export const pool = createPool();
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle SQL pool client:', err);

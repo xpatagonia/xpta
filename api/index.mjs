@@ -248,10 +248,34 @@ var db_exports = {};
 __export(db_exports, {
   createPool: () => createPool,
   db: () => db,
-  hasDatabaseConfig: () => hasDatabaseConfig
+  formatPgError: () => formatPgError,
+  hasDatabaseConfig: () => hasDatabaseConfig,
+  pool: () => pool
 });
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+function cleanEnvUrl(raw) {
+  return (raw || "").trim().replace(/^['"]|['"]$/g, "");
+}
+function formatPgError(err) {
+  const cause = err?.cause || err;
+  const code = cause?.code || err?.code;
+  const msg = String(cause?.message || err?.message || err || "Unknown Postgres error");
+  const detail = cause?.detail ? ` (${cause.detail})` : "";
+  if (code === "42P01") {
+    return `Tabla inexistente en Postgres (42P01): ${msg}`;
+  }
+  if (code === "28P01" || /password authentication failed/i.test(msg)) {
+    return `Contrase\xF1a incorrecta en DATABASE_URL (28P01): verific\xE1 tu password de Postgres en Vercel.`;
+  }
+  if (/Tenant or user not found/i.test(msg)) {
+    return `Usuario/Proyecto inv\xE1lido en Supabase Pooler ("Tenant or user not found"): verific\xE1 que el usuario sea postgres.<PROJECT_REF> en DATABASE_URL.`;
+  }
+  if (code === "ENETUNREACH" || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+    return `No se pudo conectar a Postgres (${code}: ${msg}). Si us\xE1s Supabase en Vercel, deb\xE9s usar la URI del Transaction Pooler (puerto 6543, host *.pooler.supabase.com), no el host directo db.*.supabase.co:5432.`;
+  }
+  return `${code ? `[${code}] ` : ""}${msg}${detail}`;
+}
 var Pool, hasDatabaseConfig, createPool, pool, db;
 var init_db = __esm({
   "src/db/index.ts"() {
@@ -259,12 +283,13 @@ var init_db = __esm({
     ({ Pool } = pg);
     hasDatabaseConfig = () => {
       return Boolean(
-        process.env.DATABASE_URL || process.env.SQL_HOST && process.env.SQL_DB_NAME && process.env.SQL_USER
+        cleanEnvUrl(process.env.DATABASE_URL) || process.env.SQL_HOST && process.env.SQL_DB_NAME && process.env.SQL_USER
       );
     };
     createPool = () => {
-      if (process.env.DATABASE_URL) {
-        let dbUrl = process.env.DATABASE_URL.replace(/@+db\./, "@db.").trim();
+      const rawDbUrl = cleanEnvUrl(process.env.DATABASE_URL);
+      if (rawDbUrl) {
+        let dbUrl = rawDbUrl.replace(/@+db\./, "@db.").trim();
         let isLocal = false;
         try {
           const url = new URL(dbUrl);
@@ -796,19 +821,18 @@ Ingresa a https://xpatagonia.online/dashboard para revisar especificaciones y en
 init_db();
 init_schema();
 import { eq as eq4, desc as desc2 } from "drizzle-orm";
-var cachedSupabaseAdmin;
+var cachedSupabaseAdmin = null;
 function getSupabaseAdminClient() {
-  if (cachedSupabaseAdmin !== void 0) return cachedSupabaseAdmin;
-  const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  if (cachedSupabaseAdmin) return cachedSupabaseAdmin;
+  const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim().replace(/^['"]|['"]$/g, "");
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || "").trim().replace(/^['"]|['"]$/g, "");
   if ((supabaseUrl.startsWith("http://") || supabaseUrl.startsWith("https://")) && serviceRoleKey.length > 20) {
     cachedSupabaseAdmin = createClient2(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false }
     });
-  } else {
-    cachedSupabaseAdmin = null;
+    return cachedSupabaseAdmin;
   }
-  return cachedSupabaseAdmin;
+  return null;
 }
 var DEFAULT_HERO_SUGGESTIONS = [
   "Log\xEDstica de Fr\xEDo -25\xB0C",
@@ -887,22 +911,36 @@ function createApiApp() {
       credentials: true
     })
   );
-  app.get("/api/health", (req, res) => {
-    const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-    const supabaseAnon = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
+  app.get("/api/health", async (req, res) => {
+    const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim().replace(/^['"]|['"]$/g, "");
+    const supabaseAnon = (process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim().replace(/^['"]|['"]$/g, "");
+    const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || "").trim().replace(/^['"]|['"]$/g, "");
     const geminiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     const resendConfigured = Boolean(
       process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim().length > 5
     );
     const smtpConfigured = Boolean(process.env.SMTP_PASSWORD);
     const imapConfigured = Boolean(process.env.IMAP_PASSWORD);
+    let dbDiagnostics;
+    if (req.query.checkDb === "1" && hasDatabaseConfig()) {
+      try {
+        await pool.query("SELECT 1");
+        const tbl = await pool.query("SELECT to_regclass('public.site_settings') IS NOT NULL AS exists");
+        dbDiagnostics = { ok: true, siteSettingsTable: Boolean(tbl.rows?.[0]?.exists) };
+      } catch (dbErr) {
+        dbDiagnostics = { ok: false, error: formatPgError(dbErr) };
+      }
+    }
     res.json({
       status: "ok",
       runtime: process.env.VERCEL ? "vercel_serverless" : "node_server",
       environment: process.env.NODE_ENV || "development",
+      vercelEnv: process.env.VERCEL_ENV || null,
       databaseConfigured: hasDatabaseConfig(),
+      ...dbDiagnostics ? { dbDiagnostics } : {},
       supabaseConfigured: Boolean(supabaseUrl && supabaseAnon),
       supabaseAdminConfigured: Boolean(getSupabaseAdminClient()),
+      supabaseServiceRolePresent: serviceRoleKey.length > 20,
       geminiConfigured: isUsableGeminiKey(geminiKey),
       resendConfigured,
       emailOutboundProvider: resendConfigured ? "resend_https" : smtpConfigured ? "cyberpanel_smtp" : "none",
@@ -1838,23 +1876,40 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
         let persistedSource = null;
         const persistenceErrors = [];
         if (hasDatabaseConfig()) {
+          const runSiteSettingsUpsert = async () => {
+            await pool.query(
+              `INSERT INTO public.site_settings ("key", "value", "updated_by", "updated_at")
+               VALUES ($1, $2::jsonb, $3, $4)
+               ON CONFLICT ("key") DO UPDATE
+               SET "value" = EXCLUDED."value",
+                   "updated_by" = EXCLUDED."updated_by",
+                   "updated_at" = EXCLUDED."updated_at"`,
+              ["global_site_config", JSON.stringify(updatedSettings), updatedBy, /* @__PURE__ */ new Date()]
+            );
+          };
           try {
-            await db.insert(siteSettings).values({
-              key: "global_site_config",
-              value: updatedSettings,
-              updatedBy,
-              updatedAt: /* @__PURE__ */ new Date()
-            }).onConflictDoUpdate({
-              target: siteSettings.key,
-              set: {
-                value: updatedSettings,
-                updatedBy,
-                updatedAt: /* @__PURE__ */ new Date()
-              }
-            });
+            await runSiteSettingsUpsert();
             persistedSource = "postgres";
           } catch (pgErr) {
-            persistenceErrors.push(`Postgres: ${pgErr?.message || String(pgErr)}`);
+            const pgCode = pgErr?.cause?.code || pgErr?.code;
+            if (pgCode === "42P01") {
+              try {
+                await pool.query(`
+                  CREATE TABLE IF NOT EXISTS public.site_settings (
+                    key text PRIMARY KEY,
+                    value jsonb NOT NULL DEFAULT '{}'::jsonb,
+                    updated_by text,
+                    updated_at timestamptz DEFAULT now()
+                  );
+                `);
+                await runSiteSettingsUpsert();
+                persistedSource = "postgres";
+              } catch (retryErr) {
+                persistenceErrors.push(`Postgres: ${formatPgError(retryErr)}`);
+              }
+            } else {
+              persistenceErrors.push(`Postgres: ${formatPgError(pgErr)}`);
+            }
           }
         }
         if (!persistedSource) {
@@ -1875,7 +1930,10 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
               persistenceErrors.push(`Supabase: ${sbErr.message}`);
             }
           } else {
-            persistenceErrors.push("SUPABASE_SERVICE_ROLE_KEY no configurada");
+            const vercelEnv = process.env.VERCEL_ENV || "unknown";
+            persistenceErrors.push(
+              `SUPABASE_SERVICE_ROLE_KEY no disponible en este entorno (vercelEnv=${vercelEnv})`
+            );
           }
         }
         if (!persistedSource) {

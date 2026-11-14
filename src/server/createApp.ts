@@ -13,15 +13,30 @@ import {
 import { getOrCreateUser } from "../db/users.ts";
 import { getUserRfqs, createRfq, updateRfqStatus } from "../db/rfqs.ts";
 import { notifyProvidersForRfq } from "../services/notificationService.ts";
-import { db, hasDatabaseConfig } from "../db/index.ts";
+import { db, pool, hasDatabaseConfig, formatPgError } from "../db/index.ts";
 import { insights, siteSettings, automationLogs, contacts } from "../db/schema.ts";
 import { eq, desc } from "drizzle-orm";
 
-let cachedSupabaseAdmin: SupabaseClient | null | undefined;
+let cachedSupabaseAdmin: SupabaseClient | null = null;
 export function getSupabaseAdminClient(): SupabaseClient | null {
-  if (cachedSupabaseAdmin !== undefined) return cachedSupabaseAdmin;
-  const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  if (cachedSupabaseAdmin) return cachedSupabaseAdmin;
+  const supabaseUrl = (
+    process.env.VITE_SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    ""
+  )
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+  const serviceRoleKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    ""
+  )
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+
   if (
     (supabaseUrl.startsWith("http://") || supabaseUrl.startsWith("https://")) &&
     serviceRoleKey.length > 20
@@ -29,10 +44,9 @@ export function getSupabaseAdminClient(): SupabaseClient | null {
     cachedSupabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-  } else {
-    cachedSupabaseAdmin = null;
+    return cachedSupabaseAdmin;
   }
-  return cachedSupabaseAdmin;
+  return null;
 }
 
 const DEFAULT_HERO_SUGGESTIONS = [
@@ -144,13 +158,31 @@ export function createApiApp() {
   // ==========================================
   // HEALTH & DIAGNOSTICS
   // ==========================================
-  app.get("/api/health", (req, res) => {
-    const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+  app.get("/api/health", async (req, res) => {
+    const supabaseUrl = (
+      process.env.VITE_SUPABASE_URL ||
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      ""
+    )
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
     const supabaseAnon = (
       process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
       process.env.SUPABASE_ANON_KEY ||
       ""
-    ).trim();
+    )
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
+    const serviceRoleKey = (
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SUPABASE_SECRET_KEY ||
+      ""
+    )
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
     const geminiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     const resendConfigured = Boolean(
       process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim().length > 5
@@ -158,13 +190,27 @@ export function createApiApp() {
     const smtpConfigured = Boolean(process.env.SMTP_PASSWORD);
     const imapConfigured = Boolean(process.env.IMAP_PASSWORD);
 
+    let dbDiagnostics: { ok: boolean; error?: string; siteSettingsTable?: boolean } | undefined;
+    if (req.query.checkDb === "1" && hasDatabaseConfig()) {
+      try {
+        await pool.query("SELECT 1");
+        const tbl = await pool.query("SELECT to_regclass('public.site_settings') IS NOT NULL AS exists");
+        dbDiagnostics = { ok: true, siteSettingsTable: Boolean(tbl.rows?.[0]?.exists) };
+      } catch (dbErr: any) {
+        dbDiagnostics = { ok: false, error: formatPgError(dbErr) };
+      }
+    }
+
     res.json({
       status: "ok",
       runtime: process.env.VERCEL ? "vercel_serverless" : "node_server",
       environment: process.env.NODE_ENV || "development",
+      vercelEnv: process.env.VERCEL_ENV || null,
       databaseConfigured: hasDatabaseConfig(),
+      ...(dbDiagnostics ? { dbDiagnostics } : {}),
       supabaseConfigured: Boolean(supabaseUrl && supabaseAnon),
       supabaseAdminConfigured: Boolean(getSupabaseAdminClient()),
+      supabaseServiceRolePresent: serviceRoleKey.length > 20,
       geminiConfigured: isUsableGeminiKey(geminiKey),
       resendConfigured,
       emailOutboundProvider: resendConfigured
@@ -1244,26 +1290,41 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
         const persistenceErrors: string[] = [];
 
         if (hasDatabaseConfig()) {
+          const runSiteSettingsUpsert = async () => {
+            await pool.query(
+              `INSERT INTO public.site_settings ("key", "value", "updated_by", "updated_at")
+               VALUES ($1, $2::jsonb, $3, $4)
+               ON CONFLICT ("key") DO UPDATE
+               SET "value" = EXCLUDED."value",
+                   "updated_by" = EXCLUDED."updated_by",
+                   "updated_at" = EXCLUDED."updated_at"`,
+              ["global_site_config", JSON.stringify(updatedSettings), updatedBy, new Date()]
+            );
+          };
+
           try {
-            await db
-              .insert(siteSettings)
-              .values({
-                key: "global_site_config",
-                value: updatedSettings,
-                updatedBy,
-                updatedAt: new Date(),
-              })
-              .onConflictDoUpdate({
-                target: siteSettings.key,
-                set: {
-                  value: updatedSettings,
-                  updatedBy,
-                  updatedAt: new Date(),
-                },
-              });
+            await runSiteSettingsUpsert();
             persistedSource = "postgres";
           } catch (pgErr: any) {
-            persistenceErrors.push(`Postgres: ${pgErr?.message || String(pgErr)}`);
+            const pgCode = pgErr?.cause?.code || pgErr?.code;
+            if (pgCode === "42P01") {
+              try {
+                await pool.query(`
+                  CREATE TABLE IF NOT EXISTS public.site_settings (
+                    key text PRIMARY KEY,
+                    value jsonb NOT NULL DEFAULT '{}'::jsonb,
+                    updated_by text,
+                    updated_at timestamptz DEFAULT now()
+                  );
+                `);
+                await runSiteSettingsUpsert();
+                persistedSource = "postgres";
+              } catch (retryErr: any) {
+                persistenceErrors.push(`Postgres: ${formatPgError(retryErr)}`);
+              }
+            } else {
+              persistenceErrors.push(`Postgres: ${formatPgError(pgErr)}`);
+            }
           }
         }
 
@@ -1285,7 +1346,10 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
               persistenceErrors.push(`Supabase: ${sbErr.message}`);
             }
           } else {
-            persistenceErrors.push("SUPABASE_SERVICE_ROLE_KEY no configurada");
+            const vercelEnv = process.env.VERCEL_ENV || "unknown";
+            persistenceErrors.push(
+              `SUPABASE_SERVICE_ROLE_KEY no disponible en este entorno (vercelEnv=${vercelEnv})`
+            );
           }
         }
 
