@@ -24,7 +24,7 @@ import {
   fetchSiteSettings,
   getCachedSiteSettings,
   persistSiteSettings,
-  saveCachedSiteSettings,
+  parseHeroVideoSource,
 } from '../../lib/siteSettings';
 
 export default function AdminSiteEditor() {
@@ -72,10 +72,12 @@ export default function AdminSiteEditor() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 18 * 1024 * 1024) {
+    // Vercel Serverless functions cap JSON request payloads around 4.5 MB (~3.2 MB raw file in base64)
+    if (file.size > 3.2 * 1024 * 1024) {
       setStatusBanner({
         type: 'error',
-        message: 'El archivo supera 18 MB. Usá un video MP4/WebM comprimido o una URL externa/R2.',
+        message:
+          'El archivo supera 3.2 MB (límite de subida directa en Vercel). Sube videos pesados a Cloudflare R2 / Cloudflare Stream o Supabase Storage y pega la URL pública.',
       });
       return;
     }
@@ -92,31 +94,29 @@ export default function AdminSiteEditor() {
       });
 
       const token = await auth.currentUser?.getIdToken?.();
-      let finalUrl = base64Data;
-
-      if (token) {
-        try {
-          const res = await fetch(`${getApiUrl()}/api/admin/upload-media`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              filename: file.name,
-              mimeType: file.type,
-              base64Data,
-            }),
-          });
-          if (res.ok) {
-            const uploaded = await res.json();
-            if (uploaded.url) finalUrl = uploaded.url;
-          }
-        } catch {
-          // Local preview fallback via base64 if backend upload endpoint unreachable
-        }
+      if (!token) {
+        throw new Error('Sesión expirada. Vuelve a iniciar sesión como administrador.');
       }
 
+      const res = await fetch(`${getApiUrl()}/api/admin/upload-media`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          mimeType: file.type,
+          base64Data,
+        }),
+      });
+
+      const uploaded = await res.json().catch(() => ({}));
+      if (!res.ok || !uploaded.url) {
+        throw new Error(uploaded.error || `Error del servidor (HTTP ${res.status})`);
+      }
+
+      const finalUrl = uploaded.url;
       if (targetKind === 'video') {
         updateHero({ backgroundType: 'video', videoUrl: finalUrl });
       } else {
@@ -125,12 +125,12 @@ export default function AdminSiteEditor() {
 
       setStatusBanner({
         type: 'success',
-        message: `${targetKind === 'video' ? 'Video' : 'Imagen'} cargado en la vista previa. Pulsá "Guardar y Publicar" para aplicarlo a todo el sitio.`,
+        message: `${targetKind === 'video' ? 'Video' : 'Imagen'} subido a Supabase Storage (${uploaded.storage}). Pulsa "Guardar y Publicar Sitio" para aplicarlo en todos los dispositivos.`,
       });
     } catch (err: any) {
       setStatusBanner({
         type: 'error',
-        message: `No se pudo procesar el archivo: ${err?.message || 'error'}`,
+        message: `No se pudo subir el archivo a producción: ${err?.message || 'error'}`,
       });
     } finally {
       setIsUploading(false);
@@ -148,12 +148,13 @@ export default function AdminSiteEditor() {
     if (res.savedRemote) {
       setStatusBanner({
         type: 'success',
-        message: 'Configuración publicada en servidor y aplicada en vivo a Hero, Secciones, Footer y Planes.',
+        message:
+          'Configuración guardada en base de datos de producción y publicada para todos los dispositivos.',
       });
     } else {
       setStatusBanner({
-        type: 'info',
-        message: `Aplicado al instante en este navegador (respaldo local). Servidor: ${res.error || 'modo preview sin sesión remoto'}.`,
+        type: 'error',
+        message: `No se pudo publicar en producción: ${res.error || 'Error de persistencia en servidor'}.`,
       });
     }
   };
@@ -164,14 +165,15 @@ export default function AdminSiteEditor() {
       updatedAt: new Date().toISOString(),
     };
     setSettings(resetCopy);
-    saveCachedSiteSettings(resetCopy);
     setStatusBanner({
       type: 'info',
-      message: 'Valores predeterminados restaurados. Pulsá Guardar para confirmar en el backend.',
+      message: 'Valores predeterminados cargados en el editor. Pulsa "Guardar y Publicar Sitio" para aplicarlos en producción.',
     });
   };
 
   const firstSlide = settings.hero.slides[0] || DEFAULT_SITE_SETTINGS.hero.slides[0];
+  const parsedPreviewVideo =
+    settings.hero.backgroundType === 'video' ? parseHeroVideoSource(settings.hero.videoUrl) : null;
   const overlayAlpha = Math.min(0.92, Math.max(0.15, settings.hero.overlayOpacity / 100));
   const tintRgb =
     settings.hero.overlayTint === 'purple'
@@ -304,14 +306,14 @@ export default function AdminSiteEditor() {
             <div className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                  URL de Video Loop (MP4 / WebM / YouTube URL)
+                  URL de Video Loop (Cloudflare R2 MP4 / Cloudflare Stream / YouTube)
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="url"
                     value={settings.hero.videoUrl}
                     onChange={(e) => updateHero({ videoUrl: e.target.value })}
-                    placeholder="https://.../video-patagonia.mp4 o YouTube link"
+                    placeholder="https://...r2.dev/video.mp4, Cloudflare Stream o YouTube"
                     className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-sm text-slate-900 dark:text-white outline-none focus:border-orange-500"
                   />
                   <label className="px-4 py-2.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 hover:opacity-90 shrink-0">
@@ -432,19 +434,29 @@ export default function AdminSiteEditor() {
                 style={{ filter: settings.hero.blurPx ? `blur(${settings.hero.blurPx}px)` : undefined }}
               />
             )}
-            {settings.hero.backgroundType === 'video' && settings.hero.videoUrl && (
+            {parsedPreviewVideo && (parsedPreviewVideo.kind === 'youtube' || parsedPreviewVideo.kind === 'cloudflare_stream') && (
+              <iframe
+                key={parsedPreviewVideo.embedUrl}
+                src={parsedPreviewVideo.embedUrl}
+                title="Preview video Hero"
+                className="absolute inset-0 w-full h-full pointer-events-none border-0"
+                style={{ filter: settings.hero.blurPx ? `blur(${settings.hero.blurPx}px)` : undefined }}
+                allow="autoplay; encrypted-media; fullscreen"
+              />
+            )}
+            {parsedPreviewVideo && parsedPreviewVideo.kind === 'direct' && (
               <video
-                key={settings.hero.videoUrl}
+                key={parsedPreviewVideo.src}
+                src={parsedPreviewVideo.src}
                 autoPlay
                 muted
                 loop
                 playsInline
+                preload="auto"
                 poster={settings.hero.posterUrl || undefined}
                 className="absolute inset-0 w-full h-full object-cover"
                 style={{ filter: settings.hero.blurPx ? `blur(${settings.hero.blurPx}px)` : undefined }}
-              >
-                <source src={settings.hero.videoUrl} />
-              </video>
+              />
             )}
             {settings.hero.backgroundType === 'gradient' && (
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-purple-700/40 via-[#110E17] to-[#110E17]" />

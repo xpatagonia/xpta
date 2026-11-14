@@ -6,17 +6,10 @@ import {
   SiteSettings,
   fetchSiteSettings,
   getCachedSiteSettings,
+  parseHeroVideoSource,
   SITE_SETTINGS_EVENT,
 } from '../lib/siteSettings';
 import { getApiUrl } from '../lib/apiConfig';
-
-function getYouTubeId(url: string): string | null {
-  if (!url) return null;
-  const match = url.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-  );
-  return match ? match[1] : null;
-}
 
 function ModernTextReveal({
   text,
@@ -94,10 +87,11 @@ export default function Hero() {
   const safeFrameIndex = activeFrame < framesConfig.length ? activeFrame : 0;
   const currentFrame = framesConfig[safeFrameIndex] || framesConfig[0];
 
+  const parsedVideo =
+    heroConfig.backgroundType === 'video' ? parseHeroVideoSource(heroConfig.videoUrl) : null;
   const hasImageBg = heroConfig.backgroundType === 'image' && Boolean(heroConfig.imageUrl);
-  const hasVideoBg = heroConfig.backgroundType === 'video' && Boolean(heroConfig.videoUrl);
+  const hasVideoBg = heroConfig.backgroundType === 'video' && Boolean(parsedVideo);
   const hasMediaBackground = hasImageBg || hasVideoBg;
-  const youtubeBgId = hasVideoBg ? getYouTubeId(heroConfig.videoUrl) : null;
 
   useEffect(() => {
     fetchSiteSettings().then((loaded) => setSiteSettings(loaded));
@@ -182,31 +176,32 @@ export default function Hero() {
       {/* Dynamic Background Layer controlled by Dashboard CMS */}
       {hasMediaBackground ? (
         <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-          {hasVideoBg && youtubeBgId ? (
+          {hasVideoBg && parsedVideo && (parsedVideo.kind === 'youtube' || parsedVideo.kind === 'cloudflare_stream') ? (
             <iframe
-              src={`https://www.youtube.com/embed/${youtubeBgId}?autoplay=1&mute=1&loop=1&playlist=${youtubeBgId}&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1`}
+              key={parsedVideo.embedUrl}
+              src={parsedVideo.embedUrl}
               title="Patagonia Hero Background Video"
-              className="absolute top-1/2 left-1/2 w-[177.78vh] min-w-full h-[56.25vw] min-h-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              className="absolute top-1/2 left-1/2 w-[177.78vh] min-w-full h-[56.25vw] min-h-full -translate-x-1/2 -translate-y-1/2 pointer-events-none border-0"
               style={{
                 filter: heroConfig.blurPx ? `blur(${heroConfig.blurPx}px)` : undefined,
               }}
-              allow="autoplay; encrypted-media"
+              allow="autoplay; encrypted-media; fullscreen"
             />
-          ) : hasVideoBg ? (
+          ) : hasVideoBg && parsedVideo && parsedVideo.kind === 'direct' ? (
             <video
-              key={heroConfig.videoUrl}
+              key={parsedVideo.src}
+              src={parsedVideo.src}
               autoPlay
               muted
               loop
               playsInline
+              preload="auto"
               poster={heroConfig.posterUrl || heroConfig.imageUrl || undefined}
               className="w-full h-full object-cover scale-[1.02]"
               style={{
                 filter: heroConfig.blurPx ? `blur(${heroConfig.blurPx}px)` : undefined,
               }}
-            >
-              <source src={heroConfig.videoUrl} />
-            </video>
+            />
           ) : (
             <img
               src={heroConfig.imageUrl}

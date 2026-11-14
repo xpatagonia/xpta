@@ -90,7 +90,7 @@ export default function Inbox() {
       
       if (data.mocked) {
         const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-        alert(`AVISO: El servidor no tiene configuradas las credenciales SMTP. El envío fue simulado y NO se envió realmente.${missingText}\nConfigure los Secrets en AI Studio.`);
+        alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
       } else {
         alert('Correo enviado exitosamente.');
       }

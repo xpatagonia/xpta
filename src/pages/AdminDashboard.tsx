@@ -108,14 +108,15 @@ export default function AdminDashboard() {
           setRequests(reqsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[]);
 
           try {
-            const insightsSnap = await getDocs(query(collection(db, 'insights')));
-            setInsights(
-              insightsSnap.docs
-                .map((d) => ({ id: d.id, ...d.data() }))
-                .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-            );
+            const insRes = await fetch(`${getApiUrl()}/api/insights`, { cache: 'no-store' });
+            if (insRes.ok) {
+              const insJson = await insRes.json();
+              if (Array.isArray(insJson.insights)) {
+                setInsights(insJson.insights);
+              }
+            }
           } catch (e) {
-            console.warn('Admin insights fallback:', e);
+            console.warn('Admin insights fetch error:', e);
           }
         } catch (error) {
           console.warn('Error fetching admin data:', error);
@@ -262,29 +263,35 @@ export default function AdminDashboard() {
     if (!insightTitle || !insightContent) return;
     setIsSubmitting(true);
     try {
-
-      const newInsight = {
-        title: insightTitle,
-        category: insightCategory,
-        content: insightContent,
-        image: insightImage,
-        videoUrl: insightVideo,
-        author: auth.currentUser?.email || 'Redacción',
-        createdAt: new Date().toISOString()
-      };
-      const docRef = await addDoc(collection(db, 'insights'), newInsight);
-      setInsights([{ id: docRef.id, ...newInsight }, ...insights]);
-
-      
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiUrl()}/api/admin/insights`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: insightTitle,
+          category: insightCategory,
+          content: insightContent,
+          image: insightImage || null,
+          videoUrl: insightVideo || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.insight) {
+        throw new Error(data?.error || 'Error al crear insight');
+      }
+      setInsights([data.insight, ...insights]);
       setIsInsightModalOpen(false);
       setInsightTitle('');
       setInsightCategory('Actualidad');
       setInsightContent('');
       setInsightImage('');
       setInsightVideo('');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('Error al crear insight');
+      alert(error?.message || 'Error al crear insight');
     } finally {
       setIsSubmitting(false);
     }
@@ -293,11 +300,19 @@ export default function AdminDashboard() {
   const handleDeleteInsight = async (id: string) => {
     if (!confirm('¿Estás seguro de eliminar este artículo?')) return;
     try {
-      await deleteDoc(doc(db, 'insights', id));
-      setInsights(insights.filter(i => i.id !== id));
-    } catch (error) {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiUrl()}/api/admin/insights/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Error eliminando insight');
+      }
+      setInsights(insights.filter(i => String(i.id) !== String(id)));
+    } catch (error: any) {
       console.error(error);
-      alert('Error eliminando insight');
+      alert(error?.message || 'Error eliminando insight');
     }
   };
 

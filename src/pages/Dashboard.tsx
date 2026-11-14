@@ -21,33 +21,12 @@ interface RFQ {
   createdAt: string;
 }
 
-const DEFAULT_SAMPLE_RFQS: RFQ[] = [
-  {
-    id: 1042,
-    title: 'Adquisición de 40 Pallets Térmicos y Flete a -20°C',
-    category: 'Logística y Almacenamiento',
-    priority: 'high',
-    description: 'Requerimos provisión de pallets homologados con transporte garantizado a -20°C desde Chubut a Santa Cruz.',
-    status: 'quoted',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 1041,
-    title: 'Válvulas Esféricas Acero Forjado 3" ANSI 600',
-    category: 'Sector Metalúrgico y Metalmecánico',
-    priority: 'medium',
-    description: 'Suministro de 24 válvulas para tendido de gasoducto en Cuenca Neuquina. Certificación API 6D requerida.',
-    status: 'quoted',
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-  }
-];
-
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'rfqs'|'products'|'received_rfqs'|'adn'>('rfqs');
   const [myOffersInput, setMyOffersInput] = useState('Mecanizado CNC, Estructuras Metálicas, Servicios Petroleros');
   const [myDemandsInput, setMyDemandsInput] = useState('Bridas Forjadas, Transformadores MT, Flete Consolidado');
   const [odooSyncStatus, setOdooSyncStatus] = useState<string | null>(null);
-  const [rfqs, setRfqs] = useState<RFQ[]>(DEFAULT_SAMPLE_RFQS);
+  const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [negotiationRfq, setNegotiationRfq] = useState<RFQ | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -85,7 +64,7 @@ export default function Dashboard() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setRfqs(data);
           }
         }
@@ -111,11 +90,6 @@ export default function Dashboard() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           ids = data.installed || [];
-        } else {
-          const saved = localStorage.getItem('installedModules');
-          if (saved) {
-            ids = JSON.parse(saved);
-          }
         }
         
         // Auto-enable logistics module for logistics companies
@@ -713,13 +687,14 @@ export default function Dashboard() {
                         }),
                       });
                       const data = await res.json();
+                      if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
                       setOdooSyncStatus(
                         data.forwardedToN8n
                           ? 'Sincronizado en vivo con Odoo VPS vía n8n.'
-                          : 'Perfil ADN guardado y encolado para webhook n8n (flujos.xpatagonia.online).'
+                          : 'Perfil ADN guardado en servidor y registrado en bitácora n8n.'
                       );
-                    } catch {
-                      setOdooSyncStatus('Perfil ADN actualizado localmente.');
+                    } catch (err: any) {
+                      setOdooSyncStatus(`No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`);
                     }
                     setTimeout(() => setOdooSyncStatus(null), 4000);
                   }}
@@ -831,8 +806,21 @@ export default function Dashboard() {
           rfq={negotiationRfq}
           isOpen={Boolean(negotiationRfq)}
           onClose={() => setNegotiationRfq(null)}
-          onAward={(propId) => {
-            setRfqs(prev => prev.map(r => r.id === negotiationRfq.id ? { ...r, status: 'awarded' } : r));
+          onAward={async () => {
+            try {
+              const token = await auth.getToken();
+              const res = await fetch(`${getApiUrl()}/api/rfqs/${negotiationRfq.id}/award`, {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              if (res.ok) {
+                setRfqs((prev) =>
+                  prev.map((r) => (r.id === negotiationRfq.id ? { ...r, status: 'awarded' } : r))
+                );
+              }
+            } catch (err) {
+              console.error('Error awarding RFQ in production DB:', err);
+            }
           }}
         />
       )}

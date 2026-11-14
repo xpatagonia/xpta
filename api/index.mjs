@@ -586,12 +586,12 @@ async function resolveUserRoleAndMembership(uid, email) {
     const { db: db2, hasDatabaseConfig: hasDatabaseConfig2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     if (hasDatabaseConfig2()) {
       const { userRoles: userRoles2, roles: roles2, userMemberships: userMemberships2, memberships: memberships2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq4 } = await import("drizzle-orm");
-      const roleRows = await db2.select().from(userRoles2).leftJoin(roles2, eq4(userRoles2.roleId, roles2.id)).where(eq4(userRoles2.userId, uid));
+      const { eq: eq5 } = await import("drizzle-orm");
+      const roleRows = await db2.select().from(userRoles2).leftJoin(roles2, eq5(userRoles2.roleId, roles2.id)).where(eq5(userRoles2.userId, uid));
       if (roleRows[0]?.roles?.name) {
         roleName = roleRows[0].roles.name;
       }
-      const memRows = await db2.select().from(userMemberships2).leftJoin(memberships2, eq4(userMemberships2.membershipId, memberships2.id)).where(eq4(userMemberships2.userId, uid));
+      const memRows = await db2.select().from(userMemberships2).leftJoin(memberships2, eq5(userMemberships2.membershipId, memberships2.id)).where(eq5(userMemberships2.userId, uid));
       if (memRows[0]?.memberships?.name) {
         membershipName = memRows[0].memberships.name;
       }
@@ -660,7 +660,7 @@ init_users();
 // src/db/rfqs.ts
 init_db();
 init_schema();
-import { eq as eq2, desc } from "drizzle-orm";
+import { and, eq as eq2, desc } from "drizzle-orm";
 async function getUserRfqs(userId) {
   return await db.select().from(rfqs).where(eq2(rfqs.userId, userId)).orderBy(desc(rfqs.createdAt));
 }
@@ -674,44 +674,128 @@ async function createRfq(userId, data) {
   }).returning();
   return result[0];
 }
+async function updateRfqStatus(rfqId, userId, status) {
+  const result = await db.update(rfqs).set({ status }).where(and(eq2(rfqs.id, rfqId), eq2(rfqs.userId, userId))).returning();
+  return result[0] || null;
+}
 
 // src/services/notificationService.ts
-var MOCK_PROVIDERS = [
-  { id: "1", name: "PatagoniaTech Solutions", email: "contacto@patagoniatech.local", category: "Servicios Industriales" },
-  { id: "2", name: "Metal\xFArgica del C\xE9firo", email: "ventas@metalurgicacefiro.local", category: "Servicios Industriales" },
-  { id: "3", name: "Log\xEDstica Austral S.A.", email: "operaciones@logisticaaustral.local", category: "Log\xEDstica y Transporte" },
-  { id: "4", name: "Transportes Cruz del Sur", email: "cotizaciones@cruz-sur.local", category: "Log\xEDstica y Transporte" },
-  { id: "5", name: "NorteSur Inspecciones", email: "cotizaciones@nortesur.local", category: "Hidrocarburos" },
-  { id: "6", name: "Servicios Petroleros del Golfo", email: "ventas@spg.local", category: "Hidrocarburos" },
-  { id: "7", name: "RenovaPatagonia", email: "proyectos@renovapatagonia.local", category: "Energ\xEDas Renovables" },
-  { id: "8", name: "E\xF3lica Sur", email: "comercial@eolicasur.local", category: "Energ\xEDas Renovables" }
-];
+init_db();
+init_schema();
+init_emailService();
+import { eq as eq3, ilike, or } from "drizzle-orm";
 async function notifyProvidersForRfq(rfqCategory, rfqTitle, rfqId) {
-  console.log(`
-======================================================`);
-  console.log(`[Notificaci\xF3n Inteligente] Iniciando proceso de Match...`);
-  console.log(`RFQ Categor\xEDa Buscada: "${rfqCategory}"`);
-  const matchedProviders = MOCK_PROVIDERS.filter((p) => p.category === rfqCategory);
-  console.log(`\u2705 [Match Directo] Se encontraron ${matchedProviders.length} proveedores verificados para la categor\xEDa.`);
-  console.log(`======================================================
-`);
-  for (const provider of matchedProviders) {
-    console.log(`[Email Service] Preparando env\xEDo para: ${provider.name} <${provider.email}>`);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    console.log(`[Email Service] \u2709\uFE0F ENVIADO - Asunto: "Nueva Oportunidad de Negocio #${rfqId} - ${rfqTitle}"
-`);
+  const matchedProviders = [];
+  const seenEmails = /* @__PURE__ */ new Set();
+  if (hasDatabaseConfig()) {
+    try {
+      const profiles = await db.select({
+        userId: companyProfiles.userId,
+        companyName: companyProfiles.companyName,
+        email: companyProfiles.email,
+        industry: companyProfiles.industry
+      }).from(companyProfiles).where(
+        or(
+          eq3(companyProfiles.industry, rfqCategory),
+          ilike(companyProfiles.industry, `%${rfqCategory}%`)
+        )
+      ).limit(20);
+      for (const p of profiles) {
+        if (p.email && !seenEmails.has(p.email.toLowerCase())) {
+          seenEmails.add(p.email.toLowerCase());
+          matchedProviders.push({
+            uid: p.userId,
+            name: p.companyName || p.email,
+            email: p.email,
+            category: p.industry || rfqCategory
+          });
+        }
+      }
+      if (matchedProviders.length === 0) {
+        const userRows = await db.select({
+          uid: users.uid,
+          email: users.email,
+          category: users.category
+        }).from(users).where(ilike(users.category, `%${rfqCategory}%`)).limit(20);
+        for (const u of userRows) {
+          if (u.email && !seenEmails.has(u.email.toLowerCase())) {
+            seenEmails.add(u.email.toLowerCase());
+            matchedProviders.push({
+              uid: u.uid,
+              name: u.email,
+              email: u.email,
+              category: u.category || rfqCategory
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[notifyProvidersForRfq] DB query warning:", err);
+    }
   }
-  console.log(`[Proceso Completado] Se notificaron ${matchedProviders.length} proveedores exitosamente.`);
+  const opsEmails = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  for (const adminEmail of opsEmails) {
+    if (!seenEmails.has(adminEmail.toLowerCase())) {
+      seenEmails.add(adminEmail.toLowerCase());
+      matchedProviders.push({
+        uid: "ops-admin",
+        name: "Mesa de Operaciones xPatagonia",
+        email: adminEmail,
+        category: rfqCategory
+      });
+    }
+  }
+  let sentCount = 0;
+  const hasOutboundEmail = Boolean(process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD);
+  if (hasOutboundEmail && matchedProviders.length > 0) {
+    for (const provider of matchedProviders) {
+      try {
+        await sendEmail(
+          provider.email,
+          `Nueva Oportunidad B2B #${rfqId} (${rfqCategory}) - ${rfqTitle}`,
+          `Hola ${provider.name},
+
+Se ha publicado una nueva Solicitud de Cotizaci\xF3n (RFQ #${rfqId}) en la categor\xEDa "${rfqCategory}":
+
+${rfqTitle}
+
+Ingresa a https://xpatagonia.online/dashboard para revisar especificaciones y enviar tu propuesta.`,
+          `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:20px;">
+            <h2 style="color:#111827;">Nueva Oportunidad B2B #${rfqId}</h2>
+            <p>Hola <strong>${provider.name}</strong>,</p>
+            <p>Se public\xF3 una nueva solicitud de cotizaci\xF3n compatible con tu rubro (<strong>${rfqCategory}</strong>):</p>
+            <p style="padding:12px 16px;background:#f8fafc;border-left:4px solid #f97316;font-weight:600;">${rfqTitle}</p>
+            <p><a href="https://xpatagonia.online/dashboard" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Ver Solicitud en xPatagonia</a></p>
+          </div>`
+        );
+        sentCount++;
+      } catch (err) {
+        console.warn(`[notifyProvidersForRfq] Failed sending to ${provider.email}:`, err);
+      }
+    }
+  }
+  if (hasDatabaseConfig()) {
+    try {
+      await db.insert(automationLogs).values({
+        direction: "outbound_n8n",
+        event: "rfq.providers_notified",
+        status: sentCount > 0 ? "delivered" : "processed",
+        payload: { rfqId, rfqCategory, matchedCount: matchedProviders.length, sentCount }
+      });
+    } catch {
+    }
+  }
   return {
     success: true,
-    providersNotified: matchedProviders.length
+    providersMatched: matchedProviders.length,
+    providersNotified: sentCount
   };
 }
 
 // src/server/createApp.ts
 init_db();
 init_schema();
-import { eq as eq3, desc as desc2 } from "drizzle-orm";
+import { eq as eq4, desc as desc2 } from "drizzle-orm";
 var cachedSupabaseAdmin;
 function getSupabaseAdminClient() {
   if (cachedSupabaseAdmin !== void 0) return cachedSupabaseAdmin;
@@ -746,17 +830,13 @@ function createApiApp() {
   });
   app.use(express.json({ limit: "25mb" }));
   const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
-  const TMP_UPLOADS_DIR = path.join("/tmp", "xpatagonia-uploads");
-  const SITE_SETTINGS_CACHE_FILE = path.join("/tmp", "xpatagonia-site-settings.json");
-  for (const dir of [UPLOADS_DIR, TMP_UPLOADS_DIR]) {
+  if (!process.env.VERCEL) {
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      app.use("/uploads", express.static(UPLOADS_DIR));
     } catch {
     }
   }
-  app.use("/uploads", express.static(UPLOADS_DIR));
-  app.use("/uploads", express.static(TMP_UPLOADS_DIR));
-  let inMemorySiteSettings = null;
   const inMemoryAutomationLogs = [];
   async function recordAutomationEvent(direction, event, status, payload) {
     const entry = {
@@ -946,7 +1026,7 @@ function createApiApp() {
         await updateUserMembership2(uid, membershipName);
         const { companyProfiles: companyProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
         if (companyName) {
-          await db.update(companyProfiles2).set({ companyName }).where(eq3(companyProfiles2.userId, uid));
+          await db.update(companyProfiles2).set({ companyName }).where(eq4(companyProfiles2.userId, uid));
         }
         res.json({ success: true, uid });
       } catch (error) {
@@ -999,6 +1079,244 @@ function createApiApp() {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+  app.post("/api/rfqs/:id/award", requireAuth, async (req, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const rfqId = Number(req.params.id);
+      if (!Number.isFinite(rfqId)) {
+        return res.status(400).json({ error: "Invalid RFQ id" });
+      }
+      if (!hasDatabaseConfig()) {
+        return res.status(503).json({ error: "Database not configured" });
+      }
+      const updated = await updateRfqStatus(rfqId, req.user.uid, "awarded");
+      if (!updated) {
+        return res.status(404).json({ error: "RFQ not found for current user" });
+      }
+      res.json({ success: true, rfq: updated });
+    } catch (error) {
+      console.error("Error awarding RFQ:", error);
+      res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+  app.post("/api/public/rfq-lead", async (req, res) => {
+    try {
+      const { company, email, category, budget, details } = req.body || {};
+      if (!company || !email || !details) {
+        return res.status(400).json({ error: "Completa empresa, email corporativo y detalles." });
+      }
+      const cleanCompany = String(company).trim();
+      const cleanEmail = String(email).trim();
+      const cleanCategory = String(category || "General").trim();
+      const cleanBudget = String(budget || "Consultar").trim();
+      const cleanDetails = String(details).trim();
+      let persisted = false;
+      if (hasDatabaseConfig()) {
+        try {
+          await db.insert(contacts).values({
+            entityType: "rfq_lead",
+            name: cleanCompany,
+            company: cleanCompany,
+            email: cleanEmail,
+            industry: cleanCategory,
+            status: "lead",
+            type: "inbound_home_rfq",
+            socialMedia: `Presupuesto: ${cleanBudget}`
+          });
+          persisted = true;
+        } catch (dbErr) {
+          console.warn("PG lead insert warning:", dbErr);
+        }
+      }
+      if (!persisted) {
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { error: sbErr } = await sbAdmin.from("contacts").insert({
+            entity_type: "rfq_lead",
+            name: cleanCompany,
+            company: cleanCompany,
+            email: cleanEmail,
+            industry: cleanCategory,
+            status: "lead",
+            type: "inbound_home_rfq",
+            social_media: `Presupuesto: ${cleanBudget}`
+          });
+          if (!sbErr) persisted = true;
+        }
+      }
+      await recordAutomationEvent("outbound_n8n", "public.rfq_lead.created", persisted ? "saved" : "received", {
+        company: cleanCompany,
+        email: cleanEmail,
+        category: cleanCategory,
+        budget: cleanBudget
+      });
+      const opsTargets = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",").map((s) => s.trim()).filter(Boolean);
+      if ((process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD) && opsTargets.length > 0) {
+        try {
+          const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+          await sendEmail2(
+            opsTargets.join(","),
+            `Nuevo Lead RFQ Home - ${cleanCompany} (${cleanCategory})`,
+            `Empresa: ${cleanCompany}
+Email: ${cleanEmail}
+Categor\xEDa: ${cleanCategory}
+Presupuesto: ${cleanBudget}
+
+Detalles:
+${cleanDetails}`
+          );
+        } catch (mailErr) {
+          console.warn("RFQ lead email warning:", mailErr);
+        }
+      }
+      if (process.env.N8N_WEBHOOK_URL) {
+        fetch(process.env.N8N_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "public.rfq_lead.created",
+            company: cleanCompany,
+            email: cleanEmail,
+            category: cleanCategory,
+            budget: cleanBudget,
+            details: cleanDetails
+          }),
+          signal: AbortSignal.timeout(3e3)
+        }).catch(() => {
+        });
+      }
+      res.json({ success: true, persisted });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Error registrando solicitud" });
+    }
+  });
+  app.get("/api/insights", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      if (hasDatabaseConfig()) {
+        try {
+          const rows = await db.select().from(insights).orderBy(desc2(insights.createdAt)).limit(50);
+          return res.json({ insights: rows, source: "postgres" });
+        } catch {
+        }
+      }
+      const sbAdmin = getSupabaseAdminClient();
+      if (sbAdmin) {
+        const { data, error } = await sbAdmin.from("insights").select("*").order("created_at", { ascending: false }).limit(50);
+        if (!error && Array.isArray(data)) {
+          return res.json({
+            insights: data.map((row) => ({
+              id: row.id,
+              title: row.title,
+              category: row.category,
+              content: row.content,
+              author: row.author,
+              image: row.image,
+              videoUrl: row.video_url,
+              sourceUrl: row.source_url,
+              createdAt: row.created_at
+            })),
+            source: "supabase"
+          });
+        }
+      }
+      res.json({ insights: [], source: "empty" });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Failed to fetch insights" });
+    }
+  });
+  app.post(
+    "/api/admin/insights",
+    requireAuth,
+    requireRoles(["system_admin", "content_editor"]),
+    async (req, res) => {
+      try {
+        const { title, category, content, image, videoUrl, sourceUrl } = req.body || {};
+        if (!title || !content) {
+          return res.status(400).json({ error: "T\xEDtulo y contenido son obligatorios" });
+        }
+        const author = req.user?.email || "Redacci\xF3n";
+        if (hasDatabaseConfig()) {
+          try {
+            const inserted = await db.insert(insights).values({
+              title,
+              category: category || "Actualidad",
+              content,
+              image: image || null,
+              videoUrl: videoUrl || null,
+              sourceUrl: sourceUrl || null,
+              author
+            }).returning();
+            return res.json({ success: true, insight: inserted[0] });
+          } catch (pgErr) {
+            console.warn("PG insight insert fallback to Supabase REST:", pgErr);
+          }
+        }
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { data, error } = await sbAdmin.from("insights").insert({
+            title,
+            category: category || "Actualidad",
+            content,
+            image: image || null,
+            video_url: videoUrl || null,
+            source_url: sourceUrl || null,
+            author
+          }).select().single();
+          if (error) throw new Error(error.message);
+          return res.json({
+            success: true,
+            insight: {
+              id: data.id,
+              title: data.title,
+              category: data.category,
+              content: data.content,
+              author: data.author,
+              image: data.image,
+              videoUrl: data.video_url,
+              sourceUrl: data.source_url,
+              createdAt: data.created_at
+            }
+          });
+        }
+        res.status(500).json({ error: "No hay base de datos configurada para guardar el art\xEDculo." });
+      } catch (error) {
+        res.status(500).json({ error: error.message || "Error al publicar insight" });
+      }
+    }
+  );
+  app.delete(
+    "/api/admin/insights/:id",
+    requireAuth,
+    requireRoles(["system_admin", "content_editor"]),
+    async (req, res) => {
+      try {
+        const insightId = Number(req.params.id);
+        if (!Number.isFinite(insightId)) {
+          return res.status(400).json({ error: "ID de insight inv\xE1lido" });
+        }
+        if (hasDatabaseConfig()) {
+          try {
+            await db.delete(insights).where(eq4(insights.id, insightId));
+            return res.json({ success: true });
+          } catch (pgErr) {
+            console.warn("PG insight delete fallback to Supabase REST:", pgErr);
+          }
+        }
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { error } = await sbAdmin.from("insights").delete().eq("id", insightId);
+          if (error) throw new Error(error.message);
+          return res.json({ success: true });
+        }
+        res.status(500).json({ error: "No hay base de datos configurada." });
+      } catch (error) {
+        res.status(500).json({ error: error.message || "Error eliminando insight" });
+      }
+    }
+  );
   app.get("/api/emails", requireAuth, async (req, res) => {
     try {
       const { fetchEmails: fetchEmails2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
@@ -1462,34 +1780,26 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   });
   app.get("/api/site-settings", async (req, res) => {
     try {
-      if (inMemorySiteSettings) {
-        return res.json({ settings: inMemorySiteSettings, source: "memory" });
-      }
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("CDN-Cache-Control", "no-store");
       if (hasDatabaseConfig()) {
         try {
-          const rows = await db.select().from(siteSettings).where(eq3(siteSettings.key, "global_site_config"));
+          const rows = await db.select().from(siteSettings).where(eq4(siteSettings.key, "global_site_config"));
           if (rows[0]?.value) {
-            inMemorySiteSettings = rows[0].value;
-            return res.json({ settings: inMemorySiteSettings, source: "postgres" });
+            return res.json({ settings: rows[0].value, source: "postgres" });
           }
-        } catch {
+        } catch (pgErr) {
+          console.warn("site_settings PG read fallback to Supabase REST:", pgErr);
         }
       }
       const sbAdmin = getSupabaseAdminClient();
       if (sbAdmin) {
-        try {
-          const { data } = await sbAdmin.from("site_settings").select("value").eq("key", "global_site_config").maybeSingle();
-          if (data?.value) {
-            inMemorySiteSettings = data.value;
-            return res.json({ settings: inMemorySiteSettings, source: "supabase" });
-          }
-        } catch {
+        const { data, error } = await sbAdmin.from("site_settings").select("value").eq("key", "global_site_config").maybeSingle();
+        if (error) {
+          console.warn("site_settings Supabase REST read error:", error.message);
+        } else if (data?.value) {
+          return res.json({ settings: data.value, source: "supabase" });
         }
-      }
-      if (fs.existsSync(SITE_SETTINGS_CACHE_FILE)) {
-        const parsed = JSON.parse(fs.readFileSync(SITE_SETTINGS_CACHE_FILE, "utf-8"));
-        inMemorySiteSettings = parsed;
-        return res.json({ settings: parsed, source: "file" });
       }
       res.json({ settings: null, source: "defaults" });
     } catch (error) {
@@ -1502,54 +1812,69 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
     requireRoles(["system_admin", "content_editor"]),
     async (req, res) => {
       try {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        const incoming = req.body || {};
+        const hero = incoming.hero || {};
+        if (typeof hero.videoUrl === "string" && hero.videoUrl.startsWith("data:") || typeof hero.imageUrl === "string" && hero.imageUrl.startsWith("data:") || typeof hero.posterUrl === "string" && hero.posterUrl.startsWith("data:")) {
+          return res.status(400).json({
+            error: "No se permite guardar media en base64 dentro de la configuraci\xF3n global. Usa una URL p\xFAblica (Cloudflare R2/Stream) o sube el archivo a Supabase Storage."
+          });
+        }
         const updatedSettings = {
-          ...req.body || {},
+          ...incoming,
           updatedAt: (/* @__PURE__ */ new Date()).toISOString()
         };
-        inMemorySiteSettings = updatedSettings;
-        try {
-          fs.writeFileSync(
-            SITE_SETTINGS_CACHE_FILE,
-            JSON.stringify(updatedSettings, null, 2),
-            "utf-8"
-          );
-        } catch {
-        }
-        let persistedInPg = false;
+        const updatedBy = req.user?.email || req.user?.uid || "admin";
+        let persistedSource = null;
+        const persistenceErrors = [];
         if (hasDatabaseConfig()) {
           try {
             await db.insert(siteSettings).values({
               key: "global_site_config",
               value: updatedSettings,
-              updatedBy: req.user?.email || req.user?.uid || "admin",
+              updatedBy,
               updatedAt: /* @__PURE__ */ new Date()
             }).onConflictDoUpdate({
               target: siteSettings.key,
               set: {
                 value: updatedSettings,
-                updatedBy: req.user?.email || req.user?.uid || "admin",
+                updatedBy,
                 updatedAt: /* @__PURE__ */ new Date()
               }
             });
-            persistedInPg = true;
-          } catch {
+            persistedSource = "postgres";
+          } catch (pgErr) {
+            persistenceErrors.push(`Postgres: ${pgErr?.message || String(pgErr)}`);
           }
         }
-        if (!persistedInPg) {
+        if (!persistedSource) {
           const sbAdmin = getSupabaseAdminClient();
           if (sbAdmin) {
-            try {
-              await sbAdmin.from("site_settings").upsert({
+            const { error: sbErr } = await sbAdmin.from("site_settings").upsert(
+              {
                 key: "global_site_config",
                 value: updatedSettings,
-                updated_by: req.user?.email || req.user?.uid || "admin",
+                updated_by: updatedBy,
                 updated_at: (/* @__PURE__ */ new Date()).toISOString()
-              });
-            } catch {
+              },
+              { onConflict: "key" }
+            );
+            if (!sbErr) {
+              persistedSource = "supabase";
+            } else {
+              persistenceErrors.push(`Supabase: ${sbErr.message}`);
             }
+          } else {
+            persistenceErrors.push("SUPABASE_SERVICE_ROLE_KEY no configurada");
           }
         }
-        res.json({ success: true, settings: updatedSettings });
+        if (!persistedSource) {
+          return res.status(500).json({
+            success: false,
+            error: `No se pudo persistir en base de datos de producci\xF3n (${persistenceErrors.join(" | ")})`
+          });
+        }
+        res.json({ success: true, persistedSource, settings: updatedSettings });
       } catch (error) {
         res.status(500).json({ error: error.message || "Failed to update site settings" });
       }
@@ -1572,49 +1897,41 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
         const resolvedMime = mimeType || "application/octet-stream";
         const sbAdmin = getSupabaseAdminClient();
         if (sbAdmin) {
-          try {
-            const storagePath = `hero/${safeName}`;
-            const { error: uploadError } = await sbAdmin.storage.from("site-media").upload(storagePath, buffer, {
-              contentType: resolvedMime,
-              upsert: true
+          const storagePath = `hero/${safeName}`;
+          const { error: uploadError } = await sbAdmin.storage.from("site-media").upload(storagePath, buffer, {
+            contentType: resolvedMime,
+            upsert: true
+          });
+          if (uploadError) {
+            return res.status(500).json({
+              error: `Error subiendo a Supabase Storage (site-media): ${uploadError.message}`
             });
-            if (!uploadError) {
-              const { data: pub } = sbAdmin.storage.from("site-media").getPublicUrl(storagePath);
-              if (pub?.publicUrl) {
-                return res.json({
-                  success: true,
-                  url: pub.publicUrl,
-                  storage: "supabase",
-                  mimeType: resolvedMime,
-                  sizeBytes: buffer.length
-                });
-              }
-            }
-          } catch (storageErr) {
-            console.warn("Supabase Storage upload fallback to local:", storageErr);
+          }
+          const { data: pub } = sbAdmin.storage.from("site-media").getPublicUrl(storagePath);
+          if (pub?.publicUrl) {
+            return res.json({
+              success: true,
+              url: pub.publicUrl,
+              storage: "supabase",
+              mimeType: resolvedMime,
+              sizeBytes: buffer.length
+            });
           }
         }
-        try {
-          const targetPath = path.join(UPLOADS_DIR, safeName);
-          fs.writeFileSync(targetPath, buffer);
-          return res.json({
-            success: true,
-            url: `/uploads/${safeName}`,
-            storage: "local",
-            mimeType: resolvedMime,
-            sizeBytes: buffer.length
-          });
-        } catch {
-          const tmpPath = path.join(TMP_UPLOADS_DIR, safeName);
-          fs.writeFileSync(tmpPath, buffer);
-          return res.json({
-            success: true,
-            url: `/uploads/${safeName}`,
-            storage: "tmp",
-            mimeType: resolvedMime,
-            sizeBytes: buffer.length
+        if (process.env.VERCEL) {
+          return res.status(500).json({
+            error: "SUPABASE_SERVICE_ROLE_KEY o bucket 'site-media' no disponibles en producci\xF3n. Configura Supabase Storage o pega la URL p\xFAblica de Cloudflare R2/Stream."
           });
         }
+        const targetPath = path.join(UPLOADS_DIR, safeName);
+        fs.writeFileSync(targetPath, buffer);
+        return res.json({
+          success: true,
+          url: `/uploads/${safeName}`,
+          storage: "local",
+          mimeType: resolvedMime,
+          sizeBytes: buffer.length
+        });
       } catch (error) {
         res.status(500).json({ error: error.message || "Upload failed" });
       }

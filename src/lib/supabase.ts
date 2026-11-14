@@ -1,7 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+const metaEnv = ((import.meta as any)?.env ?? {}) as Record<string, string | undefined>;
+const rawUrl = (metaEnv.VITE_SUPABASE_URL || '').trim();
+const rawKey = (metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
 function isValidHttpUrl(url: string): boolean {
   try {

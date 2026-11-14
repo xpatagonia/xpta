@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { db, getDocs, collection, query, orderBy, limit } from "../lib/db";
-import { getCachedSiteSettings } from "../lib/siteSettings";
+import { getApiUrl } from "../lib/apiConfig";
+import { fetchSiteSettings, getCachedSiteSettings } from "../lib/siteSettings";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -140,13 +141,10 @@ export default function Insights() {
   const [showWpModal, setShowWpModal] = useState(false);
   const [wpSubdomainUrl, setWpSubdomainUrl] = useState<string>(
     () =>
-      localStorage.getItem("xpatagonia_wp_url") ||
       getCachedSiteSettings().platform.wpSubdomainUrl ||
       "https://insights.xpatagonia.online"
   );
-  const [wpSyncEnabled, setWpSyncEnabled] = useState<boolean>(
-    () => localStorage.getItem("xpatagonia_wp_enabled") === "true"
-  );
+  const [wpSyncEnabled, setWpSyncEnabled] = useState<boolean>(false);
   const [wpSyncStatus, setWpSyncStatus] = useState<"idle" | "syncing" | "connected" | "fallback">("idle");
 
   const itemsPerPage = 6;
@@ -164,20 +162,32 @@ export default function Insights() {
     setLoading(true);
     let combinedPosts: any[] = [];
 
-    // 1. Fetch Native Firestore Posts (created from AdminDashboard)
+    // 1. Fetch Native Production Insights (/api/insights -> Postgres / Supabase)
     try {
-      const q = query(
-        collection(db, "insights"),
-        orderBy("createdAt", "desc"),
-        limit(50)
-      );
-      const querySnapshot = await getDocs(q);
-      const firestoreData = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        sourceType: "native",
-        ...doc.data(),
-      }));
-      combinedPosts = [...firestoreData];
+      const apiRes = await fetch(`${getApiUrl()}/api/insights`, { cache: "no-store" });
+      if (apiRes.ok) {
+        const apiJson = await apiRes.json();
+        if (Array.isArray(apiJson.insights) && apiJson.insights.length > 0) {
+          combinedPosts = apiJson.insights.map((item: any) => ({
+            sourceType: "native",
+            ...item,
+          }));
+        }
+      }
+      if (combinedPosts.length === 0) {
+        const q = query(
+          collection(db, "insights"),
+          orderBy("createdAt", "desc"),
+          limit(50)
+        );
+        const querySnapshot = await getDocs(q);
+        const firestoreData = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          sourceType: "native",
+          ...doc.data(),
+        }));
+        combinedPosts = [...firestoreData];
+      }
     } catch (err) {
       console.warn("[Insights] Remote fetch skipped, using curated editorial feed:", err);
     }
@@ -241,13 +251,16 @@ export default function Insights() {
   };
 
   useEffect(() => {
+    fetchSiteSettings().then((s) => {
+      if (s?.platform?.wpSubdomainUrl) {
+        setWpSubdomainUrl(s.platform.wpSubdomainUrl);
+      }
+    });
     fetchPosts();
   }, [wpSyncEnabled]);
 
   const handleSaveWpConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("xpatagonia_wp_url", wpSubdomainUrl);
-    localStorage.setItem("xpatagonia_wp_enabled", String(wpSyncEnabled));
     setShowWpModal(false);
     fetchPosts();
   };

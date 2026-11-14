@@ -1,17 +1,42 @@
 import { motion } from 'motion/react';
 import React, { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
+import { getApiUrl } from '../lib/apiConfig';
 
 export default function Contact() {
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [company, setCompany] = useState('');
+  const [email, setEmail] = useState('');
+  const [category, setCategory] = useState('Logística y Supply Chain');
+  const [budget, setBudget] = useState('Consultar precio');
+  const [details, setDetails] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus('submitting');
-    setTimeout(() => {
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${getApiUrl()}/api/public/rfq-lead`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company, email, category, budget, details }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'No se pudo enviar la solicitud');
+      }
       setStatus('success');
-      setTimeout(() => setStatus('idle'), 3000); 
-    }, 1500);
+      setCompany('');
+      setEmail('');
+      setDetails('');
+      setTimeout(() => setStatus('idle'), 4500);
+    } catch (err: any) {
+      setStatus('error');
+      setErrorMsg(err?.message || 'Error al registrar la solicitud en producción');
+      setTimeout(() => setStatus('idle'), 4500);
+    }
   };
 
   return (
@@ -41,56 +66,60 @@ export default function Contact() {
             <div className="grid md:grid-cols-2 gap-8">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-3">Nombre de Empresa</label>
-                <input required type="text" className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium text-slate-900 dark:text-white" placeholder="Odoo Latam S.A." />
+                <input required type="text" value={company} onChange={(e) => setCompany(e.target.value)} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium text-slate-900 dark:text-white" placeholder="Ej: Ingeniería Austral S.A." />
               </div>
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-3">Email Corporativo</label>
-                <input required type="email" className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium text-slate-900 dark:text-white" placeholder="compras@empresa.com" />
+                <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium text-slate-900 dark:text-white" placeholder="compras@empresa.com" />
               </div>
             </div>
             
             <div className="grid md:grid-cols-2 gap-8">
               <div>
                   <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-3">Categoría Principal</label>
-                  <select className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all text-base font-medium appearance-none cursor-pointer text-slate-900 dark:text-white">
-                    <option value="logistica" className="bg-white dark:bg-[#110E17]">Logística y Supply Chain</option>
-                    <option value="maquinaria" className="bg-white dark:bg-[#110E17]">Ingeniería e Industrial</option>
-                    <option value="agro" className="bg-white dark:bg-[#110E17]">AgroTech e Insumos</option>
-                    <option value="it" className="bg-white dark:bg-[#110E17]">Sistemas e Infraestructura IT</option>
+                  <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all text-base font-medium appearance-none cursor-pointer text-slate-900 dark:text-white">
+                    <option value="Logística y Supply Chain" className="bg-white dark:bg-[#110E17]">Logística y Supply Chain</option>
+                    <option value="Ingeniería e Industrial" className="bg-white dark:bg-[#110E17]">Ingeniería e Industrial</option>
+                    <option value="AgroTech e Insumos" className="bg-white dark:bg-[#110E17]">AgroTech e Insumos</option>
+                    <option value="Sistemas e Infraestructura IT" className="bg-white dark:bg-[#110E17]">Sistemas e Infraestructura IT</option>
                   </select>
               </div>
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-3">Presupuesto Estimado (USD)</label>
-                  <select className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all text-base font-medium appearance-none cursor-pointer text-slate-900 dark:text-white">
-                    <option value="1" className="bg-white dark:bg-[#110E17]">- Consultar precio -</option>
-                    <option value="2" className="bg-white dark:bg-[#110E17]">Menos de $1,000</option>
-                    <option value="3" className="bg-white dark:bg-[#110E17]">$1,000 - $10,000</option>
-                    <option value="4" className="bg-white dark:bg-[#110E17]">Más de $10,000</option>
+                  <select value={budget} onChange={(e) => setBudget(e.target.value)} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all text-base font-medium appearance-none cursor-pointer text-slate-900 dark:text-white">
+                    <option value="Consultar precio" className="bg-white dark:bg-[#110E17]">- Consultar precio -</option>
+                    <option value="Menos de $1,000" className="bg-white dark:bg-[#110E17]">Menos de $1,000</option>
+                    <option value="$1,000 - $10,000" className="bg-white dark:bg-[#110E17]">$1,000 - $10,000</option>
+                    <option value="Más de $10,000" className="bg-white dark:bg-[#110E17]">Más de $10,000</option>
                   </select>
               </div>
             </div>
             
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-3">Detalles del Requerimiento / Volumen de Compra</label>
-              <textarea required rows={5} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium resize-none text-slate-900 dark:text-white" placeholder="Especificar cantidades, fechas de entrega, estándares técnicos requeridos..."></textarea>
+              <textarea required rows={5} value={details} onChange={(e) => setDetails(e.target.value)} className="w-full px-5 py-4 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 outline-none transition-all placeholder:text-slate-600 text-base font-medium resize-none text-slate-900 dark:text-white" placeholder="Especificar cantidades, fechas de entrega, estándares técnicos requeridos..."></textarea>
             </div>
+
+            {status === 'error' && errorMsg && (
+              <p className="text-xs font-semibold text-rose-500 text-center">{errorMsg}</p>
+            )}
             
             <button 
               type="submit" 
-              disabled={status !== 'idle'}
-              className="w-full bg-gradient-to-r from-orange-500 to-purple-600 text-slate-900 dark:text-white text-[11px] font-bold uppercase tracking-widest py-5 rounded-xl hover:opacity-90 transition-all duration-300 disabled:opacity-70 flex justify-center items-center shadow-lg shadow-purple-500/20"
+              disabled={status === 'submitting' || status === 'success'}
+              className="w-full bg-gradient-to-r from-orange-500 to-purple-600 text-white text-[11px] font-bold uppercase tracking-widest py-5 rounded-xl hover:opacity-90 transition-all duration-300 disabled:opacity-70 flex justify-center items-center shadow-lg shadow-purple-500/20"
             >
               {status === 'submitting' ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : status === 'success' ? (
-                <span>Solicitud Enviada (Se notificará vía Odoo)</span>
+                <span>Solicitud Registrada y Notificada</span>
               ) : (
                 <span className="flex items-center gap-2">Generar Oportunidad B2B <ArrowRight className="w-4 h-4" /></span>
               )}
             </button>
             <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-slate-500 mt-4 uppercase tracking-widest">
-              <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse"></div>
-              Conectado mediante Odoo RPC al módulo de Compras / Ventas B2B
+              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+              Conectado a Base de Datos &amp; Notificación B2B en Producción
             </div>
           </form>
         </motion.div>

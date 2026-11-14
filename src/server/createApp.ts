@@ -11,10 +11,10 @@ import {
   type AuthRequest,
 } from "../middleware/auth.ts";
 import { getOrCreateUser } from "../db/users.ts";
-import { getUserRfqs, createRfq } from "../db/rfqs.ts";
+import { getUserRfqs, createRfq, updateRfqStatus } from "../db/rfqs.ts";
 import { notifyProvidersForRfq } from "../services/notificationService.ts";
 import { db, hasDatabaseConfig } from "../db/index.ts";
-import { insights, siteSettings, automationLogs } from "../db/schema.ts";
+import { insights, siteSettings, automationLogs, contacts } from "../db/schema.ts";
 import { eq, desc } from "drizzle-orm";
 
 let cachedSupabaseAdmin: SupabaseClient | null | undefined;
@@ -60,20 +60,15 @@ export function createApiApp() {
   app.use(express.json({ limit: "25mb" }));
 
   const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
-  const TMP_UPLOADS_DIR = path.join("/tmp", "xpatagonia-uploads");
-  const SITE_SETTINGS_CACHE_FILE = path.join("/tmp", "xpatagonia-site-settings.json");
-
-  for (const dir of [UPLOADS_DIR, TMP_UPLOADS_DIR]) {
+  if (!process.env.VERCEL) {
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      app.use("/uploads", express.static(UPLOADS_DIR));
     } catch {
-      // ignore read-only dir edge cases (e.g. Vercel serverless filesystem)
+      // ignore read-only dir edge cases
     }
   }
-  app.use("/uploads", express.static(UPLOADS_DIR));
-  app.use("/uploads", express.static(TMP_UPLOADS_DIR));
 
-  let inMemorySiteSettings: any = null;
   const inMemoryAutomationLogs: any[] = [];
 
   async function recordAutomationEvent(
@@ -379,6 +374,268 @@ export function createApiApp() {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  app.post("/api/rfqs/:id/award", requireAuth as any, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const rfqId = Number(req.params.id);
+      if (!Number.isFinite(rfqId)) {
+        return res.status(400).json({ error: "Invalid RFQ id" });
+      }
+      if (!hasDatabaseConfig()) {
+        return res.status(503).json({ error: "Database not configured" });
+      }
+      const updated = await updateRfqStatus(rfqId, req.user.uid, "awarded");
+      if (!updated) {
+        return res.status(404).json({ error: "RFQ not found for current user" });
+      }
+      res.json({ success: true, rfq: updated });
+    } catch (error: any) {
+      console.error("Error awarding RFQ:", error);
+      res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
+  app.post("/api/public/rfq-lead", async (req, res) => {
+    try {
+      const { company, email, category, budget, details } = req.body || {};
+      if (!company || !email || !details) {
+        return res.status(400).json({ error: "Completa empresa, email corporativo y detalles." });
+      }
+
+      const cleanCompany = String(company).trim();
+      const cleanEmail = String(email).trim();
+      const cleanCategory = String(category || "General").trim();
+      const cleanBudget = String(budget || "Consultar").trim();
+      const cleanDetails = String(details).trim();
+
+      let persisted = false;
+      if (hasDatabaseConfig()) {
+        try {
+          await db.insert(contacts).values({
+            entityType: "rfq_lead",
+            name: cleanCompany,
+            company: cleanCompany,
+            email: cleanEmail,
+            industry: cleanCategory,
+            status: "lead",
+            type: "inbound_home_rfq",
+            socialMedia: `Presupuesto: ${cleanBudget}`,
+          });
+          persisted = true;
+        } catch (dbErr) {
+          console.warn("PG lead insert warning:", dbErr);
+        }
+      }
+
+      if (!persisted) {
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { error: sbErr } = await sbAdmin.from("contacts").insert({
+            entity_type: "rfq_lead",
+            name: cleanCompany,
+            company: cleanCompany,
+            email: cleanEmail,
+            industry: cleanCategory,
+            status: "lead",
+            type: "inbound_home_rfq",
+            social_media: `Presupuesto: ${cleanBudget}`,
+          });
+          if (!sbErr) persisted = true;
+        }
+      }
+
+      await recordAutomationEvent("outbound_n8n", "public.rfq_lead.created", persisted ? "saved" : "received", {
+        company: cleanCompany,
+        email: cleanEmail,
+        category: cleanCategory,
+        budget: cleanBudget,
+      });
+
+      const opsTargets = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if ((process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD) && opsTargets.length > 0) {
+        try {
+          const { sendEmail } = await import("../services/emailService.ts");
+          await sendEmail(
+            opsTargets.join(","),
+            `Nuevo Lead RFQ Home - ${cleanCompany} (${cleanCategory})`,
+            `Empresa: ${cleanCompany}\nEmail: ${cleanEmail}\nCategoría: ${cleanCategory}\nPresupuesto: ${cleanBudget}\n\nDetalles:\n${cleanDetails}`
+          );
+        } catch (mailErr) {
+          console.warn("RFQ lead email warning:", mailErr);
+        }
+      }
+
+      if (process.env.N8N_WEBHOOK_URL) {
+        fetch(process.env.N8N_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "public.rfq_lead.created",
+            company: cleanCompany,
+            email: cleanEmail,
+            category: cleanCategory,
+            budget: cleanBudget,
+            details: cleanDetails,
+          }),
+          signal: AbortSignal.timeout(3000),
+        }).catch(() => {});
+      }
+
+      res.json({ success: true, persisted });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error registrando solicitud" });
+    }
+  });
+
+  app.get("/api/insights", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      if (hasDatabaseConfig()) {
+        try {
+          const rows = await db.select().from(insights).orderBy(desc(insights.createdAt)).limit(50);
+          return res.json({ insights: rows, source: "postgres" });
+        } catch {
+          // fallback to Supabase Admin REST
+        }
+      }
+      const sbAdmin = getSupabaseAdminClient();
+      if (sbAdmin) {
+        const { data, error } = await sbAdmin
+          .from("insights")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (!error && Array.isArray(data)) {
+          return res.json({
+            insights: data.map((row: any) => ({
+              id: row.id,
+              title: row.title,
+              category: row.category,
+              content: row.content,
+              author: row.author,
+              image: row.image,
+              videoUrl: row.video_url,
+              sourceUrl: row.source_url,
+              createdAt: row.created_at,
+            })),
+            source: "supabase",
+          });
+        }
+      }
+      res.json({ insights: [], source: "empty" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch insights" });
+    }
+  });
+
+  app.post(
+    "/api/admin/insights",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { title, category, content, image, videoUrl, sourceUrl } = req.body || {};
+        if (!title || !content) {
+          return res.status(400).json({ error: "Título y contenido son obligatorios" });
+        }
+        const author = req.user?.email || "Redacción";
+
+        if (hasDatabaseConfig()) {
+          try {
+            const inserted = await db
+              .insert(insights)
+              .values({
+                title,
+                category: category || "Actualidad",
+                content,
+                image: image || null,
+                videoUrl: videoUrl || null,
+                sourceUrl: sourceUrl || null,
+                author,
+              })
+              .returning();
+            return res.json({ success: true, insight: inserted[0] });
+          } catch (pgErr) {
+            console.warn("PG insight insert fallback to Supabase REST:", pgErr);
+          }
+        }
+
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { data, error } = await sbAdmin
+            .from("insights")
+            .insert({
+              title,
+              category: category || "Actualidad",
+              content,
+              image: image || null,
+              video_url: videoUrl || null,
+              source_url: sourceUrl || null,
+              author,
+            })
+            .select()
+            .single();
+          if (error) throw new Error(error.message);
+          return res.json({
+            success: true,
+            insight: {
+              id: data.id,
+              title: data.title,
+              category: data.category,
+              content: data.content,
+              author: data.author,
+              image: data.image,
+              videoUrl: data.video_url,
+              sourceUrl: data.source_url,
+              createdAt: data.created_at,
+            },
+          });
+        }
+
+        res.status(500).json({ error: "No hay base de datos configurada para guardar el artículo." });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Error al publicar insight" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/admin/insights/:id",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const insightId = Number(req.params.id);
+        if (!Number.isFinite(insightId)) {
+          return res.status(400).json({ error: "ID de insight inválido" });
+        }
+        if (hasDatabaseConfig()) {
+          try {
+            await db.delete(insights).where(eq(insights.id, insightId));
+            return res.json({ success: true });
+          } catch (pgErr) {
+            console.warn("PG insight delete fallback to Supabase REST:", pgErr);
+          }
+        }
+        const sbAdmin = getSupabaseAdminClient();
+        if (sbAdmin) {
+          const { error } = await sbAdmin.from("insights").delete().eq("id", insightId);
+          if (error) throw new Error(error.message);
+          return res.json({ success: true });
+        }
+        res.status(500).json({ error: "No hay base de datos configurada." });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Error eliminando insight" });
+      }
+    }
+  );
 
   app.get("/api/emails", requireAuth as any, async (req: AuthRequest, res) => {
     try {
@@ -899,9 +1156,9 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   // ==========================================
   app.get("/api/site-settings", async (req, res) => {
     try {
-      if (inMemorySiteSettings) {
-        return res.json({ settings: inMemorySiteSettings, source: "memory" });
-      }
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("CDN-Cache-Control", "no-store");
+
       if (hasDatabaseConfig()) {
         try {
           const rows = await db
@@ -909,34 +1166,27 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
             .from(siteSettings)
             .where(eq(siteSettings.key, "global_site_config"));
           if (rows[0]?.value) {
-            inMemorySiteSettings = rows[0].value;
-            return res.json({ settings: inMemorySiteSettings, source: "postgres" });
+            return res.json({ settings: rows[0].value, source: "postgres" });
           }
-        } catch {
-          // Fallback to Supabase REST or local file cache
+        } catch (pgErr) {
+          console.warn("site_settings PG read fallback to Supabase REST:", pgErr);
         }
       }
+
       const sbAdmin = getSupabaseAdminClient();
       if (sbAdmin) {
-        try {
-          const { data } = await sbAdmin
-            .from("site_settings")
-            .select("value")
-            .eq("key", "global_site_config")
-            .maybeSingle();
-          if (data?.value) {
-            inMemorySiteSettings = data.value;
-            return res.json({ settings: inMemorySiteSettings, source: "supabase" });
-          }
-        } catch {
-          // Fallback to local file cache
+        const { data, error } = await sbAdmin
+          .from("site_settings")
+          .select("value")
+          .eq("key", "global_site_config")
+          .maybeSingle();
+        if (error) {
+          console.warn("site_settings Supabase REST read error:", error.message);
+        } else if (data?.value) {
+          return res.json({ settings: data.value, source: "supabase" });
         }
       }
-      if (fs.existsSync(SITE_SETTINGS_CACHE_FILE)) {
-        const parsed = JSON.parse(fs.readFileSync(SITE_SETTINGS_CACHE_FILE, "utf-8"));
-        inMemorySiteSettings = parsed;
-        return res.json({ settings: parsed, source: "file" });
-      }
+
       res.json({ settings: null, source: "defaults" });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to read site settings" });
@@ -949,23 +1199,29 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
     requireRoles(["system_admin", "content_editor"]) as any,
     async (req: AuthRequest, res) => {
       try {
-        const updatedSettings = {
-          ...(req.body || {}),
-          updatedAt: new Date().toISOString(),
-        };
-        inMemorySiteSettings = updatedSettings;
-
-        try {
-          fs.writeFileSync(
-            SITE_SETTINGS_CACHE_FILE,
-            JSON.stringify(updatedSettings, null, 2),
-            "utf-8"
-          );
-        } catch {
-          // ignore write failures in ephemeral FS
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        const incoming = req.body || {};
+        const hero = incoming.hero || {};
+        if (
+          (typeof hero.videoUrl === "string" && hero.videoUrl.startsWith("data:")) ||
+          (typeof hero.imageUrl === "string" && hero.imageUrl.startsWith("data:")) ||
+          (typeof hero.posterUrl === "string" && hero.posterUrl.startsWith("data:"))
+        ) {
+          return res.status(400).json({
+            error:
+              "No se permite guardar media en base64 dentro de la configuración global. Usa una URL pública (Cloudflare R2/Stream) o sube el archivo a Supabase Storage.",
+          });
         }
 
-        let persistedInPg = false;
+        const updatedSettings = {
+          ...incoming,
+          updatedAt: new Date().toISOString(),
+        };
+
+        const updatedBy = req.user?.email || req.user?.uid || "admin";
+        let persistedSource: "postgres" | "supabase" | null = null;
+        const persistenceErrors: string[] = [];
+
         if (hasDatabaseConfig()) {
           try {
             await db
@@ -973,40 +1229,53 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
               .values({
                 key: "global_site_config",
                 value: updatedSettings,
-                updatedBy: req.user?.email || req.user?.uid || "admin",
+                updatedBy,
                 updatedAt: new Date(),
               })
               .onConflictDoUpdate({
                 target: siteSettings.key,
                 set: {
                   value: updatedSettings,
-                  updatedBy: req.user?.email || req.user?.uid || "admin",
+                  updatedBy,
                   updatedAt: new Date(),
                 },
               });
-            persistedInPg = true;
-          } catch {
-            // Non-fatal if Postgres is optional
+            persistedSource = "postgres";
+          } catch (pgErr: any) {
+            persistenceErrors.push(`Postgres: ${pgErr?.message || String(pgErr)}`);
           }
         }
 
-        if (!persistedInPg) {
+        if (!persistedSource) {
           const sbAdmin = getSupabaseAdminClient();
           if (sbAdmin) {
-            try {
-              await sbAdmin.from("site_settings").upsert({
+            const { error: sbErr } = await sbAdmin.from("site_settings").upsert(
+              {
                 key: "global_site_config",
                 value: updatedSettings,
-                updated_by: req.user?.email || req.user?.uid || "admin",
+                updated_by: updatedBy,
                 updated_at: new Date().toISOString(),
-              });
-            } catch {
-              // Non-fatal if Supabase table not yet provisioned
+              },
+              { onConflict: "key" }
+            );
+            if (!sbErr) {
+              persistedSource = "supabase";
+            } else {
+              persistenceErrors.push(`Supabase: ${sbErr.message}`);
             }
+          } else {
+            persistenceErrors.push("SUPABASE_SERVICE_ROLE_KEY no configurada");
           }
         }
 
-        res.json({ success: true, settings: updatedSettings });
+        if (!persistedSource) {
+          return res.status(500).json({
+            success: false,
+            error: `No se pudo persistir en base de datos de producción (${persistenceErrors.join(" | ")})`,
+          });
+        }
+
+        res.json({ success: true, persistedSource, settings: updatedSettings });
       } catch (error: any) {
         res.status(500).json({ error: error.message || "Failed to update site settings" });
       }
@@ -1030,56 +1299,51 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
         const buffer = Buffer.from(rawBase64, "base64");
         const resolvedMime = mimeType || "application/octet-stream";
 
-        // Prefer Supabase Storage bucket 'site-media' in production (required on Vercel serverless)
         const sbAdmin = getSupabaseAdminClient();
         if (sbAdmin) {
-          try {
-            const storagePath = `hero/${safeName}`;
-            const { error: uploadError } = await sbAdmin.storage
-              .from("site-media")
-              .upload(storagePath, buffer, {
-                contentType: resolvedMime,
-                upsert: true,
-              });
-            if (!uploadError) {
-              const { data: pub } = sbAdmin.storage.from("site-media").getPublicUrl(storagePath);
-              if (pub?.publicUrl) {
-                return res.json({
-                  success: true,
-                  url: pub.publicUrl,
-                  storage: "supabase",
-                  mimeType: resolvedMime,
-                  sizeBytes: buffer.length,
-                });
-              }
-            }
-          } catch (storageErr) {
-            console.warn("Supabase Storage upload fallback to local:", storageErr);
+          const storagePath = `hero/${safeName}`;
+          const { error: uploadError } = await sbAdmin.storage
+            .from("site-media")
+            .upload(storagePath, buffer, {
+              contentType: resolvedMime,
+              upsert: true,
+            });
+
+          if (uploadError) {
+            return res.status(500).json({
+              error: `Error subiendo a Supabase Storage (site-media): ${uploadError.message}`,
+            });
+          }
+
+          const { data: pub } = sbAdmin.storage.from("site-media").getPublicUrl(storagePath);
+          if (pub?.publicUrl) {
+            return res.json({
+              success: true,
+              url: pub.publicUrl,
+              storage: "supabase",
+              mimeType: resolvedMime,
+              sizeBytes: buffer.length,
+            });
           }
         }
 
-        // Local writable fallback (dev / persistent disk) or /tmp
-        try {
-          const targetPath = path.join(UPLOADS_DIR, safeName);
-          fs.writeFileSync(targetPath, buffer);
-          return res.json({
-            success: true,
-            url: `/uploads/${safeName}`,
-            storage: "local",
-            mimeType: resolvedMime,
-            sizeBytes: buffer.length,
-          });
-        } catch {
-          const tmpPath = path.join(TMP_UPLOADS_DIR, safeName);
-          fs.writeFileSync(tmpPath, buffer);
-          return res.json({
-            success: true,
-            url: `/uploads/${safeName}`,
-            storage: "tmp",
-            mimeType: resolvedMime,
-            sizeBytes: buffer.length,
+        if (process.env.VERCEL) {
+          return res.status(500).json({
+            error:
+              "SUPABASE_SERVICE_ROLE_KEY o bucket 'site-media' no disponibles en producción. Configura Supabase Storage o pega la URL pública de Cloudflare R2/Stream.",
           });
         }
+
+        // Local filesystem allowed only on non-serverless dev/Node server
+        const targetPath = path.join(UPLOADS_DIR, safeName);
+        fs.writeFileSync(targetPath, buffer);
+        return res.json({
+          success: true,
+          url: `/uploads/${safeName}`,
+          storage: "local",
+          mimeType: resolvedMime,
+          sizeBytes: buffer.length,
+        });
       } catch (error: any) {
         res.status(500).json({ error: error.message || "Upload failed" });
       }

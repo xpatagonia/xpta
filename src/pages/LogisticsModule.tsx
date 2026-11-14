@@ -218,11 +218,8 @@ export default function LogisticsModule() {
   };
 
   const handleSaveOsrmEndpoint = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('xpatagonia_osrm_url', osrmInput.trim());
-    }
     setShowOsrmConfig(false);
-    notify(`Motor OSRM configurado en ${osrmInput.trim() || 'OpenStreetMap público'}.`);
+    notify('Las rutas de producción utilizan OSRM del servidor (/api/logistics/route).');
     runRouteCalculation();
   };
 

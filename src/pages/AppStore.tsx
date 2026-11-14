@@ -61,21 +61,6 @@ export default function AppStore() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const defaultLocalApps = () => {
-      const saved = localStorage.getItem('installedModules');
-      if (saved) {
-        try {
-          const installedIds = JSON.parse(saved);
-          setApps(prev => prev.map(app => ({
-            ...app,
-            status: installedIds.includes(app.id) ? 'installed' : app.status
-          })));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    };
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -85,21 +70,16 @@ export default function AppStore() {
           if (docSnap.exists()) {
             const data = docSnap.data();
             const installedIds = data.installed || [];
-            // Override localStorage logic with backend logic
             setApps(APPS.map(app => ({
               ...app,
               status: installedIds.includes(app.id) ? 'installed' : app.status
             })));
-            localStorage.setItem('installedModules', JSON.stringify(installedIds));
-          } else {
-             defaultLocalApps();
           }
         } catch (error) {
-          console.error('Error fetching settings:', error);
-          defaultLocalApps();
+          console.error('Error fetching module settings from Supabase:', error);
         }
       } else {
-        defaultLocalApps();
+        setApps(APPS);
       }
     });
 

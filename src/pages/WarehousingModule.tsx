@@ -204,11 +204,11 @@ export default function WarehousingModule() {
                   Para visualizar tus almacenes distribuidos en el mapa interactivo satelital, puedes configurar tu clave de Google Maps Platform en los ajustes del proyecto.
                 </p>
                 <div className="text-left text-sm bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5 mb-6">
-                  <p className="mb-2 font-bold text-slate-700 dark:text-slate-300">Pasos para activar:</p>
+                  <p className="mb-2 font-bold text-slate-700 dark:text-slate-300">Pasos para activar en producción:</p>
                   <ol className="list-decimal pl-5 space-y-2 text-slate-600 dark:text-slate-400 text-xs">
-                    <li>Abre <strong>Settings</strong> (⚙️ en AI Studio)</li>
-                    <li>Selecciona <strong>Secrets</strong></li>
-                    <li>Agrega <code>GOOGLE_MAPS_PLATFORM_KEY</code> con tu clave activa.</li>
+                    <li>Abre <strong>Vercel → Project Settings → Environment Variables</strong></li>
+                    <li>Agrega <code>GOOGLE_MAPS_PLATFORM_KEY</code> con tu clave activa</li>
+                    <li>Haz un <strong>Redeploy</strong> para aplicar la variable en producción.</li>
                   </ol>
                 </div>
                 <a href="https://console.cloud.google.com/google/maps-apis/start" target="_blank" rel="noopener noreferrer" className="inline-block w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold transition text-xs">

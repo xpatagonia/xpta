@@ -70,41 +70,18 @@ export default function CompanyInbox() {
 
       // Contacts listener
       unsubscribeContacts = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
-        if (snapshot.empty) {
-          const initialContacts = [
-            { name: 'Carlos Mendoza', company: 'PetroSur Energía S.A.', role: 'Jefe de Compras', email: 'cmendoza@petrosur.com.ar', phone: '+54 9 11 1234-5678', type: 'external', status: 'active', createdAt: serverTimestamp() },
-            { name: 'Laura Gómez', company: 'Constructora Austral', role: 'Gerente de Proyectos', email: 'lgomez@caustral.com.ar', phone: '+54 9 299 456-7890', type: 'external', status: 'lead', createdAt: serverTimestamp() },
-            { name: 'Martín Suárez', company: 'Nuestra Empresa', role: 'Ejecutivo de Cuentas B2B', email: 'msuarez@empresa.com', phone: '+54 9 11 9876-5432', type: 'internal', status: 'active', createdAt: serverTimestamp() },
-          ];
-          initialContacts.forEach(contact => {
-            addDoc(collection(db, 'crm_contacts'), { ...contact, userId: user.uid });
-          });
-        } else {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setContacts(data);
-        }
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setContacts(data);
       });
 
       // RFQs listener
       unsubscribeRfqs = onSnapshot(collection(db, 'crm_rfqs'), (snapshot) => {
-        if (snapshot.empty) {
-          // Seed RFQs
-          const initialRfqs = [
-            { rfqId: '10042', buyer: 'PetroSur Energía S.A.', title: 'Provisión Válvulas Esféricas Brida ANSI 150', status: 'new', dateString: 'Hace 2 horas', priority: 'high', unread: true, createdAt: serverTimestamp() },
-            { rfqId: '10038', buyer: 'Constructora Austral', title: 'Equipamiento de Protección Personal (EPP)', status: 'replied', dateString: 'Ayer', priority: 'medium', unread: false, createdAt: serverTimestamp() },
-            { rfqId: '10031', buyer: 'Hidrodinámica Global', title: 'Bombas multietapa y repuestos', status: 'awarded', dateString: '12 Jun 2026', priority: 'low', unread: false, createdAt: serverTimestamp() },
-          ];
-          initialRfqs.forEach(rfq => {
-            addDoc(collection(db, 'crm_rfqs'), { ...rfq, userId: user.uid });
-          });
-        } else {
-          const data = snapshot.docs.map(doc => ({ 
-            id: doc.id, 
-            idDisplay: doc.data().rfqId, 
-            ...doc.data() 
-          }));
-          setRfqs(data);
-        }
+        const data = snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          idDisplay: doc.data().rfqId, 
+          ...doc.data() 
+        }));
+        setRfqs(data);
       });
     });
 
@@ -456,7 +433,7 @@ export default function CompanyInbox() {
                             
                             if (data.mocked) {
                               const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-                              alert(`AVISO: El servidor no tiene configuradas las credenciales SMTP. El envío fue simulado y NO se envió realmente.${missingText}\nConfigure los Secrets en AI Studio.`);
+                              alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
                             } else {
                               alert('Respuesta enviada exitosamente.');
                             }
@@ -1092,7 +1069,7 @@ export default function CompanyInbox() {
                           
                           if (data.mocked) {
                             const missingText = data.missing ? `\nFaltan: ${data.missing.join(', ')}` : '';
-                            alert(`AVISO: El servidor no tiene configuradas las credenciales SMTP. El envío fue simulado y NO se envió realmente.${missingText}\nConfigure los Secrets en AI Studio.`);
+                            alert(`AVISO: El servidor no tiene configuradas las credenciales de correo (Resend/SMTP).${missingText}`);
                           } else {
                             alert('Correo enviado exitosamente.');
                           }

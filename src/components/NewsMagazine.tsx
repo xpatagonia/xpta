@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Newspaper, PlayCircle, MapPin, ArrowRight, Video, CheckCircle2, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { db, collection, getDocs, query, orderBy, limit } from '../lib/db';
+import { getApiUrl } from '../lib/apiConfig';
 import { CURATED_INSIGHTS, getYouTubeEmbedUrl, getYouTubeThumbnail } from '../pages/Insights';
 
 const parseInsightLocation = (content: string) => {
@@ -22,16 +23,32 @@ export default function NewsMagazine() {
   const [activeVideoModal, setActiveVideoModal] = useState<any | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'insights'), orderBy('createdAt', 'desc'), limit(3));
-    getDocs(q)
-      .then((querySnapshot) => {
+    const loadNews = async () => {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/insights`, { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.insights) && json.insights.length > 0) {
+            setNews([...json.insights, ...CURATED_INSIGHTS].slice(0, 3));
+            return;
+          }
+        }
+      } catch {
+        // Fallback to Supabase client
+      }
+
+      try {
+        const q = query(collection(db, 'insights'), orderBy('createdAt', 'desc'), limit(3));
+        const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
           const data = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          const merged = [...data, ...CURATED_INSIGHTS].slice(0, 3);
-          setNews(merged);
+          setNews([...data, ...CURATED_INSIGHTS].slice(0, 3));
         }
-      })
-      .catch((err) => console.warn('[NewsMagazine] Usando insights curados:', err?.message || err));
+      } catch (err: any) {
+        console.warn('[NewsMagazine] Usando insights curados:', err?.message || err);
+      }
+    };
+    loadNews();
   }, []);
 
   return (
