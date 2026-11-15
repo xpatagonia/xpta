@@ -349,6 +349,26 @@ export async function ensureProductionTables(): Promise<void> {
         status text NOT NULL DEFAULT 'submitted',
         created_at timestamptz DEFAULT now()
       );
+
+      ALTER TABLE IF EXISTS public.organizations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.org_members ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.org_invitations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.contacts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.products ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.inventory_items ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_vehicles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_drivers ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.logistics_contracts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.processed_email_uids ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_expiry_alerts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.automation_logs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.billing_transactions ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.rfq_quotes ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_profiles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.rfqs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.user_roles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.user_memberships ENABLE ROW LEVEL SECURITY;
     `);
     arnTablesEnsured = true;
   } catch (err) {

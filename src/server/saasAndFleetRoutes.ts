@@ -1062,6 +1062,35 @@ export function registerSaasAndFleetRoutes(
         return res.status(400).json({ error: "Carga, origen y destino son obligatorios." });
       }
 
+      const vehicleId = b.vehicleId ? Number(b.vehicleId) : null;
+      const driverId = b.driverId ? Number(b.driverId) : null;
+
+      if (vehicleId !== null) {
+        if (!Number.isInteger(vehicleId) || vehicleId <= 0) {
+          return res.status(400).json({ error: "ID de vehículo inválido." });
+        }
+        const vehCheck = await pool.query(
+          `SELECT id FROM public.fleet_vehicles WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+          [vehicleId, tenant.organizationId]
+        );
+        if (!vehCheck.rows?.[0]) {
+          return res.status(403).json({ error: "La unidad seleccionada no pertenece a tu organización." });
+        }
+      }
+
+      if (driverId !== null) {
+        if (!Number.isInteger(driverId) || driverId <= 0) {
+          return res.status(400).json({ error: "ID de chofer inválido." });
+        }
+        const drvCheck = await pool.query(
+          `SELECT id FROM public.fleet_drivers WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+          [driverId, tenant.organizationId]
+        );
+        if (!drvCheck.rows?.[0]) {
+          return res.status(403).json({ error: "El chofer seleccionado no pertenece a tu organización." });
+        }
+      }
+
       const trackingCode = `TRK-${Date.now().toString().slice(-6)}`;
       const inserted = await pool.query(
         `INSERT INTO public.logistics_contracts (
@@ -1079,8 +1108,8 @@ export function registerSaasAndFleetRoutes(
           tenant.organizationId,
           req.user!.uid,
           tenant.orgName,
-          b.vehicleId ? Number(b.vehicleId) : null,
-          b.driverId ? Number(b.driverId) : null,
+          vehicleId,
+          driverId,
           Math.max(0, Number(b.agreedPriceArs) || 0),
           trackingCode,
           b.notes || null,
@@ -1130,8 +1159,12 @@ export function registerSaasAndFleetRoutes(
 
       if (existing.vehicle_id && (nextStatus === "en_transito" || nextStatus === "entregado")) {
         await pool.query(
-          `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2`,
-          [nextStatus === "en_transito" ? "en_ruta" : "disponible", existing.vehicle_id]
+          `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2 AND organization_id = $3`,
+          [
+            nextStatus === "en_transito" ? "en_ruta" : "disponible",
+            existing.vehicle_id,
+            existing.carrier_org_id,
+          ]
         ).catch(() => {});
       }
 

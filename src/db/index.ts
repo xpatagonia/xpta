@@ -62,15 +62,30 @@ export const createPool = () => {
     }
 
     const maxConnections = process.env.VERCEL ? 5 : 10;
+    const sslConfig = isLocal
+      ? false
+      : process.env.DB_SSL_CA
+      ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') }
+      : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' };
 
     return new Pool({
       connectionString: dbUrl,
       max: maxConnections,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 15000,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      ssl: sslConfig,
     });
   }
+
+  const isLocalSql =
+    !process.env.SQL_HOST ||
+    process.env.SQL_HOST === 'localhost' ||
+    process.env.SQL_HOST === '127.0.0.1';
+  const sqlSslConfig = isLocalSql
+    ? false
+    : process.env.DB_SSL_CA
+    ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') }
+    : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' };
 
   return new Pool({
     host: process.env.SQL_HOST,
@@ -80,12 +95,7 @@ export const createPool = () => {
     max: process.env.VERCEL ? 5 : 10,
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 15000,
-    ssl:
-      !process.env.SQL_HOST ||
-      process.env.SQL_HOST === 'localhost' ||
-      process.env.SQL_HOST === '127.0.0.1'
-        ? false
-        : { rejectUnauthorized: false },
+    ssl: sqlSslConfig,
   });
 };
 

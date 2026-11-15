@@ -481,9 +481,28 @@ export function registerArnAndModuleRoutes(
 
   app.post("/api/arn/triage-inbox", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const isOpsOrAdmin = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      );
+      if (!isOpsOrAdmin && !tenant?.organizationId) {
+        return res.status(403).json({
+          error: "El triaje de casilla global está restringido a operadores o cuentas con alias +org.",
+        });
+      }
+
       const { fetchEmails } = await import("../services/emailService.ts");
+      const { extractOrgAliasId } = await import("../services/vpsWorkerService.ts");
       const emails = await fetchEmails();
-      const recent = Array.isArray(emails) ? emails.slice(0, 5) : [];
+      const recentAll = Array.isArray(emails) ? emails.slice(0, 10) : [];
+      const recent = isOpsOrAdmin
+        ? recentAll.slice(0, 5)
+        : recentAll
+            .filter((mail) => extractOrgAliasId(mail.to) === tenant!.organizationId)
+            .slice(0, 5);
       const created: any[] = [];
 
       for (const mail of recent) {
@@ -494,6 +513,7 @@ export function registerArnAndModuleRoutes(
 
         const out = await runArnPipelineForEvent({
           ownerUid: req.user!.uid,
+          organizationId: tenant?.organizationId || null,
           source: "email_imap",
           companyName: senderName,
           contactName: senderName,
@@ -1014,7 +1034,16 @@ export function registerArnAndModuleRoutes(
         ? await pool.query(`SELECT * FROM public.products WHERE user_uid = $1 ORDER BY created_at DESC`, [
             member.uid,
           ])
-        : await pool.query(`SELECT * FROM public.products ORDER BY created_at DESC LIMIT 100`);
+        : await pool.query(
+            `SELECT id, sku, name, category, subcategory, brand, model, condition, year, usage_hours,
+                    warranty, price_base, price_wholesale, stock, moq, description, certifications,
+                    payment_methods, shipping_conditions, lead_time, location,
+                    CASE WHEN supplier LIKE '%@%' THEN 'Proveedor Verificado xPatagonia' ELSE supplier END AS supplier,
+                    video_url, tax_rate, image, status, company_id, created_at
+             FROM public.products
+             WHERE status = 'active'
+             ORDER BY created_at DESC LIMIT 100`
+          );
 
       res.json({ products: result.rows || [] });
     } catch (err: any) {
@@ -1195,24 +1224,35 @@ export function registerArnAndModuleRoutes(
 
   app.post("/api/chat/messages", requireAuth as any, async (req: AuthRequest, res) => {
     try {
-      const { channelId, text, senderCompany, msgType = "text", metadata = {} } = req.body || {};
+      const { channelId, text, msgType = "text", metadata = {} } = req.body || {};
       if (!channelId || !text || !String(text).trim()) {
         return res.status(400).json({ error: "channelId y mensaje requeridos" });
       }
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
+      ).catch(() => null);
+      const verifiedCompanyName = tenant?.orgName || "Empresa xPatagonia";
+      const safeMsgType = ["text", "rfq_link", "quote", "system"].includes(String(msgType))
+        ? String(msgType)
+        : "text";
+
       const inserted = await pool.query(
         `INSERT INTO public.chat_messages (
           channel_id, sender_uid, sender_name, sender_company, text, msg_type, metadata
         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,
         [
-          String(channelId),
+          String(channelId).slice(0, 100),
           req.user!.uid,
           req.user!.email?.split("@")[0] || "Miembro",
-          senderCompany || "Empresa xPatagonia",
-          String(text).trim(),
-          msgType,
-          JSON.stringify(metadata || {}),
+          verifiedCompanyName,
+          String(text).trim().slice(0, 4000),
+          safeMsgType,
+          JSON.stringify(metadata && typeof metadata === "object" ? metadata : {}),
         ]
       );
       res.json({ success: true, message: inserted.rows[0] });

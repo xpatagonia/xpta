@@ -293,9 +293,13 @@ export default function AdminDashboard() {
   const handleGenerateAI = async () => {
     setIsGenerating(true);
     try {
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch(`${getApiUrl()}/api/generate-insights`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Error generando contenido');

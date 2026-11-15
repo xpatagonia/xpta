@@ -551,14 +551,17 @@ var init_db = __esm({
           console.warn("[XPATAGONIA] Could not parse DATABASE_URL");
         }
         const maxConnections = process.env.VERCEL ? 5 : 10;
+        const sslConfig = isLocal ? false : process.env.DB_SSL_CA ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA.replace(/\\n/g, "\n") } : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === "true" };
         return new Pool({
           connectionString: dbUrl,
           max: maxConnections,
           idleTimeoutMillis: 1e4,
           connectionTimeoutMillis: 15e3,
-          ssl: isLocal ? false : { rejectUnauthorized: false }
+          ssl: sslConfig
         });
       }
+      const isLocalSql = !process.env.SQL_HOST || process.env.SQL_HOST === "localhost" || process.env.SQL_HOST === "127.0.0.1";
+      const sqlSslConfig = isLocalSql ? false : process.env.DB_SSL_CA ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA.replace(/\\n/g, "\n") } : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === "true" };
       return new Pool({
         host: process.env.SQL_HOST,
         user: process.env.SQL_USER,
@@ -567,7 +570,7 @@ var init_db = __esm({
         max: process.env.VERCEL ? 5 : 10,
         idleTimeoutMillis: 1e4,
         connectionTimeoutMillis: 15e3,
-        ssl: !process.env.SQL_HOST || process.env.SQL_HOST === "localhost" || process.env.SQL_HOST === "127.0.0.1" ? false : { rejectUnauthorized: false }
+        ssl: sqlSslConfig
       });
     };
     pool = createPool();
@@ -791,7 +794,7 @@ async function fetchEmails() {
       pass: imapPass
     },
     tls: {
-      rejectUnauthorized: false
+      rejectUnauthorized: process.env.MAIL_TLS_INSECURE !== "true"
     },
     logger: false,
     connectionTimeout: 1e4,
@@ -817,11 +820,13 @@ async function fetchEmails() {
       const recentMessages = rawMessages.reverse();
       for (const message of recentMessages) {
         const parsed = await simpleParser(message.source);
+        const toText = Array.isArray(parsed.to) ? parsed.to.map((t) => t.text).join(", ") : parsed.to?.text || "";
         emails.push({
           id: message.uid.toString(),
           uid: message.uid,
           subject: parsed.subject || "(No Subject)",
           from: parsed.from?.text || "Unknown",
+          to: toText,
           date: parsed.date ? parsed.date.toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
           snippet: parsed.text ? parsed.text.substring(0, 100) + "..." : "",
           text: parsed.text,
@@ -843,19 +848,23 @@ async function fetchEmails() {
   }
   return emails;
 }
-async function sendEmail(to, subject, text2, html) {
+async function sendEmail(to, subject, text2, html, replyTo) {
+  const safeSubject = String(subject || "").replace(/[\r\n]+/g, " ").trim();
+  const safeTo = String(to || "").replace(/[\r\n]+/g, "").trim();
+  const safeReplyTo = replyTo ? String(replyTo).replace(/[\r\n]+/g, "").trim() : void 0;
   const resendApiKey = sanitizeEnvValue(process.env.RESEND_API_KEY);
   const resendFrom = sanitizeEnvValue(
     process.env.RESEND_FROM_EMAIL,
     "xPatagonia <notificaciones@xpatagonia.online>"
   );
   if (resendApiKey) {
-    const recipients = to.split(",").map((addr) => addr.trim()).filter(Boolean);
+    const recipients = safeTo.split(",").map((addr) => addr.trim()).filter(Boolean);
     const payload = {
       from: resendFrom,
       to: recipients,
-      subject
+      subject: safeSubject
     };
+    if (safeReplyTo) payload.reply_to = safeReplyTo;
     if (text2) payload.text = text2;
     if (html) payload.html = html;
     console.log(`[sendEmail] Sending via Resend HTTPS to ${recipients.join(", ")} from ${resendFrom}`);
@@ -882,7 +891,7 @@ async function sendEmail(to, subject, text2, html) {
   if (!smtpPass) {
     throw new Error("Configura RESEND_API_KEY o SMTP_PASSWORD en las variables de entorno (Settings > Secrets).");
   }
-  console.log(`[sendEmail] Starting SMTP send to ${to}. Host: ${smtpHost}, Port: ${smtpPort}, User: ${smtpUser}, Secure: ${smtpPort === 465}`);
+  console.log(`[sendEmail] Starting SMTP send to ${safeTo}. Host: ${smtpHost}, Port: ${smtpPort}, User: ${smtpUser}, Secure: ${smtpPort === 465}`);
   const transporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,
@@ -892,7 +901,7 @@ async function sendEmail(to, subject, text2, html) {
       pass: smtpPass
     },
     tls: {
-      rejectUnauthorized: false
+      rejectUnauthorized: process.env.MAIL_TLS_INSECURE !== "true"
     },
     connectionTimeout: 15e3,
     greetingTimeout: 15e3
@@ -900,12 +909,13 @@ async function sendEmail(to, subject, text2, html) {
   try {
     const info = await transporter.sendMail({
       from: smtpUser,
-      to,
-      subject,
+      to: safeTo,
+      ...safeReplyTo ? { replyTo: safeReplyTo } : {},
+      subject: safeSubject,
       text: text2,
       html
     });
-    console.log(`[sendEmail] Successfully sent email via SMTP to ${to}. MessageId: ${info.messageId}`);
+    console.log(`[sendEmail] Successfully sent email via SMTP to ${safeTo}. MessageId: ${info.messageId}`);
     return { ...info, provider: "smtp" };
   } catch (error) {
     console.error("[sendEmail] ERROR sending email:", error);
@@ -1264,6 +1274,26 @@ async function ensureProductionTables() {
         status text NOT NULL DEFAULT 'submitted',
         created_at timestamptz DEFAULT now()
       );
+
+      ALTER TABLE IF EXISTS public.organizations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.org_members ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.org_invitations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.contacts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.products ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.inventory_items ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_vehicles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_drivers ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.logistics_contracts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.processed_email_uids ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.fleet_expiry_alerts ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.automation_logs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.billing_transactions ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.rfq_quotes ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_profiles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.rfqs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.user_roles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.user_memberships ENABLE ROW LEVEL SECURITY;
     `);
     arnTablesEnsured = true;
   } catch (err) {
@@ -2418,7 +2448,7 @@ function isMercadoPagoConfigured() {
 }
 function verifyMercadoPagoWebhookSignature(params) {
   const secret = String(params.secret || process.env.MP_WEBHOOK_SECRET || "").trim();
-  if (!secret) return true;
+  if (!secret) return false;
   const header = String(params.signatureHeader || "").trim();
   if (!header || !params.dataId) return false;
   let ts = "";
@@ -3420,6 +3450,32 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
       if (!b.loadId || !b.originName || !b.destinationName) {
         return res.status(400).json({ error: "Carga, origen y destino son obligatorios." });
       }
+      const vehicleId = b.vehicleId ? Number(b.vehicleId) : null;
+      const driverId = b.driverId ? Number(b.driverId) : null;
+      if (vehicleId !== null) {
+        if (!Number.isInteger(vehicleId) || vehicleId <= 0) {
+          return res.status(400).json({ error: "ID de veh\xEDculo inv\xE1lido." });
+        }
+        const vehCheck = await pool.query(
+          `SELECT id FROM public.fleet_vehicles WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+          [vehicleId, tenant.organizationId]
+        );
+        if (!vehCheck.rows?.[0]) {
+          return res.status(403).json({ error: "La unidad seleccionada no pertenece a tu organizaci\xF3n." });
+        }
+      }
+      if (driverId !== null) {
+        if (!Number.isInteger(driverId) || driverId <= 0) {
+          return res.status(400).json({ error: "ID de chofer inv\xE1lido." });
+        }
+        const drvCheck = await pool.query(
+          `SELECT id FROM public.fleet_drivers WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+          [driverId, tenant.organizationId]
+        );
+        if (!drvCheck.rows?.[0]) {
+          return res.status(403).json({ error: "El chofer seleccionado no pertenece a tu organizaci\xF3n." });
+        }
+      }
       const trackingCode = `TRK-${Date.now().toString().slice(-6)}`;
       const inserted = await pool.query(
         `INSERT INTO public.logistics_contracts (
@@ -3437,8 +3493,8 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
           tenant.organizationId,
           req.user.uid,
           tenant.orgName,
-          b.vehicleId ? Number(b.vehicleId) : null,
-          b.driverId ? Number(b.driverId) : null,
+          vehicleId,
+          driverId,
           Math.max(0, Number(b.agreedPriceArs) || 0),
           trackingCode,
           b.notes || null
@@ -3482,8 +3538,12 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
       );
       if (existing.vehicle_id && (nextStatus === "en_transito" || nextStatus === "entregado")) {
         await pool.query(
-          `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2`,
-          [nextStatus === "en_transito" ? "en_ruta" : "disponible", existing.vehicle_id]
+          `UPDATE public.fleet_vehicles SET status = $1 WHERE id = $2 AND organization_id = $3`,
+          [
+            nextStatus === "en_transito" ? "en_ruta" : "disponible",
+            existing.vehicle_id,
+            existing.carrier_org_id
+          ]
         ).catch(() => {
         });
       }
@@ -3731,6 +3791,382 @@ async function verifyCuitKyb(rawCuit) {
 }
 var init_kybService = __esm({
   "src/services/kybService.ts"() {
+  }
+});
+
+// src/services/vpsWorkerService.ts
+var vpsWorkerService_exports = {};
+__export(vpsWorkerService_exports, {
+  checkAndNotifyFleetExpiries: () => checkAndNotifyFleetExpiries,
+  computeNextRetryDate: () => computeNextRetryDate,
+  dispatchAutomationWebhook: () => dispatchAutomationWebhook,
+  extractEmailAddress: () => extractEmailAddress,
+  extractOrgAliasId: () => extractOrgAliasId,
+  flushAutomationRetryQueue: () => flushAutomationRetryQueue,
+  parseExpiryDaysRemaining: () => parseExpiryDaysRemaining,
+  processInboundEmailWithArn: () => processInboundEmailWithArn,
+  resolveEmailTenantTarget: () => resolveEmailTenantTarget
+});
+function extractOrgAliasId(toHeader) {
+  const raw = String(toHeader || "");
+  const match = raw.match(/\+org(\d+)@/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+function extractEmailAddress(rawHeader) {
+  const raw = String(rawHeader || "").trim();
+  const match = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  const email = match ? match[0].toLowerCase() : "";
+  const cleanedName = raw.replace(/<[^>]+>/g, "").replace(/["']/g, "").trim();
+  return {
+    email,
+    name: cleanedName || email || "Contacto Entrante"
+  };
+}
+function computeNextRetryDate(attempts, now = /* @__PURE__ */ new Date()) {
+  const idx = Math.max(0, Number(attempts) - 1);
+  if (attempts <= 0) return new Date(now.getTime() + 6e4);
+  if (idx >= RETRY_BACKOFF_MINUTES.length) return null;
+  return new Date(now.getTime() + RETRY_BACKOFF_MINUTES[idx] * 6e4);
+}
+function parseExpiryDaysRemaining(dateStr, referenceDate = /* @__PURE__ */ new Date()) {
+  const raw = String(dateStr || "").trim();
+  if (!raw) return null;
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let targetUtc;
+  if (ymd) {
+    targetUtc = Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  } else {
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    targetUtc = Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+  }
+  const refUtc = Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate()
+  );
+  return Math.floor((targetUtc - refUtc) / 864e5);
+}
+async function resolveEmailTenantTarget(params) {
+  const fallbackUid = String(process.env.WORKER_DEFAULT_OWNER_UID || "system-arn-bootstrap").trim();
+  if (!hasDatabaseConfig()) {
+    return { ownerUid: fallbackUid, organizationId: null };
+  }
+  await ensureProductionTables();
+  const aliasOrgId = extractOrgAliasId(params.toHeader);
+  if (aliasOrgId) {
+    const orgRes = await pool.query(
+      `SELECT id, owner_uid FROM public.organizations WHERE id = $1 LIMIT 1`,
+      [aliasOrgId]
+    );
+    if (orgRes.rows?.[0]) {
+      return {
+        ownerUid: orgRes.rows[0].owner_uid,
+        organizationId: Number(orgRes.rows[0].id)
+      };
+    }
+  }
+  if (params.senderEmail) {
+    const contactRes = await pool.query(
+      `SELECT user_uid, organization_id FROM public.contacts
+       WHERE LOWER(email) = LOWER($1)
+       ORDER BY last_arn_sync_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [params.senderEmail]
+    );
+    if (contactRes.rows?.[0]) {
+      return {
+        ownerUid: contactRes.rows[0].user_uid || fallbackUid,
+        organizationId: contactRes.rows[0].organization_id ? Number(contactRes.rows[0].organization_id) : null
+      };
+    }
+  }
+  const adminEmail = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",")[0].trim().toLowerCase();
+  const adminOrgRes = await pool.query(
+    `SELECT o.id, o.owner_uid
+     FROM public.organizations o
+     LEFT JOIN public.users u ON u.uid = o.owner_uid
+     ORDER BY (LOWER(COALESCE(u.email, '')) = $1) DESC, o.id ASC
+     LIMIT 1`,
+    [adminEmail]
+  );
+  if (adminOrgRes.rows?.[0]) {
+    return {
+      ownerUid: adminOrgRes.rows[0].owner_uid,
+      organizationId: Number(adminOrgRes.rows[0].id)
+    };
+  }
+  const userRes = await pool.query(
+    `SELECT uid FROM public.users WHERE LOWER(email) = $1 LIMIT 1`,
+    [adminEmail]
+  );
+  return {
+    ownerUid: userRes.rows?.[0]?.uid || fallbackUid,
+    organizationId: null
+  };
+}
+async function dispatchAutomationWebhook(direction, event, payload) {
+  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+  let status = "local_queue";
+  let attempts = 0;
+  let nextRetryAt = null;
+  let lastError = null;
+  let forwarded = false;
+  if (n8nUrl) {
+    try {
+      const response = await fetch(n8nUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
+        },
+        body: JSON.stringify({ event, direction, payload, timestamp: (/* @__PURE__ */ new Date()).toISOString() }),
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (response.ok) {
+        status = "processed";
+        forwarded = true;
+      } else {
+        attempts = 1;
+        status = "retry_pending";
+        nextRetryAt = computeNextRetryDate(attempts);
+        lastError = `n8n HTTP ${response.status}`;
+      }
+    } catch (err) {
+      attempts = 1;
+      status = "retry_pending";
+      nextRetryAt = computeNextRetryDate(attempts);
+      lastError = err?.message || "n8n connection error";
+    }
+  } else {
+    attempts = 0;
+    status = "local_queue";
+    nextRetryAt = computeNextRetryDate(1);
+  }
+  let logId;
+  if (hasDatabaseConfig()) {
+    await ensureProductionTables();
+    const res = await pool.query(
+      `INSERT INTO public.automation_logs (
+        direction, event, status, payload, attempts, next_retry_at, last_error, updated_at
+      ) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,now())
+      RETURNING id`,
+      [direction, event, status, JSON.stringify(payload || {}), attempts, nextRetryAt, lastError]
+    );
+    logId = res.rows?.[0]?.id ? Number(res.rows[0].id) : void 0;
+  }
+  return { status, forwarded, logId };
+}
+async function flushAutomationRetryQueue(limit = 20) {
+  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
+  if (!n8nUrl) {
+    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0, skippedNoUrl: true };
+  }
+  if (!hasDatabaseConfig()) {
+    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0 };
+  }
+  await ensureProductionTables();
+  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
+  const pendingRes = await pool.query(
+    `SELECT * FROM public.automation_logs
+     WHERE direction = 'outbound_n8n'
+       AND status IN ('retry_pending', 'local_queue')
+       AND (next_retry_at IS NULL OR next_retry_at <= now())
+     ORDER BY created_at ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(50, limit))]
+  );
+  const rows = pendingRes.rows || [];
+  let succeeded = 0;
+  let rescheduled = 0;
+  let deadLettered = 0;
+  for (const row of rows) {
+    try {
+      const response = await fetch(n8nUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
+        },
+        body: JSON.stringify({
+          event: row.event,
+          direction: row.direction,
+          payload: row.payload || {},
+          retryAttempt: Number(row.attempts || 0) + 1,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        }),
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (response.ok) {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'processed', last_error = NULL, next_retry_at = NULL, updated_at = now()
+           WHERE id = $1`,
+          [row.id]
+        );
+        succeeded += 1;
+        continue;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      const nextAttempts = Number(row.attempts || 0) + 1;
+      const nextRetry = computeNextRetryDate(nextAttempts);
+      if (!nextRetry) {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'dead_letter', attempts = $1, next_retry_at = NULL, last_error = $2, updated_at = now()
+           WHERE id = $3`,
+          [nextAttempts, err?.message || "Max retries exceeded", row.id]
+        );
+        deadLettered += 1;
+      } else {
+        await pool.query(
+          `UPDATE public.automation_logs
+           SET status = 'retry_pending', attempts = $1, next_retry_at = $2, last_error = $3, updated_at = now()
+           WHERE id = $4`,
+          [nextAttempts, nextRetry, err?.message || "Retry scheduled", row.id]
+        );
+        rescheduled += 1;
+      }
+    }
+  }
+  return { checked: rows.length, succeeded, rescheduled, deadLettered };
+}
+async function processInboundEmailWithArn(mail) {
+  if (!hasDatabaseConfig()) {
+    return { skipped: true, reason: "no_database" };
+  }
+  await ensureProductionTables();
+  const mailbox = String(mail.mailbox || "INBOX").trim() || "INBOX";
+  const emailUid = String(mail.uid || "").trim();
+  if (!emailUid) {
+    return { skipped: true, reason: "missing_uid" };
+  }
+  const sender = extractEmailAddress(mail.from);
+  const subject = String(mail.subject || "(Sin asunto)").slice(0, 300);
+  const lockRes = await pool.query(
+    `INSERT INTO public.processed_email_uids (mailbox, email_uid, sender_email, subject)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (mailbox, email_uid) DO NOTHING
+     RETURNING id`,
+    [mailbox, emailUid, sender.email || null, subject]
+  );
+  if (!lockRes.rows?.[0]) {
+    return { skipped: true, reason: "duplicate_uid" };
+  }
+  try {
+    const tenant = await resolveEmailTenantTarget({
+      senderEmail: sender.email,
+      toHeader: mail.to
+    });
+    const { runArnPipelineForEvent: runArnPipelineForEvent2 } = await Promise.resolve().then(() => (init_arnRoutes(), arnRoutes_exports));
+    const result = await runArnPipelineForEvent2({
+      ownerUid: tenant.ownerUid,
+      organizationId: tenant.organizationId,
+      source: "email_imap_worker",
+      companyName: sender.name,
+      contactName: sender.name,
+      contactEmail: sender.email,
+      rawText: `Asunto: ${subject}
+
+${String(mail.text || "").slice(0, 3500)}`,
+      metadata: {
+        emailUid,
+        mailbox,
+        toHeader: mail.to || null,
+        emailDate: mail.date || (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+    await pool.query(
+      `UPDATE public.processed_email_uids
+       SET organization_id = $1, arn_opportunity_id = $2
+       WHERE id = $3`,
+      [tenant.organizationId, result.opportunity?.id || null, lockRes.rows[0].id]
+    );
+    await dispatchAutomationWebhook("outbound_n8n", "arn.imap.opportunity_created", {
+      emailUid,
+      senderEmail: sender.email,
+      organizationId: tenant.organizationId,
+      opportunityId: result.opportunity?.id || null,
+      linkedContactId: result.linkedContactId || null,
+      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
+    });
+    return {
+      skipped: false,
+      opportunityId: result.opportunity?.id ? Number(result.opportunity.id) : void 0,
+      linkedContactId: result.linkedContactId ?? null,
+      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
+    };
+  } catch (err) {
+    await pool.query(`DELETE FROM public.processed_email_uids WHERE id = $1`, [lockRes.rows[0].id]).catch(() => {
+    });
+    throw err;
+  }
+}
+async function checkAndNotifyFleetExpiries(daysThreshold = 15) {
+  if (!hasDatabaseConfig()) {
+    return { scanned: 0, alertsSent: 0 };
+  }
+  await ensureProductionTables();
+  const res = await pool.query(
+    `SELECT fv.*, o.name AS org_name, u.email AS owner_email
+     FROM public.fleet_vehicles fv
+     LEFT JOIN public.organizations o ON o.id = fv.organization_id
+     LEFT JOIN public.users u ON u.uid = fv.owner_uid
+     WHERE COALESCE(fv.vtv_expiry, '') <> '' OR COALESCE(fv.insurance_expiry, '') <> ''`
+  );
+  const vehicles = res.rows || [];
+  let alertsSent = 0;
+  for (const v of vehicles) {
+    const recipient = String(v.owner_email || "").trim();
+    if (!recipient) continue;
+    const checks = [
+      { type: "vtv", label: "VTV / Verificaci\xF3n T\xE9cnica", dateVal: v.vtv_expiry },
+      { type: "insurance", label: "Seguro Automotor / Carga", dateVal: v.insurance_expiry }
+    ];
+    for (const chk of checks) {
+      if (!chk.dateVal) continue;
+      const daysLeft = parseExpiryDaysRemaining(chk.dateVal);
+      if (daysLeft === null || daysLeft > daysThreshold) continue;
+      const claim = await pool.query(
+        `INSERT INTO public.fleet_expiry_alerts (vehicle_id, alert_type, expiry_date, notified_email)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (vehicle_id, alert_type, expiry_date) DO NOTHING
+         RETURNING id`,
+        [v.id, chk.type, chk.dateVal, recipient]
+      );
+      if (!claim.rows?.[0]) continue;
+      const statusText = daysLeft < 0 ? `VENCIDA hace ${Math.abs(daysLeft)} d\xEDas (${chk.dateVal})` : daysLeft === 0 ? `VENCE HOY (${chk.dateVal})` : `vence en ${daysLeft} d\xEDas (${chk.dateVal})`;
+      try {
+        await sendEmail(
+          recipient,
+          `[Alerta Flota xPatagonia] ${v.name} (${v.plate}): ${chk.label} ${statusText}`,
+          `Hola,
+
+La unidad ${v.name} (Dominio ${v.plate}) de ${v.org_name || "tu flota"} registra su ${chk.label} ${statusText}.
+
+Ingres\xE1 al Panel de Log\xEDstica & Control de Flota en https://www.xpatagonia.online/dashboard?area=fleet para actualizar la documentaci\xF3n y mantener la habilitaci\xF3n operativa.`
+        );
+        alertsSent += 1;
+      } catch (err) {
+        await pool.query(`DELETE FROM public.fleet_expiry_alerts WHERE id = $1`, [claim.rows[0].id]).catch(() => {
+        });
+        console.warn("[FleetAlert] No se pudo enviar alerta:", err);
+      }
+    }
+  }
+  return { scanned: vehicles.length, alertsSent };
+}
+var RETRY_BACKOFF_MINUTES;
+var init_vpsWorkerService = __esm({
+  "src/services/vpsWorkerService.ts"() {
+    init_db();
+    init_arnSchema();
+    init_emailService();
+    RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
   }
 });
 
@@ -4123,9 +4559,23 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
   });
   app.post("/api/arn/triage-inbox", requireAuth, async (req, res) => {
     try {
+      const isOpsOrAdmin = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!isOpsOrAdmin && !tenant?.organizationId) {
+        return res.status(403).json({
+          error: "El triaje de casilla global est\xE1 restringido a operadores o cuentas con alias +org."
+        });
+      }
       const { fetchEmails: fetchEmails2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+      const { extractOrgAliasId: extractOrgAliasId2 } = await Promise.resolve().then(() => (init_vpsWorkerService(), vpsWorkerService_exports));
       const emails = await fetchEmails2();
-      const recent = Array.isArray(emails) ? emails.slice(0, 5) : [];
+      const recentAll = Array.isArray(emails) ? emails.slice(0, 10) : [];
+      const recent = isOpsOrAdmin ? recentAll.slice(0, 5) : recentAll.filter((mail) => extractOrgAliasId2(mail.to) === tenant.organizationId).slice(0, 5);
       const created = [];
       for (const mail of recent) {
         const senderRaw = String(mail.from || "");
@@ -4134,6 +4584,7 @@ function registerArnAndModuleRoutes(app, recordAutomationEvent) {
         const senderName = senderRaw.replace(/<[^>]+>/g, "").trim() || senderEmail;
         const out = await runArnPipelineForEvent({
           ownerUid: req.user.uid,
+          organizationId: tenant?.organizationId || null,
           source: "email_imap",
           companyName: senderName,
           contactName: senderName,
@@ -4580,7 +5031,16 @@ ${mail.text || mail.snippet || ""}`,
       const mineOnly = req.query.mine === "1" && member.authenticated && member.uid;
       const result = mineOnly ? await pool.query(`SELECT * FROM public.products WHERE user_uid = $1 ORDER BY created_at DESC`, [
         member.uid
-      ]) : await pool.query(`SELECT * FROM public.products ORDER BY created_at DESC LIMIT 100`);
+      ]) : await pool.query(
+        `SELECT id, sku, name, category, subcategory, brand, model, condition, year, usage_hours,
+                    warranty, price_base, price_wholesale, stock, moq, description, certifications,
+                    payment_methods, shipping_conditions, lead_time, location,
+                    CASE WHEN supplier LIKE '%@%' THEN 'Proveedor Verificado xPatagonia' ELSE supplier END AS supplier,
+                    video_url, tax_rate, image, status, company_id, created_at
+             FROM public.products
+             WHERE status = 'active'
+             ORDER BY created_at DESC LIMIT 100`
+      );
       res.json({ products: result.rows || [] });
     } catch (err) {
       res.status(500).json({ error: formatPgError(err) });
@@ -4742,24 +5202,32 @@ ${mail.text || mail.snippet || ""}`,
   });
   app.post("/api/chat/messages", requireAuth, async (req, res) => {
     try {
-      const { channelId, text: text2, senderCompany, msgType = "text", metadata = {} } = req.body || {};
+      const { channelId, text: text2, msgType = "text", metadata = {} } = req.body || {};
       if (!channelId || !text2 || !String(text2).trim()) {
         return res.status(400).json({ error: "channelId y mensaje requeridos" });
       }
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
       await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      ).catch(() => null);
+      const verifiedCompanyName = tenant?.orgName || "Empresa xPatagonia";
+      const safeMsgType = ["text", "rfq_link", "quote", "system"].includes(String(msgType)) ? String(msgType) : "text";
       const inserted = await pool.query(
         `INSERT INTO public.chat_messages (
           channel_id, sender_uid, sender_name, sender_company, text, msg_type, metadata
         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,
         [
-          String(channelId),
+          String(channelId).slice(0, 100),
           req.user.uid,
           req.user.email?.split("@")[0] || "Miembro",
-          senderCompany || "Empresa xPatagonia",
-          String(text2).trim(),
-          msgType,
-          JSON.stringify(metadata || {})
+          verifiedCompanyName,
+          String(text2).trim().slice(0, 4e3),
+          safeMsgType,
+          JSON.stringify(metadata && typeof metadata === "object" ? metadata : {})
         ]
       );
       res.json({ success: true, message: inserted.rows[0] });
@@ -4794,7 +5262,7 @@ init_users();
 import fs from "fs";
 import express from "express";
 import path from "path";
-import crypto4 from "crypto";
+import crypto5 from "crypto";
 import cors from "cors";
 import { createClient as createClient4 } from "@supabase/supabase-js";
 
@@ -4939,366 +5407,9 @@ init_schema();
 init_arnRoutes();
 import { eq as eq4, desc as desc2 } from "drizzle-orm";
 
-// src/services/vpsWorkerService.ts
-init_db();
-init_arnSchema();
-init_emailService();
-var RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
-function extractOrgAliasId(toHeader) {
-  const raw = String(toHeader || "");
-  const match = raw.match(/\+org(\d+)@/i);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-function extractEmailAddress(rawHeader) {
-  const raw = String(rawHeader || "").trim();
-  const match = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const email = match ? match[0].toLowerCase() : "";
-  const cleanedName = raw.replace(/<[^>]+>/g, "").replace(/["']/g, "").trim();
-  return {
-    email,
-    name: cleanedName || email || "Contacto Entrante"
-  };
-}
-function computeNextRetryDate(attempts, now = /* @__PURE__ */ new Date()) {
-  const idx = Math.max(0, Number(attempts) - 1);
-  if (attempts <= 0) return new Date(now.getTime() + 6e4);
-  if (idx >= RETRY_BACKOFF_MINUTES.length) return null;
-  return new Date(now.getTime() + RETRY_BACKOFF_MINUTES[idx] * 6e4);
-}
-function parseExpiryDaysRemaining(dateStr, referenceDate = /* @__PURE__ */ new Date()) {
-  const raw = String(dateStr || "").trim();
-  if (!raw) return null;
-  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  let targetUtc;
-  if (ymd) {
-    targetUtc = Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
-  } else {
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return null;
-    targetUtc = Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
-  }
-  const refUtc = Date.UTC(
-    referenceDate.getUTCFullYear(),
-    referenceDate.getUTCMonth(),
-    referenceDate.getUTCDate()
-  );
-  return Math.floor((targetUtc - refUtc) / 864e5);
-}
-async function resolveEmailTenantTarget(params) {
-  const fallbackUid = String(process.env.WORKER_DEFAULT_OWNER_UID || "system-arn-bootstrap").trim();
-  if (!hasDatabaseConfig()) {
-    return { ownerUid: fallbackUid, organizationId: null };
-  }
-  await ensureProductionTables();
-  const aliasOrgId = extractOrgAliasId(params.toHeader);
-  if (aliasOrgId) {
-    const orgRes = await pool.query(
-      `SELECT id, owner_uid FROM public.organizations WHERE id = $1 LIMIT 1`,
-      [aliasOrgId]
-    );
-    if (orgRes.rows?.[0]) {
-      return {
-        ownerUid: orgRes.rows[0].owner_uid,
-        organizationId: Number(orgRes.rows[0].id)
-      };
-    }
-  }
-  if (params.senderEmail) {
-    const contactRes = await pool.query(
-      `SELECT user_uid, organization_id FROM public.contacts
-       WHERE LOWER(email) = LOWER($1)
-       ORDER BY last_arn_sync_at DESC NULLS LAST, id DESC
-       LIMIT 1`,
-      [params.senderEmail]
-    );
-    if (contactRes.rows?.[0]) {
-      return {
-        ownerUid: contactRes.rows[0].user_uid || fallbackUid,
-        organizationId: contactRes.rows[0].organization_id ? Number(contactRes.rows[0].organization_id) : null
-      };
-    }
-  }
-  const adminEmail = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",")[0].trim().toLowerCase();
-  const adminOrgRes = await pool.query(
-    `SELECT o.id, o.owner_uid
-     FROM public.organizations o
-     LEFT JOIN public.users u ON u.uid = o.owner_uid
-     ORDER BY (LOWER(COALESCE(u.email, '')) = $1) DESC, o.id ASC
-     LIMIT 1`,
-    [adminEmail]
-  );
-  if (adminOrgRes.rows?.[0]) {
-    return {
-      ownerUid: adminOrgRes.rows[0].owner_uid,
-      organizationId: Number(adminOrgRes.rows[0].id)
-    };
-  }
-  const userRes = await pool.query(
-    `SELECT uid FROM public.users WHERE LOWER(email) = $1 LIMIT 1`,
-    [adminEmail]
-  );
-  return {
-    ownerUid: userRes.rows?.[0]?.uid || fallbackUid,
-    organizationId: null
-  };
-}
-async function dispatchAutomationWebhook(direction, event, payload) {
-  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
-  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
-  let status = "local_queue";
-  let attempts = 0;
-  let nextRetryAt = null;
-  let lastError = null;
-  let forwarded = false;
-  if (n8nUrl) {
-    try {
-      const response = await fetch(n8nUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
-        },
-        body: JSON.stringify({ event, direction, payload, timestamp: (/* @__PURE__ */ new Date()).toISOString() }),
-        signal: AbortSignal.timeout(8e3)
-      });
-      if (response.ok) {
-        status = "processed";
-        forwarded = true;
-      } else {
-        attempts = 1;
-        status = "retry_pending";
-        nextRetryAt = computeNextRetryDate(attempts);
-        lastError = `n8n HTTP ${response.status}`;
-      }
-    } catch (err) {
-      attempts = 1;
-      status = "retry_pending";
-      nextRetryAt = computeNextRetryDate(attempts);
-      lastError = err?.message || "n8n connection error";
-    }
-  } else {
-    attempts = 0;
-    status = "local_queue";
-    nextRetryAt = computeNextRetryDate(1);
-  }
-  let logId;
-  if (hasDatabaseConfig()) {
-    await ensureProductionTables();
-    const res = await pool.query(
-      `INSERT INTO public.automation_logs (
-        direction, event, status, payload, attempts, next_retry_at, last_error, updated_at
-      ) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,now())
-      RETURNING id`,
-      [direction, event, status, JSON.stringify(payload || {}), attempts, nextRetryAt, lastError]
-    );
-    logId = res.rows?.[0]?.id ? Number(res.rows[0].id) : void 0;
-  }
-  return { status, forwarded, logId };
-}
-async function flushAutomationRetryQueue(limit = 20) {
-  const n8nUrl = String(process.env.N8N_WEBHOOK_URL || "").trim();
-  if (!n8nUrl) {
-    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0, skippedNoUrl: true };
-  }
-  if (!hasDatabaseConfig()) {
-    return { checked: 0, succeeded: 0, rescheduled: 0, deadLettered: 0 };
-  }
-  await ensureProductionTables();
-  const sharedSecret = String(process.env.N8N_SHARED_SECRET || "").trim();
-  const pendingRes = await pool.query(
-    `SELECT * FROM public.automation_logs
-     WHERE direction = 'outbound_n8n'
-       AND status IN ('retry_pending', 'local_queue')
-       AND (next_retry_at IS NULL OR next_retry_at <= now())
-     ORDER BY created_at ASC
-     LIMIT $1`,
-    [Math.max(1, Math.min(50, limit))]
-  );
-  const rows = pendingRes.rows || [];
-  let succeeded = 0;
-  let rescheduled = 0;
-  let deadLettered = 0;
-  for (const row of rows) {
-    try {
-      const response = await fetch(n8nUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...sharedSecret ? { "x-n8n-secret": sharedSecret } : {}
-        },
-        body: JSON.stringify({
-          event: row.event,
-          direction: row.direction,
-          payload: row.payload || {},
-          retryAttempt: Number(row.attempts || 0) + 1,
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        }),
-        signal: AbortSignal.timeout(8e3)
-      });
-      if (response.ok) {
-        await pool.query(
-          `UPDATE public.automation_logs
-           SET status = 'processed', last_error = NULL, next_retry_at = NULL, updated_at = now()
-           WHERE id = $1`,
-          [row.id]
-        );
-        succeeded += 1;
-        continue;
-      }
-      throw new Error(`HTTP ${response.status}`);
-    } catch (err) {
-      const nextAttempts = Number(row.attempts || 0) + 1;
-      const nextRetry = computeNextRetryDate(nextAttempts);
-      if (!nextRetry) {
-        await pool.query(
-          `UPDATE public.automation_logs
-           SET status = 'dead_letter', attempts = $1, next_retry_at = NULL, last_error = $2, updated_at = now()
-           WHERE id = $3`,
-          [nextAttempts, err?.message || "Max retries exceeded", row.id]
-        );
-        deadLettered += 1;
-      } else {
-        await pool.query(
-          `UPDATE public.automation_logs
-           SET status = 'retry_pending', attempts = $1, next_retry_at = $2, last_error = $3, updated_at = now()
-           WHERE id = $4`,
-          [nextAttempts, nextRetry, err?.message || "Retry scheduled", row.id]
-        );
-        rescheduled += 1;
-      }
-    }
-  }
-  return { checked: rows.length, succeeded, rescheduled, deadLettered };
-}
-async function processInboundEmailWithArn(mail) {
-  if (!hasDatabaseConfig()) {
-    return { skipped: true, reason: "no_database" };
-  }
-  await ensureProductionTables();
-  const mailbox = String(mail.mailbox || "INBOX").trim() || "INBOX";
-  const emailUid = String(mail.uid || "").trim();
-  if (!emailUid) {
-    return { skipped: true, reason: "missing_uid" };
-  }
-  const sender = extractEmailAddress(mail.from);
-  const subject = String(mail.subject || "(Sin asunto)").slice(0, 300);
-  const lockRes = await pool.query(
-    `INSERT INTO public.processed_email_uids (mailbox, email_uid, sender_email, subject)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (mailbox, email_uid) DO NOTHING
-     RETURNING id`,
-    [mailbox, emailUid, sender.email || null, subject]
-  );
-  if (!lockRes.rows?.[0]) {
-    return { skipped: true, reason: "duplicate_uid" };
-  }
-  try {
-    const tenant = await resolveEmailTenantTarget({
-      senderEmail: sender.email,
-      toHeader: mail.to
-    });
-    const { runArnPipelineForEvent: runArnPipelineForEvent2 } = await Promise.resolve().then(() => (init_arnRoutes(), arnRoutes_exports));
-    const result = await runArnPipelineForEvent2({
-      ownerUid: tenant.ownerUid,
-      organizationId: tenant.organizationId,
-      source: "email_imap_worker",
-      companyName: sender.name,
-      contactName: sender.name,
-      contactEmail: sender.email,
-      rawText: `Asunto: ${subject}
-
-${String(mail.text || "").slice(0, 3500)}`,
-      metadata: {
-        emailUid,
-        mailbox,
-        toHeader: mail.to || null,
-        emailDate: mail.date || (/* @__PURE__ */ new Date()).toISOString()
-      }
-    });
-    await pool.query(
-      `UPDATE public.processed_email_uids
-       SET organization_id = $1, arn_opportunity_id = $2
-       WHERE id = $3`,
-      [tenant.organizationId, result.opportunity?.id || null, lockRes.rows[0].id]
-    );
-    await dispatchAutomationWebhook("outbound_n8n", "arn.imap.opportunity_created", {
-      emailUid,
-      senderEmail: sender.email,
-      organizationId: tenant.organizationId,
-      opportunityId: result.opportunity?.id || null,
-      linkedContactId: result.linkedContactId || null,
-      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
-    });
-    return {
-      skipped: false,
-      opportunityId: result.opportunity?.id ? Number(result.opportunity.id) : void 0,
-      linkedContactId: result.linkedContactId ?? null,
-      autoExecuted: Boolean(result.decision?.shouldAutoExecute)
-    };
-  } catch (err) {
-    await pool.query(`DELETE FROM public.processed_email_uids WHERE id = $1`, [lockRes.rows[0].id]).catch(() => {
-    });
-    throw err;
-  }
-}
-async function checkAndNotifyFleetExpiries(daysThreshold = 15) {
-  if (!hasDatabaseConfig()) {
-    return { scanned: 0, alertsSent: 0 };
-  }
-  await ensureProductionTables();
-  const res = await pool.query(
-    `SELECT fv.*, o.name AS org_name, u.email AS owner_email
-     FROM public.fleet_vehicles fv
-     LEFT JOIN public.organizations o ON o.id = fv.organization_id
-     LEFT JOIN public.users u ON u.uid = fv.owner_uid
-     WHERE COALESCE(fv.vtv_expiry, '') <> '' OR COALESCE(fv.insurance_expiry, '') <> ''`
-  );
-  const vehicles = res.rows || [];
-  let alertsSent = 0;
-  for (const v of vehicles) {
-    const recipient = String(v.owner_email || "").trim();
-    if (!recipient) continue;
-    const checks = [
-      { type: "vtv", label: "VTV / Verificaci\xF3n T\xE9cnica", dateVal: v.vtv_expiry },
-      { type: "insurance", label: "Seguro Automotor / Carga", dateVal: v.insurance_expiry }
-    ];
-    for (const chk of checks) {
-      if (!chk.dateVal) continue;
-      const daysLeft = parseExpiryDaysRemaining(chk.dateVal);
-      if (daysLeft === null || daysLeft > daysThreshold) continue;
-      const claim = await pool.query(
-        `INSERT INTO public.fleet_expiry_alerts (vehicle_id, alert_type, expiry_date, notified_email)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (vehicle_id, alert_type, expiry_date) DO NOTHING
-         RETURNING id`,
-        [v.id, chk.type, chk.dateVal, recipient]
-      );
-      if (!claim.rows?.[0]) continue;
-      const statusText = daysLeft < 0 ? `VENCIDA hace ${Math.abs(daysLeft)} d\xEDas (${chk.dateVal})` : daysLeft === 0 ? `VENCE HOY (${chk.dateVal})` : `vence en ${daysLeft} d\xEDas (${chk.dateVal})`;
-      try {
-        await sendEmail(
-          recipient,
-          `[Alerta Flota xPatagonia] ${v.name} (${v.plate}): ${chk.label} ${statusText}`,
-          `Hola,
-
-La unidad ${v.name} (Dominio ${v.plate}) de ${v.org_name || "tu flota"} registra su ${chk.label} ${statusText}.
-
-Ingres\xE1 al Panel de Log\xEDstica & Control de Flota en https://www.xpatagonia.online/dashboard?area=fleet para actualizar la documentaci\xF3n y mantener la habilitaci\xF3n operativa.`
-        );
-        alertsSent += 1;
-      } catch (err) {
-        await pool.query(`DELETE FROM public.fleet_expiry_alerts WHERE id = $1`, [claim.rows[0].id]).catch(() => {
-        });
-        console.warn("[FleetAlert] No se pudo enviar alerta:", err);
-      }
-    }
-  }
-  return { scanned: vehicles.length, alertsSent };
-}
-
 // src/server/workerAndWebhookRoutes.ts
+init_vpsWorkerService();
+import crypto3 from "crypto";
 function extractIncomingSecret(req) {
   const authHeader = String(req.headers.authorization || "");
   if (authHeader.startsWith("Bearer ")) {
@@ -5306,6 +5417,12 @@ function extractIncomingSecret(req) {
   }
   const headerSecret = req.headers["x-n8n-secret"] || req.headers["x-cron-secret"] || req.headers["x-worker-secret"] || "";
   return String(headerSecret).trim();
+}
+function safeSecretEquals(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto3.timingSafeEqual(bufA, bufB);
 }
 function requireWebhookSecret(req, res, next) {
   const token = extractIncomingSecret(req);
@@ -5317,7 +5434,7 @@ function requireWebhookSecret(req, res, next) {
     process.env.N8N_SHARED_SECRET,
     process.env.ODOO_WEBHOOK_SECRET
   ].map((s) => String(s || "").trim()).filter(Boolean);
-  if (configuredSecrets.length === 0 || !configuredSecrets.includes(token)) {
+  if (configuredSecrets.length === 0 || !configuredSecrets.some((s) => safeSecretEquals(s, token))) {
     return res.status(403).json({ error: "Forbidden: Invalid worker/n8n secret" });
   }
   next();
@@ -5383,7 +5500,7 @@ init_arnSchema();
 init_saasAndFleetRoutes();
 init_billingService();
 init_kybService();
-import crypto3 from "crypto";
+import crypto4 from "crypto";
 function registerBillingAndKybRoutes(app, recordAutomationEvent) {
   app.get("/api/billing/config", (_req, res) => {
     res.json({
@@ -5451,7 +5568,7 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
           error: "Ingres\xE1 el n\xFAmero de operaci\xF3n, comprobante o CBU origen de la transferencia."
         });
       }
-      const externalReference = `XPT-${tenant.organizationId}-${targetSlug.toUpperCase()}-${Date.now()}-${crypto3.randomBytes(3).toString("hex")}`;
+      const externalReference = `XPT-${tenant.organizationId}-${targetSlug.toUpperCase()}-${Date.now()}-${crypto4.randomBytes(3).toString("hex")}`;
       if (provider === "mercadopago") {
         const mpToken = String(process.env.MP_ACCESS_TOKEN || "").trim();
         if (!mpToken) {
@@ -5610,14 +5727,27 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
       try {
         await ensureProductionTables();
         const txId = Number(req.params.id);
+        if (!Number.isInteger(txId) || txId <= 0) {
+          return res.status(400).json({ error: "ID de transacci\xF3n inv\xE1lido." });
+        }
+        const existing = await pool.query(
+          `SELECT id, status FROM public.billing_transactions WHERE id = $1`,
+          [txId]
+        );
+        if (!existing.rows?.[0]) {
+          return res.status(404).json({ error: "Transacci\xF3n no encontrada." });
+        }
+        if (existing.rows[0].status !== "pending") {
+          return res.status(409).json({ error: "La transacci\xF3n ya fue procesada previamente." });
+        }
         const upd = await pool.query(
           `UPDATE public.billing_transactions
            SET status = 'approved', reviewed_by_uid = $1, updated_at = now()
-           WHERE id = $2 RETURNING *`,
+           WHERE id = $2 AND status = 'pending' RETURNING *`,
           [req.user.uid, txId]
         );
         const txRow = upd.rows?.[0];
-        if (!txRow) return res.status(404).json({ error: "Transacci\xF3n no encontrada." });
+        if (!txRow) return res.status(409).json({ error: "La transacci\xF3n ya fue procesada." });
         await applyApprovedBillingUpgrade(txRow);
         await recordAutomationEvent("outbound_n8n", "billing.transfer.approved", "processed", {
           transactionId: txRow.id,
@@ -5638,13 +5768,18 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
       try {
         await ensureProductionTables();
         const txId = Number(req.params.id);
+        if (!Number.isInteger(txId) || txId <= 0) {
+          return res.status(400).json({ error: "ID de transacci\xF3n inv\xE1lido." });
+        }
         const upd = await pool.query(
           `UPDATE public.billing_transactions
            SET status = 'rejected', reviewed_by_uid = $1, updated_at = now()
-           WHERE id = $2 RETURNING *`,
+           WHERE id = $2 AND status = 'pending' RETURNING *`,
           [req.user.uid, txId]
         );
-        if (!upd.rows?.[0]) return res.status(404).json({ error: "Transacci\xF3n no encontrada." });
+        if (!upd.rows?.[0]) {
+          return res.status(404).json({ error: "Transacci\xF3n pendiente no encontrada." });
+        }
         res.json({ success: true, transaction: upd.rows[0] });
       } catch (err) {
         res.status(500).json({ error: formatPgError(err) });
@@ -5700,31 +5835,78 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
   app.get("/api/rfqs/:id/quotes", requireAuth, async (req, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
+      const rfqId = Number(req.params.id);
+      if (!Number.isInteger(rfqId) || rfqId <= 0) {
+        return res.status(400).json({ error: "ID de RFQ inv\xE1lido." });
+      }
       if (!hasDatabaseConfig()) return res.json({ quotes: [] });
       await ensureProductionTables();
-      const rfqId = Number(req.params.id);
-      const rows = await pool.query(
-        `SELECT * FROM public.rfq_quotes WHERE rfq_id = $1 ORDER BY total_price_ars ASC, delivery_days ASC`,
-        [rfqId]
-      );
-      res.json({ quotes: rows.rows || [] });
-    } catch (err) {
-      res.status(500).json({ error: formatPgError(err) });
-    }
-  });
-  app.post("/api/rfqs/:id/quotes", requireAuth, async (req, res) => {
-    try {
-      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
-      await ensureProductionTables();
-      const rfqId = Number(req.params.id);
+      const rfqRes = await pool.query(`SELECT id, user_uid FROM public.rfqs WHERE id = $1`, [rfqId]);
+      const rfqRow = rfqRes.rows?.[0];
+      if (!rfqRow) {
+        return res.status(404).json({ error: "RFQ no encontrada." });
+      }
       const tenant = await resolveTenantContext(
         req.user.uid,
         req.user.email,
         req.user.membershipName,
         req.user.roleName
       );
+      const isAdmin = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+      let isSameOrgOwner = rfqRow.user_uid === req.user.uid;
+      if (!isSameOrgOwner && tenant?.organizationId) {
+        const orgOwnerMatch = await pool.query(
+          `SELECT 1 FROM public.org_members WHERE organization_id = $1 AND user_uid = $2 AND status = 'active' LIMIT 1`,
+          [tenant.organizationId, rfqRow.user_uid]
+        );
+        isSameOrgOwner = (orgOwnerMatch.rows || []).length > 0;
+      }
+      if (isAdmin || isSameOrgOwner) {
+        const rows = await pool.query(
+          `SELECT * FROM public.rfq_quotes WHERE rfq_id = $1 ORDER BY total_price_ars ASC, delivery_days ASC`,
+          [rfqId]
+        );
+        return res.json({ quotes: rows.rows || [] });
+      }
+      const ownRows = await pool.query(
+        `SELECT * FROM public.rfq_quotes
+         WHERE rfq_id = $1 AND (supplier_uid = $2 OR ($3::int IS NOT NULL AND supplier_org_id = $3))
+         ORDER BY created_at DESC`,
+        [rfqId, req.user.uid, tenant?.organizationId || null]
+      );
+      if ((ownRows.rows || []).length === 0) {
+        return res.status(403).json({ error: "No ten\xE9s permiso para ver las cotizaciones de esta licitaci\xF3n." });
+      }
+      res.json({ quotes: ownRows.rows });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/rfqs/:id/quotes", requireAuth, async (req, res) => {
+    try {
+      const rfqId = Number(req.params.id);
+      if (!Number.isInteger(rfqId) || rfqId <= 0) {
+        return res.status(400).json({ error: "ID de RFQ inv\xE1lido." });
+      }
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const rfqExists = await pool.query(`SELECT id FROM public.rfqs WHERE id = $1`, [rfqId]);
+      if (!rfqExists.rows?.[0]) {
+        return res.status(404).json({ error: "La licitaci\xF3n RFQ indicada no existe." });
+      }
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      const kybRes = await pool.query(
+        `SELECT verification_status FROM public.company_profiles WHERE user_uid = $1 LIMIT 1`,
+        [req.user.uid]
+      ).catch(() => ({ rows: [] }));
+      const serverVerified = kybRes.rows?.[0]?.verification_status === "verified";
       const b = req.body || {};
-      const supplierName = String(b.supplierName || tenant?.orgName || "Proveedor B2B").trim();
+      const supplierName = String(b.supplierName || tenant?.orgName || "Proveedor B2B").trim().slice(0, 140);
       const totalPriceArs = Math.max(0, Number(b.totalPriceArs) || 0);
       if (!totalPriceArs) {
         return res.status(400).json({ error: "El importe total de la cotizaci\xF3n debe ser mayor a 0." });
@@ -5741,15 +5923,15 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
           req.user.uid,
           tenant?.organizationId || null,
           supplierName,
-          String(b.supplierLocation || "Patagonia"),
-          Boolean(b.verified),
+          String(b.supplierLocation || "Patagonia").slice(0, 100),
+          serverVerified,
           Math.max(0, Number(b.unitPriceArs) || totalPriceArs),
           totalPriceArs,
-          String(b.currency || "ARS"),
+          ["ARS", "USD"].includes(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : "ARS",
           Math.max(1, Number(b.deliveryDays) || 7),
-          String(b.paymentTerms || "Factura A 30 d\xEDas"),
+          String(b.paymentTerms || "Factura A 30 d\xEDas").slice(0, 120),
           Math.max(0, Number(b.distanceKm) || 0),
-          b.notes ? String(b.notes) : null
+          b.notes ? String(b.notes).slice(0, 1e3) : null
         ]
       );
       res.json({ success: true, quote: inserted.rows[0] });
@@ -5761,7 +5943,7 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
     try {
       res.setHeader("Cache-Control", "no-store");
       const code = String(req.params.code || "").trim().toUpperCase();
-      if (!code || code.length < 4) {
+      if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
         return res.status(400).json({ error: "C\xF3digo de seguimiento inv\xE1lido." });
       }
       if (!hasDatabaseConfig()) {
@@ -5801,6 +5983,9 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
     }
   });
 }
+
+// src/server/createApp.ts
+init_vpsWorkerService();
 
 // src/services/marketService.ts
 var DEFAULT_PREVIOUS_SELL = {
@@ -6322,17 +6507,79 @@ function createApiApp() {
     }
     return entry;
   }
-  const allowedOrigins = [
+  const allowedExactOrigins = /* @__PURE__ */ new Set([
     "https://xpatagonia.online",
     "https://www.xpatagonia.online",
     "https://api.xpatagonia.online",
     "http://localhost:3000",
     "http://localhost:5173"
-  ];
+  ]);
+  if (process.env.APP_URL) {
+    try {
+      allowedExactOrigins.add(new URL(process.env.APP_URL).origin);
+    } catch {
+    }
+  }
+  if (process.env.CORS_ALLOWED_ORIGINS) {
+    for (const o of process.env.CORS_ALLOWED_ORIGINS.split(",")) {
+      const trimmed = o.trim();
+      if (trimmed) allowedExactOrigins.add(trimmed);
+    }
+  }
+  const allowedDeploymentHosts = new Set(
+    [
+      process.env.VERCEL_URL,
+      process.env.VERCEL_BRANCH_URL,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ].map((h) => String(h || "").trim().toLowerCase()).filter(Boolean)
+  );
+  function isAllowedCorsOrigin(origin) {
+    if (!origin) return true;
+    if (allowedExactOrigins.has(origin)) return true;
+    try {
+      const parsed = new URL(origin);
+      const host = parsed.hostname.toLowerCase();
+      if (parsed.protocol === "https:") {
+        if (host === "xpatagonia.online" || host.endsWith(".xpatagonia.online")) return true;
+        if (allowedDeploymentHosts.has(host)) return true;
+        if (/^ais-(dev|pre)-[a-z0-9-]+\.us-east1\.run\.app$/.test(host)) return true;
+      }
+      if (parsed.protocol === "http:" && (host === "localhost" || host === "127.0.0.1")) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+  const rateLimitBuckets = /* @__PURE__ */ new Map();
+  function createRateLimiter(bucketName, windowMs, maxRequests) {
+    return (req, res, next) => {
+      const key = `${bucketName}:${req.ip || "unknown"}`;
+      const now = Date.now();
+      const current = rateLimitBuckets.get(key);
+      if (!current || current.resetAt <= now) {
+        rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+        if (rateLimitBuckets.size > 2e3) {
+          for (const [k, v] of rateLimitBuckets.entries()) {
+            if (v.resetAt <= now) rateLimitBuckets.delete(k);
+          }
+        }
+        return next();
+      }
+      if (current.count >= maxRequests) {
+        return res.status(429).json({
+          error: "Demasiadas solicitudes. Intent\xE1 nuevamente en unos minutos."
+        });
+      }
+      current.count += 1;
+      next();
+    };
+  }
   app.use(
     cors({
       origin: function(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin) || origin.includes(".run.app") || origin.includes(".onrender.com") || origin.includes(".vercel.app") || origin.includes(".pages.dev") || origin.includes("xpatagonia.online")) {
+        if (isAllowedCorsOrigin(origin)) {
           callback(null, true);
         } else {
           callback(new Error("Not allowed by CORS"));
@@ -6439,8 +6686,13 @@ function createApiApp() {
     requireRoles(["system_admin"]),
     async (req, res) => {
       try {
+        const nextRole = String(req.body?.role || "").trim();
+        const allowedRoles = ["system_admin", "content_editor", "support_operator", "vendor"];
+        if (!allowedRoles.includes(nextRole)) {
+          return res.status(400).json({ error: "Rol inv\xE1lido." });
+        }
         const { updateUserRole: updateUserRole2 } = await Promise.resolve().then(() => (init_users(), users_exports));
-        await updateUserRole2(req.params.uid, req.body.role);
+        await updateUserRole2(req.params.uid, nextRole);
         res.json({ success: true });
       } catch (error) {
         console.error("Error updating role:", error);
@@ -6599,97 +6851,104 @@ ${newRfq.description}`,
       res.status(500).json({ error: error.message || "Internal server error" });
     }
   });
-  app.post("/api/public/rfq-lead", async (req, res) => {
-    try {
-      const { company, email, category, budget, details } = req.body || {};
-      if (!company || !email || !details) {
-        return res.status(400).json({ error: "Completa empresa, email corporativo y detalles." });
-      }
-      const cleanCompany = String(company).trim();
-      const cleanEmail = String(email).trim();
-      const cleanCategory = String(category || "General").trim();
-      const cleanBudget = String(budget || "Consultar").trim();
-      const cleanDetails = String(details).trim();
-      let persisted = false;
-      if (hasDatabaseConfig()) {
-        try {
-          await db.insert(contacts).values({
-            entityType: "rfq_lead",
-            name: cleanCompany,
-            company: cleanCompany,
-            email: cleanEmail,
-            industry: cleanCategory,
-            status: "lead",
-            type: "inbound_home_rfq",
-            socialMedia: `Presupuesto: ${cleanBudget}`
-          });
-          persisted = true;
-        } catch (dbErr) {
-          console.warn("PG lead insert warning:", dbErr);
+  app.post(
+    "/api/public/rfq-lead",
+    createRateLimiter("public_rfq_lead", 15 * 60 * 1e3, 10),
+    async (req, res) => {
+      try {
+        const { company, email, category, budget, details } = req.body || {};
+        if (!company || !email || !details) {
+          return res.status(400).json({ error: "Completa empresa, email corporativo y detalles." });
         }
-      }
-      if (!persisted) {
-        const sbAdmin = getSupabaseAdminClient();
-        if (sbAdmin) {
-          const { error: sbErr } = await sbAdmin.from("contacts").insert({
-            entity_type: "rfq_lead",
-            name: cleanCompany,
-            company: cleanCompany,
-            email: cleanEmail,
-            industry: cleanCategory,
-            status: "lead",
-            type: "inbound_home_rfq",
-            social_media: `Presupuesto: ${cleanBudget}`
-          });
-          if (!sbErr) persisted = true;
+        const cleanCompany = String(company).trim().slice(0, 140);
+        const cleanEmail = String(email).trim().slice(0, 180);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
+          return res.status(400).json({ error: "Ingres\xE1 un email corporativo v\xE1lido." });
         }
-      }
-      await recordAutomationEvent("outbound_n8n", "public.rfq_lead.created", persisted ? "saved" : "received", {
-        company: cleanCompany,
-        email: cleanEmail,
-        category: cleanCategory,
-        budget: cleanBudget
-      });
-      const opsTargets = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",").map((s) => s.trim()).filter(Boolean);
-      if ((process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD) && opsTargets.length > 0) {
-        try {
-          const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
-          await sendEmail2(
-            opsTargets.join(","),
-            `Nuevo Lead RFQ Home - ${cleanCompany} (${cleanCategory})`,
-            `Empresa: ${cleanCompany}
+        const cleanCategory = String(category || "General").trim().slice(0, 80);
+        const cleanBudget = String(budget || "Consultar").trim().slice(0, 60);
+        const cleanDetails = String(details).trim().slice(0, 2e3);
+        let persisted = false;
+        if (hasDatabaseConfig()) {
+          try {
+            await db.insert(contacts).values({
+              entityType: "rfq_lead",
+              name: cleanCompany,
+              company: cleanCompany,
+              email: cleanEmail,
+              industry: cleanCategory,
+              status: "lead",
+              type: "inbound_home_rfq",
+              socialMedia: `Presupuesto: ${cleanBudget}`
+            });
+            persisted = true;
+          } catch (dbErr) {
+            console.warn("PG lead insert warning:", dbErr);
+          }
+        }
+        if (!persisted) {
+          const sbAdmin = getSupabaseAdminClient();
+          if (sbAdmin) {
+            const { error: sbErr } = await sbAdmin.from("contacts").insert({
+              entity_type: "rfq_lead",
+              name: cleanCompany,
+              company: cleanCompany,
+              email: cleanEmail,
+              industry: cleanCategory,
+              status: "lead",
+              type: "inbound_home_rfq",
+              social_media: `Presupuesto: ${cleanBudget}`
+            });
+            if (!sbErr) persisted = true;
+          }
+        }
+        await recordAutomationEvent("outbound_n8n", "public.rfq_lead.created", persisted ? "saved" : "received", {
+          company: cleanCompany,
+          email: cleanEmail,
+          category: cleanCategory,
+          budget: cleanBudget
+        });
+        const opsTargets = (process.env.ADMIN_EMAILS || "xpatagonia.com@gmail.com").split(",").map((s) => s.trim()).filter(Boolean);
+        if ((process.env.RESEND_API_KEY || process.env.SMTP_PASSWORD) && opsTargets.length > 0) {
+          try {
+            const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+            await sendEmail2(
+              opsTargets.join(","),
+              `Nuevo Lead RFQ Home - ${cleanCompany} (${cleanCategory})`,
+              `Empresa: ${cleanCompany}
 Email: ${cleanEmail}
 Categor\xEDa: ${cleanCategory}
 Presupuesto: ${cleanBudget}
 
 Detalles:
 ${cleanDetails}`
-          );
-        } catch (mailErr) {
-          console.warn("RFQ lead email warning:", mailErr);
+            );
+          } catch (mailErr) {
+            console.warn("RFQ lead email warning:", mailErr);
+          }
         }
+        if (process.env.N8N_WEBHOOK_URL) {
+          fetch(process.env.N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              event: "public.rfq_lead.created",
+              company: cleanCompany,
+              email: cleanEmail,
+              category: cleanCategory,
+              budget: cleanBudget,
+              details: cleanDetails
+            }),
+            signal: AbortSignal.timeout(3e3)
+          }).catch(() => {
+          });
+        }
+        res.json({ success: true, persisted });
+      } catch (error) {
+        res.status(500).json({ error: error.message || "Error registrando solicitud" });
       }
-      if (process.env.N8N_WEBHOOK_URL) {
-        fetch(process.env.N8N_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event: "public.rfq_lead.created",
-            company: cleanCompany,
-            email: cleanEmail,
-            category: cleanCategory,
-            budget: cleanBudget,
-            details: cleanDetails
-          }),
-          signal: AbortSignal.timeout(3e3)
-        }).catch(() => {
-        });
-      }
-      res.json({ success: true, persisted });
-    } catch (error) {
-      res.status(500).json({ error: error.message || "Error registrando solicitud" });
     }
-  });
+  );
   app.get("/api/insights", async (req, res) => {
     try {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -6815,69 +7074,101 @@ ${cleanDetails}`
       }
     }
   );
-  app.get("/api/emails", requireAuth, async (req, res) => {
-    try {
-      const { fetchEmails: fetchEmails2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
-      const emails = await fetchEmails2();
-      res.json(emails);
-    } catch (error) {
-      console.error("Error fetching emails:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch emails" });
-    }
-  });
-  app.post("/api/emails/send", requireAuth, async (req, res) => {
-    try {
-      const { to, subject, text: text2, html } = req.body;
-      if (!to || !subject || !text2 && !html) {
-        res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
-        return;
+  app.get(
+    "/api/emails",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const { fetchEmails: fetchEmails2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+        const emails = await fetchEmails2();
+        res.json(emails);
+      } catch (error) {
+        console.error("Error fetching emails:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch emails" });
       }
-      const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
-      const result = await sendEmail2(to, subject, text2, html);
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        provider: result.provider,
-        mocked: result.mocked
-      });
-    } catch (error) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ error: error.message || "Failed to send email" });
     }
-  });
-  app.post("/api/generate-insights", async (req, res) => {
-    try {
-      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (!isUsableGeminiKey(apiKey)) {
-        return res.json({
-          insights: `## Resumen Estrat\xE9gico Patagonia B2B
+  );
+  app.post(
+    "/api/emails/send",
+    requireAuth,
+    createRateLimiter("emails_send", 15 * 60 * 1e3, 12),
+    async (req, res) => {
+      try {
+        const { to, subject, text: text2, html } = req.body || {};
+        if (!to || !subject || !text2 && !html) {
+          res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
+          return;
+        }
+        const recipients = String(to).split(",").map((addr) => addr.trim()).filter(Boolean);
+        if (recipients.length === 0 || recipients.length > 3 || recipients.some((addr) => !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(addr))) {
+          return res.status(400).json({ error: "Destinatarios inv\xE1lidos (m\xE1ximo 3 emails v\xE1lidos)." });
+        }
+        const isAdminOrOps = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+        const safeText = String(text2 || "").slice(0, 8e3);
+        const safeHtml = isAdminOrOps && html ? String(html).slice(0, 2e4) : void 0;
+        const attributedText = isAdminOrOps ? safeText : `${safeText}
+
+---
+Mensaje enviado v\xEDa xPatagonia B2B por ${req.user?.email || "Miembro verificado"}`;
+        const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
+        const result = await sendEmail2(
+          recipients.join(", "),
+          String(subject).slice(0, 200),
+          attributedText,
+          safeHtml,
+          req.user?.email
+        );
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          provider: result.provider,
+          mocked: result.mocked
+        });
+      } catch (error) {
+        console.error("Error sending email:", error);
+        res.status(500).json({ error: error.message || "Failed to send email" });
+      }
+    }
+  );
+  app.post(
+    "/api/generate-insights",
+    requireAuth,
+    requireRoles(["system_admin", "content_editor"]),
+    async (req, res) => {
+      try {
+        const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!isUsableGeminiKey(apiKey)) {
+          return res.json({
+            insights: `## Resumen Estrat\xE9gico Patagonia B2B
 
 - **Cuenca Neuquina & Golfo San Jorge**: Incremento del 38% en licitaciones de v\xE1lvulas API 6D, montaje electromec\xE1nico y servicios ambientales.
 - **Log\xEDstica Portuaria Austral**: Modernizaci\xF3n de terminales de fr\xEDo (-25\xB0C) en Puerto Madryn, Comodoro Rivadavia y Ushuaia.
 - **Transici\xF3n Energ\xE9tica**: Nuevos proyectos de parques e\xF3licos demandan proveedores locales certificados bajo normas ISO 9001 e ISO 14001.`
+          });
+        }
+        const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
+        const ai = new GoogleGenAI2({
+          apiKey,
+          httpOptions: { headers: { "User-Agent": "aistudio-build" } }
         });
-      }
-      const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
-      const ai = new GoogleGenAI2({
-        apiKey,
-        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
-      });
-      const prompt = `Crea un resumen semanal estrat\xE9gico curado y formateado en Markdown sobre actualidad empresarial, startups e innovaci\xF3n en la regi\xF3n patag\xF3nica (Chubut, R\xEDo Negro, Neuqu\xE9n, Santa Cruz y Tierra del Fuego). Enf\xF3cate en negocios, inversiones, energ\xEDa, log\xEDstica y desarrollo econ\xF3mico industrial.`;
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt
-      });
-      res.json({ insights: response.text });
-    } catch {
-      res.json({
-        insights: `## Resumen Estrat\xE9gico Patagonia B2B
+        const prompt = `Crea un resumen semanal estrat\xE9gico curado y formateado en Markdown sobre actualidad empresarial, startups e innovaci\xF3n en la regi\xF3n patag\xF3nica (Chubut, R\xEDo Negro, Neuqu\xE9n, Santa Cruz y Tierra del Fuego). Enf\xF3cate en negocios, inversiones, energ\xEDa, log\xEDstica y desarrollo econ\xF3mico industrial.`;
+        const response = await ai.models.generateContent({
+          model: "gemini-4-hydrogen",
+          contents: prompt
+        });
+        res.json({ insights: response.text });
+      } catch {
+        res.json({
+          insights: `## Resumen Estrat\xE9gico Patagonia B2B
 
 - **Energ\xEDa e Hidrocarburos**: Expansi\xF3n de capacidad de transporte y demanda de servicios metalmec\xE1nicos certificados.
 - **Log\xEDstica Multimodal**: Integraci\xF3n de corredores en Ruta Nacional 3 y Ruta 40 con trazabilidad satelital.
 - **Ecosistema PyME**: Sincronizaci\xF3n de proveedores regionales en el directorio corporativo y CRM.`
-      });
+        });
+      }
     }
-  });
+  );
   const runAutoInsight = async () => {
     try {
       const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
@@ -6958,7 +7249,14 @@ Selecciona una noticia relevante sobre producci\xF3n, energ\xEDa, log\xEDstica, 
       }
       const token = authHeader.slice("Bearer ".length).trim();
       const cronSecret = (process.env.CRON_SECRET || "").trim();
-      let authorized = Boolean(cronSecret && token === cronSecret);
+      let authorized = false;
+      if (cronSecret && token) {
+        const expectedBuf = Buffer.from(cronSecret);
+        const actualBuf = Buffer.from(token);
+        if (expectedBuf.length === actualBuf.length) {
+          authorized = crypto5.timingSafeEqual(expectedBuf, actualBuf);
+        }
+      }
       if (!authorized) {
         const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
         const supabaseAnon = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
@@ -6990,38 +7288,48 @@ Selecciona una noticia relevante sobre producci\xF3n, energ\xEDa, log\xEDstica, 
       res.status(500).json({ error: error.message || "Failed to trigger automation" });
     }
   });
-  app.post("/api/hero-suggestions", async (req, res) => {
-    try {
-      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (!isUsableGeminiKey(apiKey)) {
-        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
-      }
-      const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
-      const ai = new GoogleGenAI2({
-        apiKey,
-        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
-      });
-      const prompt = `Eres el asistente inteligente de xPatagonia, el Hub de Servicios para la Industria Sostenible.
+  let cachedHeroSuggestions = null;
+  app.post(
+    "/api/hero-suggestions",
+    createRateLimiter("hero_suggestions", 5 * 60 * 1e3, 30),
+    async (req, res) => {
+      try {
+        if (cachedHeroSuggestions && cachedHeroSuggestions.expiresAt > Date.now()) {
+          return res.json({ suggestions: cachedHeroSuggestions.items });
+        }
+        const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!isUsableGeminiKey(apiKey)) {
+          return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+        }
+        const { GoogleGenAI: GoogleGenAI2 } = await import("@google/genai");
+        const ai = new GoogleGenAI2({
+          apiKey,
+          httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+        });
+        const prompt = `Eres el asistente inteligente de xPatagonia, el Hub de Servicios para la Industria Sostenible.
 Genera 3 sugerencias breves de b\xFAsqueda de servicios B2B o insumos industriales relevantes para la regi\xF3n (ej. "Auditor\xEDa Ambiental", "Ingenier\xEDa Naval", "Log\xEDstica de Fr\xEDo").
 Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
+        const response = await ai.models.generateContent({
+          model: "gemini-4-hydrogen",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        let rawText = response.text || "[]";
+        rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+        const suggestions = JSON.parse(rawText);
+        if (Array.isArray(suggestions) && suggestions.length > 0) {
+          const items = suggestions.slice(0, 3).map((s) => String(s).slice(0, 80));
+          cachedHeroSuggestions = { items, expiresAt: Date.now() + 15 * 60 * 1e3 };
+          return res.json({ suggestions: items });
         }
-      });
-      let rawText = response.text || "[]";
-      rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-      const suggestions = JSON.parse(rawText);
-      if (Array.isArray(suggestions) && suggestions.length > 0) {
-        return res.json({ suggestions: suggestions.slice(0, 3) });
+        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+      } catch {
+        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
       }
-      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
-    } catch {
-      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
     }
-  });
+  );
   app.get("/api/market-data", async (req, res) => {
     try {
       const force = req.query.refresh === "1" || req.query.refresh === "true";
@@ -7304,11 +7612,29 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
         if (!filename || !base64Data || typeof base64Data !== "string") {
           return res.status(400).json({ error: "Missing filename or base64Data" });
         }
-        const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
-        const safeName = `hero-${Date.now()}-${crypto4.randomBytes(4).toString("hex")}${cleanExt}`;
+        const ALLOWED_MEDIA = {
+          "image/jpeg": [".jpg", ".jpeg"],
+          "image/png": [".png"],
+          "image/webp": [".webp"],
+          "image/avif": [".avif"],
+          "video/mp4": [".mp4"],
+          "video/webm": [".webm"],
+          "video/quicktime": [".mov"]
+        };
+        const resolvedMime = String(mimeType || "").trim().toLowerCase();
+        const allowedExts = ALLOWED_MEDIA[resolvedMime];
+        const rawExt = path.extname(String(filename)).toLowerCase().replace(/[^a-z0-9.]/g, "");
+        if (!allowedExts || !allowedExts.includes(rawExt)) {
+          return res.status(400).json({
+            error: "Tipo de archivo no permitido. Solo se aceptan im\xE1genes (JPG/PNG/WebP/AVIF) y videos (MP4/WebM/MOV)."
+          });
+        }
+        const safeName = `hero-${Date.now()}-${crypto5.randomBytes(4).toString("hex")}${rawExt}`;
         const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
         const buffer = Buffer.from(rawBase64, "base64");
-        const resolvedMime = mimeType || "application/octet-stream";
+        if (buffer.length === 0 || buffer.length > 20 * 1024 * 1024) {
+          return res.status(400).json({ error: "El archivo supera el l\xEDmite permitido de 20 MB." });
+        }
         const sbAdmin = getSupabaseAdminClient();
         if (sbAdmin) {
           const storagePath = `hero/${safeName}`;
@@ -7353,15 +7679,23 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   );
   app.post("/api/webhooks/odoo", async (req, res) => {
     try {
-      const configuredSecret = process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET;
-      if (configuredSecret) {
-        const incomingSecret = req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"];
-        if (incomingSecret !== configuredSecret) {
-          return res.status(403).json({ error: "Invalid webhook signature" });
-        }
+      const configuredSecret = String(
+        process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET || ""
+      ).trim();
+      if (!configuredSecret) {
+        return res.status(503).json({ error: "Odoo webhook secret not configured" });
+      }
+      const incomingSecret = String(
+        req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"] || ""
+      ).trim();
+      const expectedBuf = Buffer.from(configuredSecret);
+      const actualBuf = Buffer.from(incomingSecret);
+      if (!incomingSecret || expectedBuf.length !== actualBuf.length || !crypto5.timingSafeEqual(expectedBuf, actualBuf)) {
+        return res.status(403).json({ error: "Invalid webhook signature" });
       }
       const { event = "odoo.event", uid, membership, verificationStatus, invoiceRef } = req.body || {};
-      if (uid && membership) {
+      const allowedMemberships = ["Basic", "Premium", "Enterprise", "Pro Industria", "Corporativo"];
+      if (uid && membership && allowedMemberships.includes(String(membership))) {
         try {
           const { updateUserMembership: updateUserMembership2 } = await Promise.resolve().then(() => (init_users(), users_exports));
           await updateUserMembership2(String(uid), String(membership));

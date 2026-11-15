@@ -285,14 +285,28 @@ export function registerBillingAndKybRoutes(
       try {
         await ensureProductionTables();
         const txId = Number(req.params.id);
+        if (!Number.isInteger(txId) || txId <= 0) {
+          return res.status(400).json({ error: "ID de transacción inválido." });
+        }
+        const existing = await pool.query(
+          `SELECT id, status FROM public.billing_transactions WHERE id = $1`,
+          [txId]
+        );
+        if (!existing.rows?.[0]) {
+          return res.status(404).json({ error: "Transacción no encontrada." });
+        }
+        if (existing.rows[0].status !== "pending") {
+          return res.status(409).json({ error: "La transacción ya fue procesada previamente." });
+        }
+
         const upd = await pool.query(
           `UPDATE public.billing_transactions
            SET status = 'approved', reviewed_by_uid = $1, updated_at = now()
-           WHERE id = $2 RETURNING *`,
+           WHERE id = $2 AND status = 'pending' RETURNING *`,
           [req.user!.uid, txId]
         );
         const txRow = upd.rows?.[0];
-        if (!txRow) return res.status(404).json({ error: "Transacción no encontrada." });
+        if (!txRow) return res.status(409).json({ error: "La transacción ya fue procesada." });
 
         await applyApprovedBillingUpgrade(txRow);
         await recordAutomationEvent("outbound_n8n", "billing.transfer.approved", "processed", {
@@ -315,13 +329,18 @@ export function registerBillingAndKybRoutes(
       try {
         await ensureProductionTables();
         const txId = Number(req.params.id);
+        if (!Number.isInteger(txId) || txId <= 0) {
+          return res.status(400).json({ error: "ID de transacción inválido." });
+        }
         const upd = await pool.query(
           `UPDATE public.billing_transactions
            SET status = 'rejected', reviewed_by_uid = $1, updated_at = now()
-           WHERE id = $2 RETURNING *`,
+           WHERE id = $2 AND status = 'pending' RETURNING *`,
           [req.user!.uid, txId]
         );
-        if (!upd.rows?.[0]) return res.status(404).json({ error: "Transacción no encontrada." });
+        if (!upd.rows?.[0]) {
+          return res.status(404).json({ error: "Transacción pendiente no encontrada." });
+        }
         res.json({ success: true, transaction: upd.rows[0] });
       } catch (err: any) {
         res.status(500).json({ error: formatPgError(err) });
@@ -382,19 +401,60 @@ export function registerBillingAndKybRoutes(
   });
 
   // ==========================================
-  // 3. COMPARADOR DE COTIZACIONES RFQ
+  // 3. COMPARADOR DE COTIZACIONES RFQ (CON CONTROL DE ACCESO POR TENANT)
   // ==========================================
   app.get("/api/rfqs/:id/quotes", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
+      const rfqId = Number(req.params.id);
+      if (!Number.isInteger(rfqId) || rfqId <= 0) {
+        return res.status(400).json({ error: "ID de RFQ inválido." });
+      }
       if (!hasDatabaseConfig()) return res.json({ quotes: [] });
       await ensureProductionTables();
-      const rfqId = Number(req.params.id);
-      const rows = await pool.query(
-        `SELECT * FROM public.rfq_quotes WHERE rfq_id = $1 ORDER BY total_price_ars ASC, delivery_days ASC`,
-        [rfqId]
+
+      const rfqRes = await pool.query(`SELECT id, user_uid FROM public.rfqs WHERE id = $1`, [rfqId]);
+      const rfqRow = rfqRes.rows?.[0];
+      if (!rfqRow) {
+        return res.status(404).json({ error: "RFQ no encontrada." });
+      }
+
+      const tenant = await resolveTenantContext(
+        req.user!.uid,
+        req.user!.email,
+        req.user!.membershipName,
+        req.user!.roleName
       );
-      res.json({ quotes: rows.rows || [] });
+      const isAdmin = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+      let isSameOrgOwner = rfqRow.user_uid === req.user!.uid;
+
+      if (!isSameOrgOwner && tenant?.organizationId) {
+        const orgOwnerMatch = await pool.query(
+          `SELECT 1 FROM public.org_members WHERE organization_id = $1 AND user_uid = $2 AND status = 'active' LIMIT 1`,
+          [tenant.organizationId, rfqRow.user_uid]
+        );
+        isSameOrgOwner = (orgOwnerMatch.rows || []).length > 0;
+      }
+
+      if (isAdmin || isSameOrgOwner) {
+        const rows = await pool.query(
+          `SELECT * FROM public.rfq_quotes WHERE rfq_id = $1 ORDER BY total_price_ars ASC, delivery_days ASC`,
+          [rfqId]
+        );
+        return res.json({ quotes: rows.rows || [] });
+      }
+
+      // Suppliers may only read their own submitted quotes for this RFQ
+      const ownRows = await pool.query(
+        `SELECT * FROM public.rfq_quotes
+         WHERE rfq_id = $1 AND (supplier_uid = $2 OR ($3::int IS NOT NULL AND supplier_org_id = $3))
+         ORDER BY created_at DESC`,
+        [rfqId, req.user!.uid, tenant?.organizationId || null]
+      );
+      if ((ownRows.rows || []).length === 0) {
+        return res.status(403).json({ error: "No tenés permiso para ver las cotizaciones de esta licitación." });
+      }
+      res.json({ quotes: ownRows.rows });
     } catch (err: any) {
       res.status(500).json({ error: formatPgError(err) });
     }
@@ -402,17 +462,36 @@ export function registerBillingAndKybRoutes(
 
   app.post("/api/rfqs/:id/quotes", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const rfqId = Number(req.params.id);
+      if (!Number.isInteger(rfqId) || rfqId <= 0) {
+        return res.status(400).json({ error: "ID de RFQ inválido." });
+      }
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
       await ensureProductionTables();
-      const rfqId = Number(req.params.id);
+
+      const rfqExists = await pool.query(`SELECT id FROM public.rfqs WHERE id = $1`, [rfqId]);
+      if (!rfqExists.rows?.[0]) {
+        return res.status(404).json({ error: "La licitación RFQ indicada no existe." });
+      }
+
       const tenant = await resolveTenantContext(
         req.user!.uid,
         req.user!.email,
         req.user!.membershipName,
         req.user!.roleName
       );
+
+      // Verify KYB status server-side rather than trusting client payload
+      const kybRes = await pool
+        .query(
+          `SELECT verification_status FROM public.company_profiles WHERE user_uid = $1 LIMIT 1`,
+          [req.user!.uid]
+        )
+        .catch(() => ({ rows: [] as any[] }));
+      const serverVerified = kybRes.rows?.[0]?.verification_status === "verified";
+
       const b = req.body || {};
-      const supplierName = String(b.supplierName || tenant?.orgName || "Proveedor B2B").trim();
+      const supplierName = String(b.supplierName || tenant?.orgName || "Proveedor B2B").trim().slice(0, 140);
       const totalPriceArs = Math.max(0, Number(b.totalPriceArs) || 0);
       if (!totalPriceArs) {
         return res.status(400).json({ error: "El importe total de la cotización debe ser mayor a 0." });
@@ -430,15 +509,17 @@ export function registerBillingAndKybRoutes(
           req.user!.uid,
           tenant?.organizationId || null,
           supplierName,
-          String(b.supplierLocation || "Patagonia"),
-          Boolean(b.verified),
+          String(b.supplierLocation || "Patagonia").slice(0, 100),
+          serverVerified,
           Math.max(0, Number(b.unitPriceArs) || totalPriceArs),
           totalPriceArs,
-          String(b.currency || "ARS"),
+          ["ARS", "USD"].includes(String(b.currency || "").toUpperCase())
+            ? String(b.currency).toUpperCase()
+            : "ARS",
           Math.max(1, Number(b.deliveryDays) || 7),
-          String(b.paymentTerms || "Factura A 30 días"),
+          String(b.paymentTerms || "Factura A 30 días").slice(0, 120),
           Math.max(0, Number(b.distanceKm) || 0),
-          b.notes ? String(b.notes) : null,
+          b.notes ? String(b.notes).slice(0, 1000) : null,
         ]
       );
       res.json({ success: true, quote: inserted.rows[0] });
@@ -454,7 +535,7 @@ export function registerBillingAndKybRoutes(
     try {
       res.setHeader("Cache-Control", "no-store");
       const code = String(req.params.code || "").trim().toUpperCase();
-      if (!code || code.length < 4) {
+      if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
         return res.status(400).json({ error: "Código de seguimiento inválido." });
       }
       if (!hasDatabaseConfig()) {

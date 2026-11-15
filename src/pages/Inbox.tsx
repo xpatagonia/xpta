@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
+import DOMPurify from 'dompurify';
 import { Mail, Send, Reply, RefreshCw, AlertCircle, Inbox as InboxIcon, Sparkles, CheckCircle2 } from 'lucide-react';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
@@ -50,6 +51,9 @@ export default function Inbox() {
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Acceso restringido: la casilla IMAP corporativa global solo está habilitada para administradores y operadores de soporte.');
+        }
         throw new Error(data.error || 'Failed to fetch emails');
       }
       setEmails(data);
@@ -312,7 +316,12 @@ export default function Inbox() {
                         {selectedEmail.html ? (
                           <div 
                             className="prose dark:prose-invert max-w-none text-slate-800 dark:text-slate-200"
-                            dangerouslySetInnerHTML={{ __html: selectedEmail.html }}
+                            dangerouslySetInnerHTML={{
+                              __html: DOMPurify.sanitize(selectedEmail.html, {
+                                FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'style'],
+                                FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
+                              }),
+                            }}
                           />
                         ) : (
                           <pre className="whitespace-pre-wrap font-sans text-slate-800 dark:text-slate-200">

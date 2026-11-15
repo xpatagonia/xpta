@@ -7,6 +7,7 @@ export interface EmailMessage {
   uid: number;
   subject: string;
   from: string;
+  to?: string;
   date: string;
   snippet: string;
   text?: string;
@@ -46,7 +47,7 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
       pass: imapPass,
     },
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: process.env.MAIL_TLS_INSECURE !== 'true',
     },
     logger: false as any,
     connectionTimeout: 10000,
@@ -79,11 +80,15 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
 
       for (const message of recentMessages) {
         const parsed = await simpleParser(message.source);
+        const toText = Array.isArray(parsed.to)
+          ? parsed.to.map((t: any) => t.text).join(', ')
+          : parsed.to?.text || '';
         emails.push({
           id: message.uid.toString(),
           uid: message.uid,
           subject: parsed.subject || '(No Subject)',
           from: parsed.from?.text || 'Unknown',
+          to: toText,
           date: parsed.date ? parsed.date.toISOString() : new Date().toISOString(),
           snippet: parsed.text ? parsed.text.substring(0, 100) + '...' : '',
           text: parsed.text,
@@ -107,7 +112,16 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   return emails;
 }
 
-export async function sendEmail(to: string, subject: string, text: string, html?: string) {
+export async function sendEmail(
+  to: string,
+  subject: string,
+  text: string,
+  html?: string,
+  replyTo?: string
+) {
+  const safeSubject = String(subject || '').replace(/[\r\n]+/g, ' ').trim();
+  const safeTo = String(to || '').replace(/[\r\n]+/g, '').trim();
+  const safeReplyTo = replyTo ? String(replyTo).replace(/[\r\n]+/g, '').trim() : undefined;
   const resendApiKey = sanitizeEnvValue(process.env.RESEND_API_KEY);
   const resendFrom = sanitizeEnvValue(
     process.env.RESEND_FROM_EMAIL,
@@ -116,7 +130,7 @@ export async function sendEmail(to: string, subject: string, text: string, html?
 
   // 1. Primary HTTPS provider: Resend (ideal para Cloud Run / AI Studio / Cloudflare sin puertos SMTP TCP)
   if (resendApiKey) {
-    const recipients = to
+    const recipients = safeTo
       .split(',')
       .map((addr) => addr.trim())
       .filter(Boolean);
@@ -124,8 +138,9 @@ export async function sendEmail(to: string, subject: string, text: string, html?
     const payload: Record<string, any> = {
       from: resendFrom,
       to: recipients,
-      subject,
+      subject: safeSubject,
     };
+    if (safeReplyTo) payload.reply_to = safeReplyTo;
     if (text) payload.text = text;
     if (html) payload.html = html;
 
@@ -160,7 +175,7 @@ export async function sendEmail(to: string, subject: string, text: string, html?
     throw new Error('Configura RESEND_API_KEY o SMTP_PASSWORD en las variables de entorno (Settings > Secrets).');
   }
 
-  console.log(`[sendEmail] Starting SMTP send to ${to}. Host: ${smtpHost}, Port: ${smtpPort}, User: ${smtpUser}, Secure: ${smtpPort === 465}`);
+  console.log(`[sendEmail] Starting SMTP send to ${safeTo}. Host: ${smtpHost}, Port: ${smtpPort}, User: ${smtpUser}, Secure: ${smtpPort === 465}`);
 
   const transporter = nodemailer.createTransport({
     host: smtpHost,
@@ -171,7 +186,7 @@ export async function sendEmail(to: string, subject: string, text: string, html?
       pass: smtpPass,
     },
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: process.env.MAIL_TLS_INSECURE !== 'true',
     },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
@@ -180,12 +195,13 @@ export async function sendEmail(to: string, subject: string, text: string, html?
   try {
     const info = await transporter.sendMail({
       from: smtpUser,
-      to,
-      subject,
+      to: safeTo,
+      ...(safeReplyTo ? { replyTo: safeReplyTo } : {}),
+      subject: safeSubject,
       text,
       html,
     });
-    console.log(`[sendEmail] Successfully sent email via SMTP to ${to}. MessageId: ${info.messageId}`);
+    console.log(`[sendEmail] Successfully sent email via SMTP to ${safeTo}. MessageId: ${info.messageId}`);
     return { ...info, provider: 'smtp' };
   } catch (error: any) {
     console.error('[sendEmail] ERROR sending email:', error);

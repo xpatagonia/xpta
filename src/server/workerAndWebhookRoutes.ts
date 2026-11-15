@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type { Express, Request, Response, NextFunction } from "express";
 import {
   processInboundEmailWithArn,
@@ -18,6 +19,13 @@ function extractIncomingSecret(req: Request): string {
   return String(headerSecret).trim();
 }
 
+function safeSecretEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
   const token = extractIncomingSecret(req);
   if (!token) {
@@ -31,7 +39,7 @@ function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
     .map((s) => String(s || "").trim())
     .filter(Boolean);
 
-  if (configuredSecrets.length === 0 || !configuredSecrets.includes(token)) {
+  if (configuredSecrets.length === 0 || !configuredSecrets.some((s) => safeSecretEquals(s, token))) {
     return res.status(403).json({ error: "Forbidden: Invalid worker/n8n secret" });
   }
   next();

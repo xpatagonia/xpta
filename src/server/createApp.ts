@@ -181,26 +181,85 @@ export function createApiApp() {
     return entry;
   }
 
-  const allowedOrigins = [
+  const allowedExactOrigins = new Set([
     "https://xpatagonia.online",
     "https://www.xpatagonia.online",
     "https://api.xpatagonia.online",
     "http://localhost:3000",
     "http://localhost:5173",
-  ];
+  ]);
+  if (process.env.APP_URL) {
+    try {
+      allowedExactOrigins.add(new URL(process.env.APP_URL).origin);
+    } catch {
+      // ignore malformed APP_URL
+    }
+  }
+  if (process.env.CORS_ALLOWED_ORIGINS) {
+    for (const o of process.env.CORS_ALLOWED_ORIGINS.split(",")) {
+      const trimmed = o.trim();
+      if (trimmed) allowedExactOrigins.add(trimmed);
+    }
+  }
+  const allowedDeploymentHosts = new Set(
+    [
+      process.env.VERCEL_URL,
+      process.env.VERCEL_BRANCH_URL,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    ]
+      .map((h) => String(h || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  function isAllowedCorsOrigin(origin?: string): boolean {
+    if (!origin) return true;
+    if (allowedExactOrigins.has(origin)) return true;
+    try {
+      const parsed = new URL(origin);
+      const host = parsed.hostname.toLowerCase();
+      if (parsed.protocol === "https:") {
+        if (host === "xpatagonia.online" || host.endsWith(".xpatagonia.online")) return true;
+        if (allowedDeploymentHosts.has(host)) return true;
+        if (/^ais-(dev|pre)-[a-z0-9-]+\.us-east1\.run\.app$/.test(host)) return true;
+      }
+      if (parsed.protocol === "http:" && (host === "localhost" || host === "127.0.0.1")) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+  function createRateLimiter(bucketName: string, windowMs: number, maxRequests: number) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const key = `${bucketName}:${req.ip || "unknown"}`;
+      const now = Date.now();
+      const current = rateLimitBuckets.get(key);
+      if (!current || current.resetAt <= now) {
+        rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+        if (rateLimitBuckets.size > 2000) {
+          for (const [k, v] of rateLimitBuckets.entries()) {
+            if (v.resetAt <= now) rateLimitBuckets.delete(k);
+          }
+        }
+        return next();
+      }
+      if (current.count >= maxRequests) {
+        return res.status(429).json({
+          error: "Demasiadas solicitudes. Intentá nuevamente en unos minutos.",
+        });
+      }
+      current.count += 1;
+      next();
+    };
+  }
 
   app.use(
     cors({
       origin: function (origin, callback) {
-        if (
-          !origin ||
-          allowedOrigins.includes(origin) ||
-          origin.includes(".run.app") ||
-          origin.includes(".onrender.com") ||
-          origin.includes(".vercel.app") ||
-          origin.includes(".pages.dev") ||
-          origin.includes("xpatagonia.online")
-        ) {
+        if (isAllowedCorsOrigin(origin)) {
           callback(null, true);
         } else {
           callback(new Error("Not allowed by CORS"));
@@ -357,8 +416,13 @@ export function createApiApp() {
     requireRoles(["system_admin"]) as any,
     async (req: AuthRequest, res) => {
       try {
+        const nextRole = String(req.body?.role || "").trim();
+        const allowedRoles = ["system_admin", "content_editor", "support_operator", "vendor"];
+        if (!allowedRoles.includes(nextRole)) {
+          return res.status(400).json({ error: "Rol inválido." });
+        }
         const { updateUserRole } = await import("../db/users.ts");
-        await updateUserRole(req.params.uid, req.body.role);
+        await updateUserRole(req.params.uid, nextRole);
         res.json({ success: true });
       } catch (error) {
         console.error("Error updating role:", error);
@@ -542,18 +606,24 @@ export function createApiApp() {
     }
   });
 
-  app.post("/api/public/rfq-lead", async (req, res) => {
+  app.post(
+    "/api/public/rfq-lead",
+    createRateLimiter("public_rfq_lead", 15 * 60 * 1000, 10),
+    async (req, res) => {
     try {
       const { company, email, category, budget, details } = req.body || {};
       if (!company || !email || !details) {
         return res.status(400).json({ error: "Completa empresa, email corporativo y detalles." });
       }
 
-      const cleanCompany = String(company).trim();
-      const cleanEmail = String(email).trim();
-      const cleanCategory = String(category || "General").trim();
-      const cleanBudget = String(budget || "Consultar").trim();
-      const cleanDetails = String(details).trim();
+      const cleanCompany = String(company).trim().slice(0, 140);
+      const cleanEmail = String(email).trim().slice(0, 180);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
+        return res.status(400).json({ error: "Ingresá un email corporativo válido." });
+      }
+      const cleanCategory = String(category || "General").trim().slice(0, 80);
+      const cleanBudget = String(budget || "Consultar").trim().slice(0, 60);
+      const cleanDetails = String(details).trim().slice(0, 2000);
 
       let persisted = false;
       if (hasDatabaseConfig()) {
@@ -781,42 +851,81 @@ export function createApiApp() {
     }
   );
 
-  app.get("/api/emails", requireAuth as any, async (req: AuthRequest, res) => {
-    try {
-      const { fetchEmails } = await import("../services/emailService.ts");
-      const emails = await fetchEmails();
-      res.json(emails);
-    } catch (error: any) {
-      console.error("Error fetching emails:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch emails" });
-    }
-  });
-
-  app.post("/api/emails/send", requireAuth as any, async (req: AuthRequest, res) => {
-    try {
-      const { to, subject, text, html } = req.body;
-      if (!to || !subject || (!text && !html)) {
-        res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
-        return;
+  app.get(
+    "/api/emails",
+    requireAuth as any,
+    requireRoles(["system_admin", "support_operator"]) as any,
+    async (req: AuthRequest, res) => {
+      try {
+        const { fetchEmails } = await import("../services/emailService.ts");
+        const emails = await fetchEmails();
+        res.json(emails);
+      } catch (error: any) {
+        console.error("Error fetching emails:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch emails" });
       }
-      const { sendEmail } = await import("../services/emailService.ts");
-      const result = await sendEmail(to, subject, text, html);
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        provider: (result as any).provider,
-        mocked: (result as any).mocked,
-      });
-    } catch (error: any) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ error: error.message || "Failed to send email" });
     }
-  });
+  );
+
+  app.post(
+    "/api/emails/send",
+    requireAuth as any,
+    createRateLimiter("emails_send", 15 * 60 * 1000, 12),
+    async (req: AuthRequest, res) => {
+      try {
+        const { to, subject, text, html } = req.body || {};
+        if (!to || !subject || (!text && !html)) {
+          res.status(400).json({ error: "Missing required fields: to, subject, text/html" });
+          return;
+        }
+        const recipients = String(to)
+          .split(",")
+          .map((addr) => addr.trim())
+          .filter(Boolean);
+        if (
+          recipients.length === 0 ||
+          recipients.length > 3 ||
+          recipients.some((addr) => !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(addr))
+        ) {
+          return res.status(400).json({ error: "Destinatarios inválidos (máximo 3 emails válidos)." });
+        }
+
+        const isAdminOrOps = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+        const safeText = String(text || "").slice(0, 8000);
+        const safeHtml = isAdminOrOps && html ? String(html).slice(0, 20000) : undefined;
+        const attributedText = isAdminOrOps
+          ? safeText
+          : `${safeText}\n\n---\nMensaje enviado vía xPatagonia B2B por ${req.user?.email || "Miembro verificado"}`;
+
+        const { sendEmail } = await import("../services/emailService.ts");
+        const result = await sendEmail(
+          recipients.join(", "),
+          String(subject).slice(0, 200),
+          attributedText,
+          safeHtml,
+          req.user?.email
+        );
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          provider: (result as any).provider,
+          mocked: (result as any).mocked,
+        });
+      } catch (error: any) {
+        console.error("Error sending email:", error);
+        res.status(500).json({ error: error.message || "Failed to send email" });
+      }
+    }
+  );
 
   // ==========================================
   // GEMINI AI (INSIGHTS, CRON, SUGGESTIONS)
   // ==========================================
-  app.post("/api/generate-insights", async (req, res) => {
+  app.post(
+    "/api/generate-insights",
+    requireAuth as any,
+    requireRoles(["system_admin", "content_editor"]) as any,
+    async (req, res) => {
     try {
       const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
       if (!isUsableGeminiKey(apiKey)) {
@@ -938,7 +1047,14 @@ Selecciona una noticia relevante sobre producción, energía, logística, pesca 
 
       const token = authHeader.slice("Bearer ".length).trim();
       const cronSecret = (process.env.CRON_SECRET || "").trim();
-      let authorized = Boolean(cronSecret && token === cronSecret);
+      let authorized = false;
+      if (cronSecret && token) {
+        const expectedBuf = Buffer.from(cronSecret);
+        const actualBuf = Buffer.from(token);
+        if (expectedBuf.length === actualBuf.length) {
+          authorized = crypto.timingSafeEqual(expectedBuf, actualBuf);
+        }
+      }
 
       if (!authorized) {
         const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
@@ -978,43 +1094,53 @@ Selecciona una noticia relevante sobre producción, energía, logística, pesca 
     }
   });
 
-  app.post("/api/hero-suggestions", async (req, res) => {
-    try {
-      const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (!isUsableGeminiKey(apiKey)) {
-        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
-      }
+  let cachedHeroSuggestions: { items: string[]; expiresAt: number } | null = null;
+  app.post(
+    "/api/hero-suggestions",
+    createRateLimiter("hero_suggestions", 5 * 60 * 1000, 30),
+    async (req, res) => {
+      try {
+        if (cachedHeroSuggestions && cachedHeroSuggestions.expiresAt > Date.now()) {
+          return res.json({ suggestions: cachedHeroSuggestions.items });
+        }
+        const apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!isUsableGeminiKey(apiKey)) {
+          return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+        }
 
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-      });
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+        });
 
-      const prompt = `Eres el asistente inteligente de xPatagonia, el Hub de Servicios para la Industria Sostenible.
+        const prompt = `Eres el asistente inteligente de xPatagonia, el Hub de Servicios para la Industria Sostenible.
 Genera 3 sugerencias breves de búsqueda de servicios B2B o insumos industriales relevantes para la región (ej. "Auditoría Ambiental", "Ingeniería Naval", "Logística de Frío").
 Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+        const response = await ai.models.generateContent({
+          model: "gemini-4-hydrogen",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
 
-      let rawText = response.text || "[]";
-      rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+        let rawText = response.text || "[]";
+        rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
 
-      const suggestions = JSON.parse(rawText);
-      if (Array.isArray(suggestions) && suggestions.length > 0) {
-        return res.json({ suggestions: suggestions.slice(0, 3) });
+        const suggestions = JSON.parse(rawText);
+        if (Array.isArray(suggestions) && suggestions.length > 0) {
+          const items = suggestions.slice(0, 3).map((s) => String(s).slice(0, 80));
+          cachedHeroSuggestions = { items, expiresAt: Date.now() + 15 * 60 * 1000 };
+          return res.json({ suggestions: items });
+        }
+        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
+      } catch {
+        return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
       }
-      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
-    } catch {
-      return res.json({ suggestions: DEFAULT_HERO_SUGGESTIONS.slice(0, 3) });
     }
-  });
+  );
 
   // ==========================================
   // MARKET DATA & CURRENCIES (LIVE + REFERENCIA)
@@ -1343,11 +1469,30 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
           return res.status(400).json({ error: "Missing filename or base64Data" });
         }
 
-        const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
-        const safeName = `hero-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${cleanExt}`;
+        const ALLOWED_MEDIA: Record<string, string[]> = {
+          "image/jpeg": [".jpg", ".jpeg"],
+          "image/png": [".png"],
+          "image/webp": [".webp"],
+          "image/avif": [".avif"],
+          "video/mp4": [".mp4"],
+          "video/webm": [".webm"],
+          "video/quicktime": [".mov"],
+        };
+        const resolvedMime = String(mimeType || "").trim().toLowerCase();
+        const allowedExts = ALLOWED_MEDIA[resolvedMime];
+        const rawExt = path.extname(String(filename)).toLowerCase().replace(/[^a-z0-9.]/g, "");
+        if (!allowedExts || !allowedExts.includes(rawExt)) {
+          return res.status(400).json({
+            error: "Tipo de archivo no permitido. Solo se aceptan imágenes (JPG/PNG/WebP/AVIF) y videos (MP4/WebM/MOV).",
+          });
+        }
+
+        const safeName = `hero-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${rawExt}`;
         const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
         const buffer = Buffer.from(rawBase64, "base64");
-        const resolvedMime = mimeType || "application/octet-stream";
+        if (buffer.length === 0 || buffer.length > 20 * 1024 * 1024) {
+          return res.status(400).json({ error: "El archivo supera el límite permitido de 20 MB." });
+        }
 
         const sbAdmin = getSupabaseAdminClient();
         if (sbAdmin) {
@@ -1405,18 +1550,31 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   // ==========================================
   app.post("/api/webhooks/odoo", async (req, res) => {
     try {
-      const configuredSecret = process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET;
-      if (configuredSecret) {
-        const incomingSecret = req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"];
-        if (incomingSecret !== configuredSecret) {
-          return res.status(403).json({ error: "Invalid webhook signature" });
-        }
+      const configuredSecret = String(
+        process.env.N8N_SHARED_SECRET || process.env.ODOO_WEBHOOK_SECRET || ""
+      ).trim();
+      if (!configuredSecret) {
+        return res.status(503).json({ error: "Odoo webhook secret not configured" });
+      }
+
+      const incomingSecret = String(
+        req.headers["x-odoo-webhook-secret"] || req.headers["x-n8n-secret"] || ""
+      ).trim();
+      const expectedBuf = Buffer.from(configuredSecret);
+      const actualBuf = Buffer.from(incomingSecret);
+      if (
+        !incomingSecret ||
+        expectedBuf.length !== actualBuf.length ||
+        !crypto.timingSafeEqual(expectedBuf, actualBuf)
+      ) {
+        return res.status(403).json({ error: "Invalid webhook signature" });
       }
 
       const { event = "odoo.event", uid, membership, verificationStatus, invoiceRef } =
         req.body || {};
 
-      if (uid && membership) {
+      const allowedMemberships = ["Basic", "Premium", "Enterprise", "Pro Industria", "Corporativo"];
+      if (uid && membership && allowedMemberships.includes(String(membership))) {
         try {
           const { updateUserMembership } = await import("../db/users.ts");
           await updateUserMembership(String(uid), String(membership));

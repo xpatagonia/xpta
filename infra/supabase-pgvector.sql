@@ -419,3 +419,59 @@ CREATE TABLE IF NOT EXISTS public.rfq_quotes (
   status text NOT NULL DEFAULT 'submitted',
   created_at timestamptz DEFAULT now()
 );
+
+-- 16. Hardening RLS en todas las tablas restantes (PostgREST / Anon Key protection)
+ALTER TABLE IF EXISTS public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.org_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.org_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.inventory_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.fleet_vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.fleet_drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.logistics_contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.processed_email_uids ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.fleet_expiry_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.automation_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.billing_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.rfq_quotes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.company_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.rfqs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.insights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.user_memberships ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "insights_public_read" ON public.insights;
+CREATE POLICY "insights_public_read"
+  ON public.insights FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "products_active_public_read" ON public.products;
+CREATE POLICY "products_active_public_read"
+  ON public.products FOR SELECT
+  USING (status = 'active' OR auth.uid()::text = user_uid);
+
+DROP POLICY IF EXISTS "products_owner_write" ON public.products;
+CREATE POLICY "products_owner_write"
+  ON public.products FOR ALL
+  USING (auth.uid()::text = user_uid)
+  WITH CHECK (auth.uid()::text = user_uid);
+
+DROP POLICY IF EXISTS "company_profiles_owner_policy" ON public.company_profiles;
+CREATE POLICY "company_profiles_owner_policy"
+  ON public.company_profiles FOR ALL
+  USING (auth.uid()::text = user_uid)
+  WITH CHECK (auth.uid()::text = user_uid);
+
+DROP POLICY IF EXISTS "rfqs_owner_policy" ON public.rfqs;
+CREATE POLICY "rfqs_owner_policy"
+  ON public.rfqs FOR ALL
+  USING (auth.uid()::text = user_uid)
+  WITH CHECK (auth.uid()::text = user_uid);
+
+DROP POLICY IF EXISTS "inventory_items_owner_policy" ON public.inventory_items;
+CREATE POLICY "inventory_items_owner_policy"
+  ON public.inventory_items FOR ALL
+  USING (auth.uid()::text = user_uid)
+  WITH CHECK (auth.uid()::text = user_uid);

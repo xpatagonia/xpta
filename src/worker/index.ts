@@ -96,7 +96,7 @@ async function startImapIdleLoop() {
       port,
       secure: port === 993,
       auth: { user, pass },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: process.env.MAIL_TLS_INSECURE !== "true" },
       logger: false as any,
     });
     activeImapClient = client;

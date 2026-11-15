@@ -83,7 +83,7 @@ export function verifyMercadoPagoWebhookSignature(params: {
   secret?: string;
 }): boolean {
   const secret = String(params.secret || process.env.MP_WEBHOOK_SECRET || "").trim();
-  if (!secret) return true; // Signature verification skipped if secret not configured
+  if (!secret) return false; // Fail-closed: webhook secret required for HMAC verification
   const header = String(params.signatureHeader || "").trim();
   if (!header || !params.dataId) return false;
 
