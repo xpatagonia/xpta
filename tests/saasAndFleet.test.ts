@@ -2,10 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SAAS_PLANS,
+  SAAS_MODULES,
+  ALL_MODULE_SLUGS,
   LOGISTICS_MEMBERSHIP,
   resolvePlanConfig,
   canAddOrganizationSeat,
   canAccessLogisticsSuite,
+  normalizeModuleSlug,
+  resolveEffectiveModules,
+  buildEntitlementsMap,
+  hasModuleEntitlement,
 } from '../src/services/saasPlans.ts';
 
 test('SAAS_PLANS defines exact PyME user seat limits: 2 Gratis, 5 Pro, 10 Corporativo', () => {
@@ -100,3 +106,49 @@ test('canAccessLogisticsSuite gates fleet tools behind separate Logistics Member
     true
   );
 });
+
+test('SAAS_MODULES and resolveEffectiveModules compute entitlements across Gratis, Pro, Corporativo, and Add-ons', () => {
+  assert.equal(ALL_MODULE_SLUGS.length, 6);
+  for (const slug of ALL_MODULE_SLUGS) {
+    assert.ok(SAAS_MODULES[slug].priceMonthlyArs > 0);
+    assert.ok(SAAS_MODULES[slug].routePath.startsWith('/'));
+  }
+
+  assert.equal(normalizeModuleSlug('logistica'), 'logistica_flota');
+  assert.equal(normalizeModuleSlug('odoo'), 'erp_sync');
+  assert.equal(normalizeModuleSlug('wms'), 'warehousing');
+
+  // Gratis gets chat_b2b only by default
+  const gratisModules = resolveEffectiveModules({ planSlug: 'gratis' });
+  assert.deepEqual(gratisModules, ['chat_b2b']);
+  assert.equal(hasModuleEntitlement({ planSlug: 'gratis' }, 'logistica_flota'), false);
+
+  // Pro gets ecommerce_b2b + chat_b2b, NOT warehousing/erp/logistics
+  const proModules = resolveEffectiveModules({ planSlug: 'pro' });
+  assert.deepEqual(proModules.sort(), ['chat_b2b', 'ecommerce_b2b'].sort());
+  assert.equal(hasModuleEntitlement({ planSlug: 'pro' }, 'warehousing'), false);
+  assert.equal(hasModuleEntitlement({ planSlug: 'pro' }, 'logistica_flota'), false);
+
+  // Pro + explicit add-ons unlocks warehousing & logistica_flota cleanly
+  const proPlusAddons = resolveEffectiveModules({
+    planSlug: 'pro',
+    rawActiveModules: ['warehousing', 'logistica'],
+  });
+  assert.equal(proPlusAddons.includes('warehousing'), true);
+  assert.equal(proPlusAddons.includes('logistica_flota'), true);
+
+  // Corporativo gets warehousing, kyb_compliance, erp_sync, ecommerce_b2b, chat_b2b (logistics still separate unless active)
+  const corpModules = resolveEffectiveModules({ planSlug: 'corporativo' });
+  const corpMap = buildEntitlementsMap(corpModules);
+  assert.equal(corpMap.warehousing, true);
+  assert.equal(corpMap.kyb_compliance, true);
+  assert.equal(corpMap.erp_sync, true);
+  assert.equal(corpMap.ecommerce_b2b, true);
+  assert.equal(corpMap.chat_b2b, true);
+  assert.equal(corpMap.logistica_flota, false);
+
+  // system_admin always gets full entitlements
+  assert.equal(hasModuleEntitlement({ planSlug: 'gratis', roleName: 'system_admin' }, 'logistica_flota'), true);
+  assert.equal(hasModuleEntitlement({ planSlug: 'gratis', roleName: 'system_admin' }, 'erp_sync'), true);
+});
+

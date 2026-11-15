@@ -1,316 +1,359 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, Truck, PackageCheck, Box, Settings, Shield, Zap, ChevronRight, CheckCircle } from 'lucide-react';
+import {
+  Check,
+  Truck,
+  PackageCheck,
+  ShieldCheck,
+  Database,
+  ShoppingBag,
+  MessageSquare,
+  ExternalLink,
+  CreditCard,
+  X,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { db, auth, doc, getDoc, setDoc, collection } from '../lib/db';
-import {  onAuthStateChanged  } from '../lib/db';
+import { auth } from '../lib/db';
+import { getApiUrl } from '../lib/apiConfig';
+import {
+  ALL_MODULE_SLUGS,
+  SAAS_MODULES,
+  SAAS_PLANS,
+  SaasModuleConfig,
+  SaasModuleSlug,
+  PymePlanSlug,
+} from '../services/saasPlans';
 import CheckoutModal from '../components/CheckoutModal';
+import AuthModal from '../components/AuthModal';
 
-const APPS = [
-  {
-    id: 'logistica',
-    name: 'Logística Integral y Transporte',
-    description: 'Integra proveedores de transporte y carga para obtener cotizaciones automáticas según peso, volumen y destino.',
-    icon: Truck,
-    category: 'Operaciones',
-    status: 'available', // available, installed
-    price: '$29.900/mes',
-    features: [
-      'Calculadora de fletes en tiempo real',
-      'Integración con Cruz del Sur, Andreani B2B',
-      'Seguimiento de flota en mapa',
-      'Emisión de cartas de porte'
-    ]
-  },
-  {
-    id: 'warehousing',
-    name: 'Warehousing & Almacenamiento',
-    description: 'Gestión de inventario remoto, alquiler de pallets y metros cuadrados en parques industriales.',
-    icon: PackageCheck,
-    category: 'Infraestructura',
-    status: 'available',
-    price: '$45.000/mes',
-    features: [
-      'Visualización de stock remoto',
-      'Alertas de inventario mínimo',
-      'Gestión de turnos de carga/descarga',
-      'Póliza de seguro integrada'
-    ]
-  },
-  {
-    id: 'ecommerce',
-    name: 'Gestión de E-commerce B2B',
-    description: 'Catálogo de productos fabricados, cumplimiento de normas y gestión de pedidos B2B.',
-    icon: Shield,
-    category: 'Ventas',
-    status: 'installed',
-    price: 'Gratis en plan actual',
-    features: [
-      'Catálogo de productos',
-      'Cumplimiento de normativas',
-      'Gestión de pedidos mayoristas'
-    ]
-  }
-];
+const MODULE_META: Record<
+  SaasModuleSlug,
+  { icon: React.ComponentType<{ className?: string }>; category: string }
+> = {
+  logistica_flota: { icon: Truck, category: 'Operaciones & Flota' },
+  warehousing: { icon: PackageCheck, category: 'Infraestructura WMS' },
+  kyb_compliance: { icon: ShieldCheck, category: 'Compliance Fiscal' },
+  erp_sync: { icon: Database, category: 'Integración ERP & IA' },
+  ecommerce_b2b: { icon: ShoppingBag, category: 'Comercial & Ventas' },
+  chat_b2b: { icon: MessageSquare, category: 'Comunicaciones' },
+};
 
 export default function AppStore() {
-  const [apps, setApps] = useState(APPS);
-  const [selectedApp, setSelectedApp] = useState<any>(null);
+  const [selectedModule, setSelectedModule] = useState<SaasModuleConfig | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [user, setUser] = useState<any>(() => auth.currentUser);
+  const [planSlug, setPlanSlug] = useState<PymePlanSlug>('gratis');
+  const [entitlements, setEntitlements] = useState<Record<string, boolean>>({});
+  const [loadingAccess, setLoadingAccess] = useState(true);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const navigate = useNavigate();
 
   const showNotice = (type: 'ok' | 'err', text: string) => {
     setNotice({ type, text });
-    setTimeout(() => setNotice(null), 6000);
+    setTimeout(() => setNotice(null), 6500);
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        try {
-          const docRef = doc(db, 'users', currentUser.uid, 'settings', 'modules');
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            const installedIds = data.installed || [];
-            setApps(APPS.map(app => ({
-              ...app,
-              status: installedIds.includes(app.id) ? 'installed' : app.status
-            })));
-          }
-        } catch (error) {
-          console.error('Error fetching module settings from Supabase:', error);
-        }
-      } else {
-        setApps(APPS);
+  const loadOrganizationModules = useCallback(async () => {
+    setLoadingAccess(true);
+    try {
+      const token = await auth.getToken();
+      if (!token) {
+        setEntitlements({});
+        setPlanSlug('gratis');
+        return;
       }
-    });
-
-    return () => unsubscribe();
+      const res = await fetch(`${getApiUrl()}/api/org/team`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      const org = data?.organization;
+      if (org) {
+        setPlanSlug((org.planSlug as PymePlanSlug) || 'gratis');
+        setEntitlements(org.entitlements || {});
+      }
+    } catch {
+      // ignore network error cleanly
+    } finally {
+      setLoadingAccess(false);
+    }
   }, []);
 
-  const initiateCheckout = () => {
+  useEffect(() => {
+    loadOrganizationModules();
+    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      setUser(currentUser);
+      loadOrganizationModules();
+    });
+    return () => unsubscribe();
+  }, [loadOrganizationModules]);
+
+  const handleHireModule = (mod: SaasModuleConfig) => {
+    setSelectedModule(mod);
     if (!user) {
-      showNotice('err', 'Debes iniciar sesión para contratar módulos.');
+      setIsAuthOpen(true);
       return;
     }
     setIsCheckoutOpen(true);
   };
 
-  const handleConfirmPayment = async (result: {
-    provider: string;
-    status: 'pending' | 'redirected';
-    message: string;
-  }) => {
-    if (!user || !selectedApp) return;
-
-    try {
-      const reqRef = doc(collection(db, 'module_requests'));
-      await setDoc(reqRef, {
-        userId: user.uid,
-        moduleId: selectedApp.id,
-        moduleName: selectedApp.name,
-        status: 'pending',
-        paymentMethod: result.provider,
-        createdAt: new Date().toISOString(),
-      });
-
-      showNotice('ok', result.message);
-      setIsCheckoutOpen(false);
-      setSelectedApp(null);
-    } catch (error) {
-      console.error('Error requesting module:', error);
-      showNotice('err', 'Error al registrar la solicitud del módulo.');
-    }
-  };
+  const modulesList = ALL_MODULE_SLUGS.map((slug) => SAAS_MODULES[slug]);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12">
-      <div className="max-w-6xl mx-auto px-6">
-        <div className="mb-10">
-          <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Módulos y Mejoras</h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Escala las capacidades de tu cuenta instalando aplicaciones y servicios integrados a tu ecosistema B2B.
-          </p>
-          {notice && (
-            <div
-              className={`mt-4 px-4 py-3 rounded-xl border text-xs font-semibold ${
-                notice.type === 'ok'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
-              }`}
-            >
-              {notice.text}
-            </div>
-          )}
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-6">
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              Catálogo Modular SaaS · {user ? `Plan actual: ${SAAS_PLANS[planSlug].displayName}` : 'Zona de Miembros'}
+            </p>
+            <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white tracking-tight text-balance">
+              Módulos Operativos y Servicios B2B
+            </h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 max-w-2xl">
+              Activá capacidades especializadas por empresa para logística con motor OSRM, almacenamiento WMS, auditoría fiscal KYB e integración Odoo ERP.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/planes')}
+            className="self-start md:self-auto px-4 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-white/5 transition whitespace-nowrap shrink-0"
+          >
+            Comparar Planes PyME (2 / 5 / 10 usuarios)
+          </button>
         </div>
 
+        {notice && (
+          <div
+            className={`mb-6 px-4 py-3 rounded-xl border text-xs font-semibold ${
+              notice.type === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+            }`}
+          >
+            {notice.text}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {apps.map((app) => (
-            <motion.div 
-              key={app.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white dark:bg-[#1A1625] rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-white/10 flex flex-col h-full"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center">
-                  <app.icon className="w-6 h-6 text-orange-500" />
+          {modulesList.map((mod) => {
+            const meta = MODULE_META[mod.slug];
+            const Icon = meta.icon;
+            const isEntitled = Boolean(entitlements[mod.slug]);
+            const includedInCurrentPlan = mod.includedInPlans.includes(planSlug);
+            const includedHint =
+              mod.includedInPlans.length > 0
+                ? `Incluido en ${mod.includedInPlans.map((p) => SAAS_PLANS[p].membershipLabel).join(' / ')}`
+                : 'Membresía dedicada';
+
+            return (
+              <div
+                key={mod.slug}
+                className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 flex flex-col h-full"
+              >
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200/70 dark:border-white/10 flex items-center justify-center shrink-0">
+                    <Icon className="w-5 h-5 text-orange-500" />
+                  </div>
+                  <div className="text-right text-xs text-slate-500 dark:text-slate-400">
+                    <span>{meta.category}</span>
+                    {user && !loadingAccess && (
+                      <>
+                        <span aria-hidden="true"> · </span>
+                        <span
+                          className={
+                            isEntitled
+                              ? 'font-semibold text-emerald-600 dark:text-emerald-400'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }
+                        >
+                          {isEntitled ? 'Habilitado' : 'Disponible'}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                {app.status === 'installed' ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-md text-[10px] font-bold uppercase tracking-wider">
-                    <CheckCircle className="w-3 h-3" /> Instalada
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-400 rounded-md text-[10px] font-bold uppercase tracking-wider">
-                    {app.category}
-                  </span>
-                )}
-              </div>
-              
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">{app.name}</h3>
-              <p className="text-sm text-slate-500 mb-6 flex-1">{app.description}</p>
-              
-              <div className="pt-6 border-t border-slate-100 dark:border-white/10 mt-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Precio</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">{app.price}</span>
+
+                <h2 className="text-lg font-display font-bold text-slate-900 dark:text-white mb-2">
+                  {mod.title}
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed mb-5 flex-1">
+                  {mod.description}
+                </p>
+
+                <ul className="space-y-1.5 mb-5 pt-4 border-t border-slate-100 dark:border-white/10">
+                  {mod.highlights.slice(0, 2).map((feat, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300"
+                    >
+                      <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{feat}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="pt-4 border-t border-slate-100 dark:border-white/10 mt-auto space-y-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {includedHint}
+                    </span>
+                    <span className="text-sm font-mono tabular-nums font-bold text-slate-900 dark:text-white whitespace-nowrap shrink-0">
+                      {includedInCurrentPlan && user ? 'Incluido' : mod.priceLabel}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {isEntitled ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(mod.routePath)}
+                        className="flex-1 py-2.5 px-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Abrir Módulo
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleHireModule(mod)}
+                        className="flex-1 py-2.5 px-4 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        Contratar Módulo
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedModule(mod)}
+                      className="py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 transition whitespace-nowrap shrink-0"
+                    >
+                      Detalles
+                    </button>
+                  </div>
                 </div>
-                
-                {app.status === 'installed' ? (
-                  <button 
-                    onClick={() => {
-                      if (app.id === 'logistica') navigate('/logistica');
-                      else if (app.id === 'warehousing') navigate('/warehousing');
-                      else navigate('/dashboard');
-                    }}
-                    className="w-full py-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-900 dark:text-white rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
-                  >
-                    <Settings className="w-4 h-4" /> Configurar / Abrir
-                  </button>
-                ) : (
-                  <button 
-                    onClick={() => setSelectedApp(app)}
-                    className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
-                  >
-                    Ver Detalles
-                  </button>
-                )}
               </div>
-            </motion.div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       <AnimatePresence>
-        {selectedApp && (
+        {selectedModule && !isCheckoutOpen && !isAuthOpen && (
           <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-              onClick={() => setSelectedApp(null)} 
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+              onClick={() => setSelectedModule(null)}
             />
-            
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-2xl z-[9999] bg-white dark:bg-[#1A1625] rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col max-h-[90vh]"
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              className="relative w-full max-w-2xl z-[9999] bg-white dark:bg-[#1A1625] rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col max-h-[90vh]"
             >
-              <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
-                <div className="flex items-start gap-4 mb-6">
-                  <div className="w-16 h-16 rounded-2xl bg-orange-100 dark:bg-orange-500/10 flex items-center justify-center shrink-0">
-                    <selectedApp.icon className="w-8 h-8 text-orange-500" />
+              <div className="flex items-start justify-between gap-4 p-6 border-b border-slate-200 dark:border-white/10">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+                    {React.createElement(MODULE_META[selectedModule.slug].icon, {
+                      className: 'w-6 h-6 text-orange-500',
+                    })}
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest text-orange-500 mb-1 block">{selectedApp.category}</span>
-                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">{selectedApp.name}</h2>
-                    <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{selectedApp.description}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      {MODULE_META[selectedModule.slug].category} · {selectedModule.shortName}
+                    </p>
+                    <h2 className="text-xl font-display font-bold text-slate-900 dark:text-white">
+                      {selectedModule.title}
+                    </h2>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedModule(null)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                  aria-label="Cerrar detalles"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-                <div className="bg-slate-50 dark:bg-black/20 rounded-2xl p-6 mb-6 border border-slate-200 dark:border-white/5">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-4 uppercase tracking-wider">Características Inclusas</h3>
-                  <ul className="space-y-3">
-                    {selectedApp.features.map((feature: string, i: number) => (
-                      <li key={i} className="flex items-start gap-3">
-                        <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                        <span className="text-slate-700 dark:text-slate-300 text-sm">{feature}</span>
+              <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {selectedModule.description}
+                </p>
+
+                <div className="rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 p-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+                    Alcance Funcional en Producción
+                  </h3>
+                  <ul className="space-y-2.5">
+                    {selectedModule.highlights.map((feature, i) => (
+                      <li key={i} className="flex items-start gap-2.5 text-sm text-slate-700 dark:text-slate-200">
+                        <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                        <span>{feature}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
 
-                {(selectedApp.id === 'logistica' || selectedApp.id === 'warehousing') && (
-                  <div className="mb-6">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3 uppercase tracking-wider">Proveedores Integrados y Tarifas (Demo)</h3>
-                    <div className="border border-slate-200 dark:border-white/10 rounded-xl overflow-hidden">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/10 text-xs text-slate-500">
-                          <tr>
-                            <th className="px-4 py-3 font-semibold">Proveedor</th>
-                            <th className="px-4 py-3 font-semibold">Servicio</th>
-                            <th className="px-4 py-3 font-semibold text-right">Tarifa Base</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedApp.id === 'logistica' ? (
-                            <>
-                              <tr className="border-b border-slate-100 dark:border-white/5">
-                                <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">Cruz del Sur</td>
-                                <td className="px-4 py-3 text-slate-600 dark:text-slate-400">Carga General Patagonia</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-amber-500">$850 / kg</td>
-                              </tr>
-                              <tr className="border-b border-slate-100 dark:border-white/5">
-                                <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">Andreani B2B</td>
-                                <td className="px-4 py-3 text-slate-600 dark:text-slate-400">Paquetería Express</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-amber-500">$12.000 / bulto</td>
-                              </tr>
-                            </>
-                          ) : (
-                            <>
-                              <tr className="border-b border-slate-100 dark:border-white/5">
-                                <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">Parque Ind. Comodoro</td>
-                                <td className="px-4 py-3 text-slate-600 dark:text-slate-400">Posición Pallet Mensual</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-amber-500">$18.500 / pos</td>
-                              </tr>
-                              <tr className="border-b border-slate-100 dark:border-white/5">
-                                <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">Almacenes del Sur Neuquén</td>
-                                <td className="px-4 py-3 text-slate-600 dark:text-slate-400">Bodega Techada 50m2</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-amber-500">$250.000 / mes</td>
-                              </tr>
-                            </>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {selectedModule.includedInPlans.length > 0 ? (
+                    <span>
+                      Incluido automáticamente en:{' '}
+                      <strong className="text-slate-800 dark:text-slate-200">
+                        {selectedModule.includedInPlans
+                          .map((p) => SAAS_PLANS[p].displayName)
+                          .join(', ')}
+                      </strong>
+                    </span>
+                  ) : (
+                    <span>
+                      Este módulo se contrata como membresía independiente para operadores y flotas.
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="p-6 md:px-8 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] flex justify-between items-center gap-4">
+              <div className="p-6 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Inversión Mensual</p>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{selectedApp.price}</p>
+                  <p className="text-xs text-slate-500">Arancel Mensual</p>
+                  <p className="text-2xl font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+                    {selectedModule.priceLabel}
+                  </p>
                 </div>
-                <div className="flex gap-3">
-                  <button 
-                    onClick={() => setSelectedApp(null)}
-                    className="px-6 py-3 font-bold text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedModule(null)}
+                    className="px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white whitespace-nowrap shrink-0"
                   >
-                    Cancelar
+                    Cerrar
                   </button>
-                  <button 
-                    onClick={initiateCheckout}
-                    className="flex items-center px-6 py-3 bg-gradient-to-r from-orange-500 to-purple-600 hover:opacity-90 text-white font-bold text-sm rounded-xl transition"
-                  >
-                    Contratar e Instalar
-                  </button>
+                  {entitlements[selectedModule.slug] ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate(selectedModule.routePath)}
+                      className="px-5 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-2"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Ir al Módulo
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleHireModule(selectedModule)}
+                      className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-2"
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      Contratar Módulo
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -318,16 +361,27 @@ export default function AppStore() {
         )}
       </AnimatePresence>
 
-      {selectedApp && (
-        <CheckoutModal 
-          isOpen={isCheckoutOpen} 
-          onClose={() => setIsCheckoutOpen(false)} 
-          onConfirm={handleConfirmPayment}
-          moduleName={selectedApp.name}
-          price={selectedApp.price}
-          targetSlug={selectedApp.id}
+      {selectedModule && (
+        <CheckoutModal
+          isOpen={isCheckoutOpen}
+          onClose={() => setIsCheckoutOpen(false)}
+          moduleName={selectedModule.title}
+          price={selectedModule.priceLabel}
+          targetSlug={selectedModule.billingSlug}
+          onConfirm={async (result) => {
+            setIsCheckoutOpen(false);
+            setSelectedModule(null);
+            await loadOrganizationModules();
+            showNotice('ok', result.message);
+          }}
         />
       )}
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        initialMode="login"
+      />
     </div>
   );
 }

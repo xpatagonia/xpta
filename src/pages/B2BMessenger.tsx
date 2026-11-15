@@ -10,6 +10,7 @@ import {
 import { auth, db } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
 import { Link } from 'react-router-dom';
+import ModuleAccessGate from '../components/ModuleAccessGate';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 
@@ -222,7 +223,7 @@ function playTone(type: 'message' | 'call' | 'connect') {
   }
 }
 
-export default function B2BMessenger() {
+function B2BMessengerWorkspace() {
   const [currentUserStatus, setCurrentUserStatus] = useState<UserStatus>('online');
   const [userStatusMessage, setUserStatusMessage] = useState('Disponible para operaciones B2B');
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -496,12 +497,8 @@ export default function B2BMessenger() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold tracking-tight text-white font-display">Patagonia Link</h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-orange-500/20 text-orange-400 border border-orange-500/30">
-                  B2B Messenger
-                </span>
-                <span className="flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Red Activa
+                <span className="text-xs text-slate-400">
+                  Mensajería B2B · Red Miembros
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -1027,3 +1024,12 @@ export default function B2BMessenger() {
     </div>
   );
 }
+
+export default function B2BMessenger() {
+  return (
+    <ModuleAccessGate moduleSlug="chat_b2b">
+      <B2BMessengerWorkspace />
+    </ModuleAccessGate>
+  );
+}
+

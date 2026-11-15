@@ -262,6 +262,7 @@ var init_schema = __esm({
       // 'gratis' (2) | 'pro' (5) | 'corporativo' (10)
       seatLimit: integer("seat_limit").notNull().default(2),
       logisticsPlanActive: boolean("logistics_plan_active").notNull().default(false),
+      activeModules: jsonb("active_modules").default("[]"),
       createdAt: timestamp("created_at").defaultNow(),
       updatedAt: timestamp("updated_at").defaultNow()
     });
@@ -1065,6 +1066,7 @@ async function ensureProductionTables() {
         plan_slug text NOT NULL DEFAULT 'gratis',
         seat_limit integer NOT NULL DEFAULT 2,
         logistics_plan_active boolean NOT NULL DEFAULT false,
+        active_modules jsonb DEFAULT '[]'::jsonb,
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
@@ -1137,6 +1139,9 @@ async function ensureProductionTables() {
 
       ALTER TABLE IF EXISTS public.inventory_items
         ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.organizations
+        ADD COLUMN IF NOT EXISTS active_modules jsonb DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS public.fleet_vehicles (
         id serial PRIMARY KEY,
@@ -2376,14 +2381,85 @@ function canAddOrganizationSeat(currentUsedSeats, seatLimit) {
   }
   return { allowed: true, remaining };
 }
+function normalizeModuleSlug(raw) {
+  const clean = String(raw || "").trim().toLowerCase();
+  if (!clean) return null;
+  if (clean === "logistica" || clean === "logistica_flota" || clean === "fleet") {
+    return "logistica_flota";
+  }
+  if (clean === "warehousing" || clean === "wms") return "warehousing";
+  if (clean === "kyb" || clean === "kyb_compliance" || clean === "compliance") {
+    return "kyb_compliance";
+  }
+  if (clean === "erp" || clean === "erp_sync" || clean === "odoo") return "erp_sync";
+  if (clean === "ecommerce" || clean === "ecommerce_b2b") return "ecommerce_b2b";
+  if (clean === "chat" || clean === "chat_b2b") return "chat_b2b";
+  return null;
+}
 function canAccessLogisticsSuite(params) {
   if (params.logisticsPlanActive) return true;
+  if (Array.isArray(params.rawActiveModules)) {
+    for (const item of params.rawActiveModules) {
+      if (normalizeModuleSlug(String(item || "")) === "logistica_flota") return true;
+    }
+  }
   const membership = String(params.membershipName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (membership.includes("logist")) return true;
   if (params.roleName === "system_admin") return true;
   return false;
 }
-var SAAS_PLANS, LOGISTICS_MEMBERSHIP;
+function resolveEffectiveModules(params) {
+  if (params.roleName === "system_admin") {
+    return [...ALL_MODULE_SLUGS];
+  }
+  const resolvedPlan = resolvePlanConfig(params.planSlug || params.membershipName);
+  const set = new Set(INCLUDED_MODULES_BY_PLAN[resolvedPlan.slug] || []);
+  if (Array.isArray(params.rawActiveModules)) {
+    for (const entry of params.rawActiveModules) {
+      const normalized = normalizeModuleSlug(String(entry || ""));
+      if (normalized) set.add(normalized);
+    }
+  } else if (typeof params.rawActiveModules === "string") {
+    try {
+      const parsed = JSON.parse(params.rawActiveModules);
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          const normalized = normalizeModuleSlug(String(entry || ""));
+          if (normalized) set.add(normalized);
+        }
+      }
+    } catch {
+    }
+  }
+  if (canAccessLogisticsSuite({
+    logisticsPlanActive: params.logisticsPlanActive,
+    membershipName: params.membershipName,
+    roleName: params.roleName,
+    rawActiveModules: params.rawActiveModules
+  })) {
+    set.add("logistica_flota");
+  }
+  return ALL_MODULE_SLUGS.filter((slug) => set.has(slug));
+}
+function buildEntitlementsMap(modules) {
+  const set = new Set(modules);
+  return {
+    logistica_flota: set.has("logistica_flota"),
+    warehousing: set.has("warehousing"),
+    kyb_compliance: set.has("kyb_compliance"),
+    erp_sync: set.has("erp_sync"),
+    ecommerce_b2b: set.has("ecommerce_b2b"),
+    chat_b2b: set.has("chat_b2b")
+  };
+}
+function hasModuleEntitlement(params, moduleSlug) {
+  if (params.roleName === "system_admin") return true;
+  if (Array.isArray(params.activeModules)) {
+    return params.activeModules.includes(moduleSlug);
+  }
+  return resolveEffectiveModules(params).includes(moduleSlug);
+}
+var SAAS_PLANS, LOGISTICS_MEMBERSHIP, INCLUDED_MODULES_BY_PLAN, SAAS_MODULES, ALL_MODULE_SLUGS;
 var init_saasPlans = __esm({
   "src/services/saasPlans.ts"() {
     SAAS_PLANS = {
@@ -2422,6 +2498,117 @@ var init_saasPlans = __esm({
       priceLabel: "$95.000 ARS/mes",
       seatLimit: 10
     };
+    INCLUDED_MODULES_BY_PLAN = {
+      gratis: ["chat_b2b"],
+      pro: ["ecommerce_b2b", "chat_b2b"],
+      corporativo: ["warehousing", "kyb_compliance", "erp_sync", "ecommerce_b2b", "chat_b2b"]
+    };
+    SAAS_MODULES = {
+      logistica_flota: {
+        slug: "logistica_flota",
+        billingSlug: "logistica_flota",
+        title: "Log\xEDstica Pro, Rutas OSRM & Bolsa de Cargas",
+        shortName: "Log\xEDstica Pro & OSRM",
+        priceMonthlyArs: 95e3,
+        priceLabel: "$95.000 ARS/mes",
+        includedInPlans: [],
+        routePath: "/logistica",
+        description: "Motor vial OSRM real sobre Patagonia, c\xE1lculo de di\xE9sel y peajes, Bolsa de Cargas y Retornos Vac\xEDos (-35%), padr\xF3n de flota/choferes LINTI y remitos QR.",
+        highlights: [
+          "C\xE1lculo vial OSRM dedicado y OpenStreetMap",
+          "Publicaci\xF3n y postulaci\xF3n directa en Bolsa de Cargas",
+          "Alertas de VTV 15 d\xEDas, licencias LINTI y contratos digitales"
+        ]
+      },
+      warehousing: {
+        slug: "warehousing",
+        billingSlug: "warehousing",
+        title: "Warehousing WMS & C\xE1maras de Fr\xEDo",
+        shortName: "Warehousing WMS",
+        priceMonthlyArs: 45e3,
+        priceLabel: "$45.000 ARS/mes",
+        includedInPlans: ["corporativo"],
+        routePath: "/warehousing",
+        description: "Control multi-dep\xF3sito (CABA, Comodoro, Neuqu\xE9n), gesti\xF3n de SKUs, alertas de quiebre de stock, reserva de bah\xEDas de fr\xEDo y despacho PDF.",
+        highlights: [
+          "Inventario multi-sede en tiempo real conectado a Postgres",
+          "Reserva de muelles de carga y monitoreo de c\xE1maras frigor\xEDficas",
+          "Incluido sin cargo en Plan Corporativo"
+        ]
+      },
+      kyb_compliance: {
+        slug: "kyb_compliance",
+        billingSlug: "kyb_compliance",
+        title: "Validaci\xF3n KYB (ARCA/BCRA) & Vendor Pack PDF",
+        shortName: "Compliance KYB",
+        priceMonthlyArs: 35e3,
+        priceLabel: "$35.000 ARS/mes",
+        includedInPlans: ["corporativo"],
+        routePath: "/perfil-empresa",
+        description: "Auditor\xEDa fiscal por CUIT ante ARCA, situaci\xF3n crediticia BCRA en tiempo real, extracci\xF3n de c\xF3digos CLAE y descarga oficial de Vendor Pack PDF.",
+        highlights: [
+          "Consulta fiscal ARCA y central de deudores BCRA",
+          "Emisi\xF3n de sello Verificado oficial y legajo de proveedor",
+          "Incluido sin cargo en Plan Corporativo"
+        ]
+      },
+      erp_sync: {
+        slug: "erp_sync",
+        billingSlug: "erp_sync",
+        title: "ADN Vectorial pgvector & Conector Odoo / n8n",
+        shortName: "Odoo ERP & ADN IA",
+        priceMonthlyArs: 55e3,
+        priceLabel: "$55.000 ARS/mes",
+        includedInPlans: ["corporativo"],
+        routePath: "/dashboard",
+        description: "Matching sem\xE1ntico vectorial entre oferta y demanda industrial patag\xF3nica junto a sincronizaci\xF3n bidireccional de clientes y oportunidades con Odoo ERP.",
+        highlights: [
+          "Webhooks en tiempo real hacia Odoo VPS y flujos n8n",
+          "Matching vectorial de contratos por similitud productiva",
+          "Incluido sin cargo en Plan Corporativo"
+        ]
+      },
+      ecommerce_b2b: {
+        slug: "ecommerce_b2b",
+        billingSlug: "ecommerce_b2b",
+        title: "E-commerce Mayorista & Portal de Ventas B2B",
+        shortName: "E-commerce B2B",
+        priceMonthlyArs: 29900,
+        priceLabel: "$29.900 ARS/mes",
+        includedInPlans: ["pro", "corporativo"],
+        routePath: "/ecommerce",
+        description: "Publicaci\xF3n de cat\xE1logo mayorista con precios escalonados, pedidos de reposici\xF3n recurrente, licitaciones y control de stock m\xEDnimo.",
+        highlights: [
+          "Precios base y mayoristas diferenciados por CUIT",
+          "Cat\xE1logo indexado en Marketplace B2B y comparador RFQ",
+          "Incluido sin cargo en Plan Pro Industria y Corporativo"
+        ]
+      },
+      chat_b2b: {
+        slug: "chat_b2b",
+        billingSlug: "chat_b2b",
+        title: "Patagonia Link \xB7 Mensajer\xEDa & Mesas de Negociaci\xF3n",
+        shortName: "Chat B2B",
+        priceMonthlyArs: 19900,
+        priceLabel: "$19.900 ARS/mes",
+        includedInPlans: ["gratis", "pro", "corporativo"],
+        routePath: "/chat",
+        description: "Comunicaci\xF3n directa entre empresas registradas en Zona de Miembros con tarjetas de licitaci\xF3n RFQ vinculadas y salas sectoriales.",
+        highlights: [
+          "Exclusivo para empresas registradas (oculto al p\xFAblico)",
+          "Hilos persistentes por corredor, log\xEDstica y compras",
+          "Salas privadas y videollamadas para miembros verificados"
+        ]
+      }
+    };
+    ALL_MODULE_SLUGS = [
+      "logistica_flota",
+      "warehousing",
+      "kyb_compliance",
+      "erp_sync",
+      "ecommerce_b2b",
+      "chat_b2b"
+    ];
   }
 });
 
@@ -2485,13 +2672,31 @@ async function applyApprovedBillingUpgrade(txRow) {
        WHERE id = $3`,
       [plan.slug, plan.seatLimit, orgId]
     );
-  } else if (txRow.target_type === "logistics" && orgId) {
-    await pool.query(
-      `UPDATE public.organizations
-       SET logistics_plan_active = true, updated_at = now()
-       WHERE id = $1`,
+  } else if ((txRow.target_type === "logistics" || txRow.target_type === "module") && orgId) {
+    const canonicalSlug = normalizeModuleSlug(txRow.target_slug) || txRow.target_slug;
+    const orgRes = await pool.query(
+      `SELECT active_modules, logistics_plan_active FROM public.organizations WHERE id = $1`,
       [orgId]
     );
+    const existingRaw = Array.isArray(orgRes.rows?.[0]?.active_modules) ? orgRes.rows[0].active_modules : [];
+    const nextSet = new Set(existingRaw.map((s) => String(s)));
+    nextSet.add(canonicalSlug);
+    const activatesLogistics = txRow.target_type === "logistics" || canonicalSlug === "logistica_flota";
+    await pool.query(
+      `UPDATE public.organizations
+       SET active_modules = $1::jsonb,
+           logistics_plan_active = (logistics_plan_active OR $2),
+           updated_at = now()
+       WHERE id = $3`,
+      [JSON.stringify(Array.from(nextSet)), activatesLogistics, orgId]
+    );
+    await pool.query(
+      `UPDATE public.module_requests
+       SET status = 'approved'
+       WHERE user_uid = $1 AND (module_id = $2 OR module_id = $3) AND status = 'pending'`,
+      [txRow.user_uid, txRow.target_slug, canonicalSlug]
+    ).catch(() => {
+    });
   } else if (txRow.target_type === "module") {
     await pool.query(
       `UPDATE public.module_requests
@@ -2505,14 +2710,15 @@ async function applyApprovedBillingUpgrade(txRow) {
 async function hasApprovedPaidEntitlement(params) {
   if (!hasDatabaseConfig()) return false;
   await ensureProductionTables();
+  const canonical = normalizeModuleSlug(params.targetSlug);
   const res = await pool.query(
     `SELECT id FROM public.billing_transactions
      WHERE status = 'approved'
-       AND target_type = $1
-       AND target_slug = $2
+       AND (target_type = $1 OR ($1 IN ('logistics', 'module') AND target_type IN ('logistics', 'module')))
+       AND (target_slug = $2 OR ($5::text IS NOT NULL AND target_slug = $5))
        AND (organization_id = $3 OR user_uid = $4)
      ORDER BY updated_at DESC LIMIT 1`,
-    [params.targetType, params.targetSlug, params.organizationId, params.userUid]
+    [params.targetType, params.targetSlug, params.organizationId, params.userUid, canonical]
   );
   return (res.rows || []).length > 0;
 }
@@ -2550,8 +2756,32 @@ var init_billingService = __esm({
       warehousing: {
         targetType: "module",
         slug: "warehousing",
-        title: "M\xF3dulo Warehousing & Almacenamiento",
-        amountArs: 45e3
+        title: SAAS_MODULES.warehousing.title,
+        amountArs: SAAS_MODULES.warehousing.priceMonthlyArs
+      },
+      kyb_compliance: {
+        targetType: "module",
+        slug: "kyb_compliance",
+        title: SAAS_MODULES.kyb_compliance.title,
+        amountArs: SAAS_MODULES.kyb_compliance.priceMonthlyArs
+      },
+      erp_sync: {
+        targetType: "module",
+        slug: "erp_sync",
+        title: SAAS_MODULES.erp_sync.title,
+        amountArs: SAAS_MODULES.erp_sync.priceMonthlyArs
+      },
+      ecommerce_b2b: {
+        targetType: "module",
+        slug: "ecommerce_b2b",
+        title: SAAS_MODULES.ecommerce_b2b.title,
+        amountArs: SAAS_MODULES.ecommerce_b2b.priceMonthlyArs
+      },
+      chat_b2b: {
+        targetType: "module",
+        slug: "chat_b2b",
+        title: SAAS_MODULES.chat_b2b.title,
+        amountArs: SAAS_MODULES.chat_b2b.priceMonthlyArs
       }
     };
   }
@@ -2647,10 +2877,19 @@ async function resolveTenantContext(uid, email, membershipName, roleName) {
   const pendingInvitesCount = Number(invitesCountRes.rows?.[0]?.cnt || 0);
   const plan = resolvePlanConfig(orgRow.plan_slug || membershipName);
   const seatLimit = Number(orgRow.seat_limit) || plan.seatLimit;
-  const hasLogisticsAccess = canAccessLogisticsSuite({
+  const activeModules = resolveEffectiveModules({
+    planSlug: plan.slug,
     logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    rawActiveModules: orgRow.active_modules,
     membershipName,
     roleName
+  });
+  const entitlements = buildEntitlementsMap(activeModules);
+  const hasLogisticsAccess = entitlements.logistica_flota || canAccessLogisticsSuite({
+    logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    membershipName,
+    roleName,
+    rawActiveModules: orgRow.active_modules
   });
   return {
     organizationId: Number(orgRow.id),
@@ -2663,9 +2902,60 @@ async function resolveTenantContext(uid, email, membershipName, roleName) {
     activeMembersCount,
     pendingInvitesCount,
     orgRole,
-    logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
-    hasLogisticsAccess
+    logisticsPlanActive: Boolean(orgRow.logistics_plan_active) || entitlements.logistica_flota,
+    hasLogisticsAccess,
+    activeModules,
+    entitlements
   };
+}
+async function ensureModuleAccess(req, res, moduleSlug) {
+  if (!req.user?.uid) {
+    res.status(401).json({ error: "Autenticaci\xF3n requerida" });
+    return { allowed: false, tenant: null };
+  }
+  if (req.user.roleName === "system_admin") {
+    const tenant2 = await resolveTenantContext(
+      req.user.uid,
+      req.user.email,
+      req.user.membershipName,
+      req.user.roleName
+    ).catch(() => null);
+    return { allowed: true, tenant: tenant2 };
+  }
+  const tenant = await resolveTenantContext(
+    req.user.uid,
+    req.user.email,
+    req.user.membershipName,
+    req.user.roleName
+  ).catch(() => null);
+  const allowed = tenant ? hasModuleEntitlement(
+    {
+      planSlug: tenant.planSlug,
+      logisticsPlanActive: tenant.logisticsPlanActive,
+      activeModules: tenant.activeModules,
+      membershipName: req.user.membershipName,
+      roleName: req.user.roleName
+    },
+    moduleSlug
+  ) : hasModuleEntitlement(
+    {
+      membershipName: req.user.membershipName,
+      roleName: req.user.roleName
+    },
+    moduleSlug
+  );
+  if (!allowed) {
+    const modMeta = SAAS_MODULES[moduleSlug];
+    res.status(403).json({
+      error: `El m\xF3dulo "${modMeta.title}" requiere suscripci\xF3n activa o plan habilitado.`,
+      code: "MODULE_ENTITLEMENT_REQUIRED",
+      requiresModule: moduleSlug,
+      moduleTitle: modMeta.title,
+      priceMonthlyArs: modMeta.priceMonthlyArs
+    });
+    return { allowed: false, tenant };
+  }
+  return { allowed: true, tenant };
 }
 async function upsertLinkedContactFromArn(params) {
   if (!hasDatabaseConfig()) return null;
@@ -2762,6 +3052,12 @@ function registerSaasAndFleetRoutes(app, deps) {
         req.user.roleName
       );
       if (!tenant) {
+        const fallbackModules = resolveEffectiveModules({
+          planSlug: "gratis",
+          membershipName: req.user.membershipName,
+          roleName: req.user.roleName
+        });
+        const fallbackEntitlements = buildEntitlementsMap(fallbackModules);
         return res.json({
           organization: {
             id: 0,
@@ -2770,8 +3066,10 @@ function registerSaasAndFleetRoutes(app, deps) {
             planName: SAAS_PLANS.gratis.displayName,
             seatLimit: 2,
             usedSeats: 1,
-            logisticsPlanActive: false,
-            hasLogisticsAccess: false
+            logisticsPlanActive: fallbackEntitlements.logistica_flota,
+            hasLogisticsAccess: fallbackEntitlements.logistica_flota,
+            activeModules: fallbackModules,
+            entitlements: fallbackEntitlements
           },
           members: [
             {
@@ -2783,6 +3081,7 @@ function registerSaasAndFleetRoutes(app, deps) {
           ],
           invitations: [],
           plansCatalog: Object.values(SAAS_PLANS),
+          modulesCatalog: Object.values(SAAS_MODULES),
           logisticsMembership: LOGISTICS_MEMBERSHIP
         });
       }
@@ -2807,6 +3106,7 @@ function registerSaasAndFleetRoutes(app, deps) {
         members: membersRes.rows || [],
         invitations: invitesRes.rows || [],
         plansCatalog: Object.values(SAAS_PLANS),
+        modulesCatalog: Object.values(SAAS_MODULES),
         logisticsMembership: LOGISTICS_MEMBERSHIP
       });
     } catch (err) {
@@ -2970,6 +3270,7 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
       const body = req.body || {};
       const nextPlan = body.planSlug ? resolvePlanConfig(body.planSlug) : resolvePlanConfig(tenant.planSlug);
       const nextLogistics = typeof body.logisticsPlanActive === "boolean" ? body.logisticsPlanActive : tenant.logisticsPlanActive;
+      const requestedModule = body.activateModuleSlug ? normalizeModuleSlug(String(body.activateModuleSlug)) : null;
       const nextName = typeof body.orgName === "string" && body.orgName.trim() ? body.orgName.trim() : tenant.orgName;
       const isSysAdmin = req.user.roleName === "system_admin";
       if (!isSysAdmin) {
@@ -3007,23 +3308,62 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
             });
           }
         }
+        if (requestedModule && !tenant.activeModules.includes(requestedModule)) {
+          const paidModule = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user.uid,
+            targetType: "module",
+            targetSlug: requestedModule
+          });
+          if (!paidModule) {
+            const modMeta = SAAS_MODULES[requestedModule];
+            return res.status(402).json({
+              error: `El m\xF3dulo "${modMeta.title}" requiere pago acreditado antes de activarse.`,
+              requiresPayment: true,
+              targetType: requestedModule === "logistica_flota" ? "logistics" : "module",
+              targetSlug: requestedModule
+            });
+          }
+        }
       }
       if (tenant.usedSeats > nextPlan.seatLimit) {
         return res.status(400).json({
           error: `Actualmente ten\xE9s ${tenant.usedSeats} asientos ocupados. Liber\xE1 miembros o invitaciones antes de bajar a un plan de ${nextPlan.seatLimit} usuarios.`
         });
       }
+      const orgModsRes = await pool.query(
+        `SELECT active_modules FROM public.organizations WHERE id = $1`,
+        [tenant.organizationId]
+      );
+      const storedRawMods = Array.isArray(orgModsRes.rows?.[0]?.active_modules) ? orgModsRes.rows[0].active_modules : [];
+      const modSet = new Set(storedRawMods.map((s) => String(s)));
+      if (requestedModule) modSet.add(requestedModule);
+      if (nextLogistics) modSet.add("logistica_flota");
+      if (body.logisticsPlanActive === false) modSet.delete("logistica_flota");
       await pool.query(
         `UPDATE public.organizations
-         SET plan_slug = $1, seat_limit = $2, logistics_plan_active = $3, name = $4, updated_at = now()
-         WHERE id = $5`,
-        [nextPlan.slug, nextPlan.seatLimit, nextLogistics, nextName, tenant.organizationId]
+         SET plan_slug = $1,
+             seat_limit = $2,
+             logistics_plan_active = $3,
+             active_modules = $4::jsonb,
+             name = $5,
+             updated_at = now()
+         WHERE id = $6`,
+        [
+          nextPlan.slug,
+          nextPlan.seatLimit,
+          nextLogistics || modSet.has("logistica_flota"),
+          JSON.stringify(Array.from(modSet)),
+          nextName,
+          tenant.organizationId
+        ]
       );
       await deps.recordAutomationEvent("outbound_n8n", "saas.plan.updated", "processed", {
         organizationId: tenant.organizationId,
         planSlug: nextPlan.slug,
         seatLimit: nextPlan.seatLimit,
-        logisticsPlanActive: nextLogistics
+        logisticsPlanActive: nextLogistics,
+        requestedModule
       });
       const updatedTenant = await resolveTenantContext(
         req.user.uid,
@@ -5104,6 +5444,8 @@ ${mail.text || mail.snippet || ""}`,
   });
   app.get("/api/warehousing/inventory", requireAuth, async (req, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "warehousing");
+      if (!access.allowed) return;
       if (!hasDatabaseConfig()) return res.json({ items: [] });
       await ensureProductionTables();
       const rows = await pool.query(
@@ -5117,6 +5459,8 @@ ${mail.text || mail.snippet || ""}`,
   });
   app.post("/api/warehousing/inventory", requireAuth, async (req, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "warehousing");
+      if (!access.allowed) return;
       const { sku, name, category, quantity, location } = req.body || {};
       if (!name) return res.status(400).json({ error: "Nombre de \xEDtem requerido" });
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
@@ -5141,9 +5485,11 @@ ${mail.text || mail.snippet || ""}`,
       res.status(500).json({ error: formatPgError(err) });
     }
   });
-  app.get("/api/logistics/loads", async (req, res) => {
+  app.get("/api/logistics/loads", requireAuth, async (req, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
       if (!hasDatabaseConfig()) return res.json({ loads: [] });
       await ensureProductionTables();
       const rows = await pool.query(
@@ -5156,6 +5502,8 @@ ${mail.text || mail.snippet || ""}`,
   });
   app.post("/api/logistics/loads", requireAuth, async (req, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
       const b = req.body || {};
       if (!b.originName || !b.destinationName) {
         return res.status(400).json({ error: "Origen y destino son obligatorios." });
@@ -5985,6 +6333,8 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
 }
 
 // src/server/createApp.ts
+init_saasAndFleetRoutes();
+init_saasPlans();
 init_vpsWorkerService();
 
 // src/services/marketService.ts
@@ -6655,14 +7005,28 @@ function createApiApp() {
       res.status(500).json({ error: "Internal server error" });
     }
   });
-  app.get("/api/me/access", requireAuth, (req, res) => {
+  app.get("/api/me/access", requireAuth, async (req, res) => {
     const roleName = req.user?.roleName || "vendor";
+    const membershipName = req.user?.membershipName || "Basic";
+    const tenant = req.user?.uid ? await resolveTenantContext(
+      req.user.uid,
+      req.user.email,
+      membershipName,
+      roleName
+    ).catch(() => null) : null;
+    const activeModules = tenant ? tenant.activeModules : resolveEffectiveModules({ membershipName, roleName });
+    const entitlements = tenant ? tenant.entitlements : buildEntitlementsMap(activeModules);
     res.json({
       uid: req.user?.uid,
       email: req.user?.email,
       roleName,
-      membershipName: req.user?.membershipName || "Basic",
-      isAdmin: ["system_admin", "content_editor"].includes(roleName)
+      membershipName,
+      isAdmin: ["system_admin", "content_editor"].includes(roleName),
+      organizationId: tenant?.organizationId || null,
+      planSlug: tenant?.planSlug || "gratis",
+      hasLogisticsAccess: entitlements.logistica_flota,
+      activeModules,
+      entitlements
     });
   });
   app.get(
@@ -7368,45 +7732,57 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
       res.status(500).json({ error: "Failed to fetch currency rates" });
     }
   });
-  app.get("/api/logistics/route", async (req, res) => {
-    try {
+  app.get(
+    "/api/logistics/route",
+    (req, res, next) => {
       const from = String(req.query.from || "");
       const to = String(req.query.to || "");
       if (!from || !to) {
         return res.status(400).json({ error: "Missing from/to coordinates (lng,lat)" });
       }
-      const candidates = [];
-      if (process.env.OSRM_BASE_URL) {
-        candidates.push({
-          base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""),
-          label: "Supermicro OSRM"
-        });
-      }
-      candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
-      for (const candidate of candidates) {
-        try {
-          const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
-          const headers = {};
-          if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
-            headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
-            headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
-          }
-          const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
-          if (!osrmRes.ok) continue;
-          const data = await osrmRes.json();
-          if (data?.routes?.[0]) {
-            return res.json({ routes: data.routes, engineUsed: candidate.label });
-          }
-        } catch {
+      return requireAuth(req, res, next);
+    },
+    async (req, res) => {
+      try {
+        const access = await ensureModuleAccess(req, res, "logistica_flota");
+        if (!access.allowed) return;
+        const from = String(req.query.from || "");
+        const to = String(req.query.to || "");
+        const candidates = [];
+        if (process.env.OSRM_BASE_URL) {
+          candidates.push({
+            base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""),
+            label: "Supermicro OSRM"
+          });
         }
+        candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
+        for (const candidate of candidates) {
+          try {
+            const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+            const headers = {};
+            if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+              headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
+              headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
+            }
+            const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
+            if (!osrmRes.ok) continue;
+            const data = await osrmRes.json();
+            if (data?.routes?.[0]) {
+              return res.json({ routes: data.routes, engineUsed: candidate.label });
+            }
+          } catch {
+          }
+        }
+        res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
+      } catch (error) {
+        res.status(500).json({ error: error.message || "Failed to calculate route" });
       }
-      res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
-    } catch (error) {
-      res.status(500).json({ error: error.message || "Failed to calculate route" });
     }
-  });
+  );
   app.post("/api/logistics/reverse-auction", requireAuth, async (req, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
       const payload = {
         event: "logistics.reverse_auction.created",
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -7446,6 +7822,8 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   });
   app.post("/api/crm/sync-odoo", requireAuth, async (req, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "erp_sync");
+      if (!access.allowed) return;
       const payload = {
         event: "crm.company.sync_odoo",
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),

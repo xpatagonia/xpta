@@ -13,6 +13,8 @@ import {
   parseCustomChartSeries,
   resolveFontFamilyCss,
   isLightColor,
+  resolveContrastSafeTextColor,
+  PUBLIC_RESTRICTED_PATHS,
   SECTION_DEFAULT_BLOCKS,
 } from '../src/lib/siteSettings.ts';
 import { sanitizeApiBaseUrl } from '../src/lib/apiConfig.ts';
@@ -273,3 +275,54 @@ test('mergeSettings preserves section blockOverrides and customBlocks while hydr
     assert.ok(SECTION_DEFAULT_BLOCKS[id].length > 0);
   }
 });
+
+test('resolveContrastSafeTextColor blocks light-on-light and dark-on-dark typography conflicts', () => {
+  // Light/white surface in Sun Mode -> light/white text MUST be rejected (returns undefined so dark fallback takes over)
+  assert.equal(resolveContrastSafeTextColor('#F8FAFC', true), undefined);
+  assert.equal(resolveContrastSafeTextColor('#FFFFFF', true), undefined);
+  assert.equal(resolveContrastSafeTextColor('#e2e8f0', true), undefined);
+  assert.equal(resolveContrastSafeTextColor('#0F172A', true), '#0F172A');
+
+  // Dark surface in Moon Mode -> dark text MUST be rejected
+  assert.equal(resolveContrastSafeTextColor('#0F172A', false), undefined);
+  assert.equal(resolveContrastSafeTextColor('#111827', false), undefined);
+  assert.equal(resolveContrastSafeTextColor('#F8FAFC', false), '#F8FAFC');
+});
+
+test('mergeSettings strips Member Zone restricted routes from public header menu and patagonia-default clears stale textColor', () => {
+  assert.ok(PUBLIC_RESTRICTED_PATHS.has('/logistica'));
+  assert.ok(PUBLIC_RESTRICTED_PATHS.has('/chat'));
+  assert.ok(PUBLIC_RESTRICTED_PATHS.has('/warehousing'));
+
+  const merged = mergeSettings({
+    menu: {
+      ...DEFAULT_SITE_SETTINGS.menu,
+      items: [
+        ...DEFAULT_SITE_SETTINGS.menu.items,
+        { id: 'legacy-log', label: 'Logística & Rutas', path: '/logistica', visible: true },
+        { id: 'legacy-chat', label: 'Chat', path: '/chat', visible: true },
+      ],
+    },
+  });
+
+  const paths = merged.menu.items.map((item) => item.path);
+  assert.equal(paths.includes('/logistica'), false);
+  assert.equal(paths.includes('/chat'), false);
+
+  const dirtySettings = {
+    ...DEFAULT_SITE_SETTINGS,
+    sectionConfigs: {
+      ...DEFAULT_SITE_SETTINGS.sectionConfigs,
+      ecosystem: {
+        ...DEFAULT_SITE_SETTINGS.sectionConfigs.ecosystem,
+        textColor: '#F8FAFC',
+        backgroundType: 'solid' as const,
+        backgroundColor: '#0D0A13',
+      },
+    },
+  };
+  const reset = applyThemePresetToSettings(dirtySettings, 'patagonia-default');
+  assert.equal(reset.sectionConfigs.ecosystem.textColor, '');
+  assert.equal(reset.sectionConfigs.ecosystem.backgroundType, 'default');
+});
+

@@ -140,6 +140,7 @@ export async function ensureProductionTables(): Promise<void> {
         plan_slug text NOT NULL DEFAULT 'gratis',
         seat_limit integer NOT NULL DEFAULT 2,
         logistics_plan_active boolean NOT NULL DEFAULT false,
+        active_modules jsonb DEFAULT '[]'::jsonb,
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
@@ -212,6 +213,9 @@ export async function ensureProductionTables(): Promise<void> {
 
       ALTER TABLE IF EXISTS public.inventory_items
         ADD COLUMN IF NOT EXISTS organization_id integer;
+
+      ALTER TABLE IF EXISTS public.organizations
+        ADD COLUMN IF NOT EXISTS active_modules jsonb DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS public.fleet_vehicles (
         id serial PRIMARY KEY,

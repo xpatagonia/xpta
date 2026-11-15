@@ -16,6 +16,8 @@ import {
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
 import CheckoutModal from './CheckoutModal';
+import { useNavigate } from 'react-router-dom';
+import { ALL_MODULE_SLUGS, SAAS_MODULES, SaasModuleSlug } from '../services/saasPlans';
 
 export interface OrganizationInfo {
   organizationId: number;
@@ -29,6 +31,8 @@ export interface OrganizationInfo {
   orgRole: string;
   logisticsPlanActive: boolean;
   hasLogisticsAccess: boolean;
+  activeModules?: SaasModuleSlug[];
+  entitlements?: Record<string, boolean>;
 }
 
 interface Props {
@@ -66,6 +70,7 @@ const PLAN_CARDS = [
 ];
 
 export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
+  const navigate = useNavigate();
   const [org, setOrg] = useState<OrganizationInfo | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [invitations, setInvitations] = useState<any[]>([]);
@@ -465,6 +470,86 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
           })}
         </div>
 
+        {/* Modular SaaS Entitlements Matrix */}
+        {org && (
+          <div className="p-6 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Módulos SaaS Activos en la Organización
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Habilitados automáticamente por tu plan actual o contratados como add-on mensual.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/apps')}
+                className="self-start sm:self-auto text-xs font-semibold text-orange-600 dark:text-orange-400 hover:underline whitespace-nowrap shrink-0"
+              >
+                Explorar catálogo de módulos →
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {ALL_MODULE_SLUGS.map((slug) => {
+                const mod = SAAS_MODULES[slug];
+                const isActive = Boolean(
+                  org.entitlements?.[slug] ||
+                    org.activeModules?.includes(slug) ||
+                    (slug === 'logistica_flota' && org.hasLogisticsAccess)
+                );
+                const includedByPlan = mod.includedInPlans.includes(org.planSlug);
+                return (
+                  <div
+                    key={slug}
+                    className="p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] flex flex-col justify-between gap-3"
+                  >
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                        {isActive ? (
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                            {includedByPlan ? 'Incluido en Plan' : 'Add-on Activo'}
+                          </span>
+                        ) : (
+                          <span>No contratado</span>
+                        )}
+                        <span aria-hidden="true"> · </span>
+                        <span className="font-mono tabular-nums">{mod.priceLabel}</span>
+                      </div>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        {mod.shortName}
+                      </p>
+                    </div>
+                    {isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(mod.routePath)}
+                        className="w-full py-2 px-3 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 transition whitespace-nowrap"
+                      >
+                        Abrir {mod.shortName}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCheckoutTarget({
+                            targetSlug: mod.billingSlug,
+                            title: mod.title,
+                            price: mod.priceLabel,
+                          })
+                        }
+                        className="w-full py-2 px-3 rounded-lg border border-orange-500/40 text-orange-600 dark:text-orange-400 hover:bg-orange-500/10 text-xs font-bold transition whitespace-nowrap"
+                      >
+                        Contratar ({mod.priceLabel})
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Dedicated Logistics Membership Card */}
         <div className="p-6 rounded-2xl border border-orange-500/40 bg-white dark:bg-[#1A1625] flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5 max-w-2xl">
@@ -475,7 +560,7 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
               Suite de Gestión y Control de Flota + Contratación de Cargas
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              Membresía específica para transportistas y operadores logísticos. Habilita administración de unidades y vencimientos (VTV/Seguro), padrón de choferes LINTI, postulación directa a cargas y contratos digitales en plataforma ($95.000 ARS/mes).
+              Membresía específica para transportistas y operadores logísticos. Habilita administración de unidades y vencimientos (VTV/Seguro), padrón de choferes LINTI, rutas OSRM, Bolsa de Cargas y contratos digitales ($95.000 ARS/mes).
             </p>
           </div>
           <div className="shrink-0">

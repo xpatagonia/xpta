@@ -19,6 +19,8 @@ import { eq, desc } from "drizzle-orm";
 import { registerArnAndModuleRoutes, runArnPipelineForEvent } from "./arnRoutes.ts";
 import { registerWorkerAndWebhookRoutes } from "./workerAndWebhookRoutes.ts";
 import { registerBillingAndKybRoutes } from "./billingAndKybRoutes.ts";
+import { resolveTenantContext, ensureModuleAccess } from "./saasAndFleetRoutes.ts";
+import { resolveEffectiveModules, buildEntitlementsMap } from "../services/saasPlans.ts";
 import { computeNextRetryDate } from "../services/vpsWorkerService.ts";
 import { getMarketSnapshot } from "../services/marketService.ts";
 
@@ -383,14 +385,36 @@ export function createApiApp() {
     }
   });
 
-  app.get("/api/me/access", requireAuth as any, (req: AuthRequest, res) => {
+  app.get("/api/me/access", requireAuth as any, async (req: AuthRequest, res) => {
     const roleName = req.user?.roleName || "vendor";
+    const membershipName = req.user?.membershipName || "Basic";
+    const tenant = req.user?.uid
+      ? await resolveTenantContext(
+          req.user.uid,
+          req.user.email,
+          membershipName,
+          roleName
+        ).catch(() => null)
+      : null;
+
+    const activeModules = tenant
+      ? tenant.activeModules
+      : resolveEffectiveModules({ membershipName, roleName });
+    const entitlements = tenant
+      ? tenant.entitlements
+      : buildEntitlementsMap(activeModules);
+
     res.json({
       uid: req.user?.uid,
       email: req.user?.email,
       roleName,
-      membershipName: req.user?.membershipName || "Basic",
+      membershipName,
       isAdmin: ["system_admin", "content_editor"].includes(roleName),
+      organizationId: tenant?.organizationId || null,
+      planSlug: tenant?.planSlug || "gratis",
+      hasLogisticsAccess: entitlements.logistica_flota,
+      activeModules,
+      entitlements,
     });
   });
 
@@ -1191,49 +1215,63 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   // ==========================================
   // LOGÍSTICA OSRM & WEBHOOKS N8N / ODOO
   // ==========================================
-  app.get("/api/logistics/route", async (req, res) => {
-    try {
+  app.get(
+    "/api/logistics/route",
+    (req, res, next) => {
       const from = String(req.query.from || "");
       const to = String(req.query.to || "");
       if (!from || !to) {
         return res.status(400).json({ error: "Missing from/to coordinates (lng,lat)" });
       }
+      return requireAuth(req as AuthRequest, res, next);
+    },
+    async (req: AuthRequest, res) => {
+      try {
+        const access = await ensureModuleAccess(req, res, "logistica_flota");
+        if (!access.allowed) return;
 
-      const candidates: { base: string; label: string }[] = [];
-      if (process.env.OSRM_BASE_URL) {
-        candidates.push({
-          base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""),
-          label: "Supermicro OSRM",
-        });
-      }
-      candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
+        const from = String(req.query.from || "");
+        const to = String(req.query.to || "");
 
-      for (const candidate of candidates) {
-        try {
-          const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
-          const headers: Record<string, string> = {};
-          if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
-            headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
-            headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
-          }
-          const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
-          if (!osrmRes.ok) continue;
-          const data = await osrmRes.json();
-          if (data?.routes?.[0]) {
-            return res.json({ routes: data.routes, engineUsed: candidate.label });
-          }
-        } catch {
-          // try next OSRM endpoint
+        const candidates: { base: string; label: string }[] = [];
+        if (process.env.OSRM_BASE_URL) {
+          candidates.push({
+            base: process.env.OSRM_BASE_URL.replace(/\/+$/, ""),
+            label: "Supermicro OSRM",
+          });
         }
+        candidates.push({ base: "https://router.project-osrm.org", label: "OpenStreetMap OSRM" });
+
+        for (const candidate of candidates) {
+          try {
+            const url = `${candidate.base}/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+            const headers: Record<string, string> = {};
+            if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+              headers["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
+              headers["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
+            }
+            const osrmRes = await fetch(url, { headers, signal: AbortSignal.timeout(4500) });
+            if (!osrmRes.ok) continue;
+            const data = await osrmRes.json();
+            if (data?.routes?.[0]) {
+              return res.json({ routes: data.routes, engineUsed: candidate.label });
+            }
+          } catch {
+            // try next OSRM endpoint
+          }
+        }
+        res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to calculate route" });
       }
-      res.status(502).json({ error: "OSRM endpoints temporarily unreachable" });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to calculate route" });
     }
-  });
+  );
 
   app.post("/api/logistics/reverse-auction", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
+
       const payload = {
         event: "logistics.reverse_auction.created",
         timestamp: new Date().toISOString(),
@@ -1274,6 +1312,9 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
 
   app.post("/api/crm/sync-odoo", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "erp_sync");
+      if (!access.allowed) return;
+
       const payload = {
         event: "crm.company.sync_odoo",
         timestamp: new Date().toISOString(),

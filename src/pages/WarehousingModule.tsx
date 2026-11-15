@@ -8,6 +8,7 @@ import { getApiUrl } from '../lib/apiConfig';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import WarehousingBaysColdChain from '../components/WarehousingBaysColdChain';
+import ModuleAccessGate from '../components/ModuleAccessGate';
 
 const API_KEY =
   (typeof process !== 'undefined' ? process.env.GOOGLE_MAPS_PLATFORM_KEY : undefined) ||
@@ -30,7 +31,7 @@ const DEFAULT_INVENTORY = [
   { sku: 'SKU-8925', name: 'Motor Trifásico 5HP', category: 'Maquinaria', location: 'Parque Ind. Comodoro', stock: 45, minStock: 30, status: 'in-stock', updated: 'Hace 1 hora' },
 ];
 
-export default function WarehousingModule() {
+function WarehousingWorkspace() {
   const [activeTab, setActiveTab] = useState<'mapa' | 'inventario' | 'camaras' | 'turnos'>('camaras');
   const [inventory, setInventory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -673,3 +674,12 @@ export default function WarehousingModule() {
     </div>
   );
 }
+
+export default function WarehousingModule() {
+  return (
+    <ModuleAccessGate moduleSlug="warehousing">
+      <WarehousingWorkspace />
+    </ModuleAccessGate>
+  );
+}
+

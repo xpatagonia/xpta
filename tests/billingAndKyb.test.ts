@@ -42,6 +42,11 @@ test('BILLING_CATALOG exposes authoritative ARS pricing and getBankTransferInstr
   assert.ok(BILLING_CATALOG.pro.amountArs > 0);
   assert.ok(BILLING_CATALOG.corporativo.amountArs > BILLING_CATALOG.pro.amountArs);
   assert.ok(BILLING_CATALOG.logistica_flota.amountArs > 0);
+  assert.ok(BILLING_CATALOG.warehousing.amountArs > 0);
+  assert.ok(BILLING_CATALOG.kyb_compliance.amountArs > 0);
+  assert.ok(BILLING_CATALOG.erp_sync.amountArs > 0);
+  assert.ok(BILLING_CATALOG.ecommerce_b2b.amountArs > 0);
+  assert.ok(BILLING_CATALOG.chat_b2b.amountArs > 0);
 
   const bank = getBankTransferInstructions();
   assert.notEqual(bank.cbu, '0000003100000000000000');

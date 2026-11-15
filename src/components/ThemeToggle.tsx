@@ -15,6 +15,20 @@ function resolveInitialDarkMode(): boolean {
   }
 }
 
+export function isDocumentDarkMode(): boolean {
+  if (typeof document !== 'undefined') {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null;
+      if (saved === 'light') return false;
+      if (saved === 'dark') return true;
+    } catch {
+      // ignore storage restrictions
+    }
+    return document.documentElement.classList.contains('dark');
+  }
+  return true;
+}
+
 function applyThemeToDocument(nextDark: boolean) {
   if (typeof document === 'undefined') return;
   document.documentElement.classList.toggle('dark', nextDark);
@@ -33,6 +47,7 @@ export default function ThemeToggle({ lightSurface }: { lightSurface?: boolean |
     const initial = resolveInitialDarkMode();
     applyThemeToDocument(initial);
     setIsDark(initial);
+    window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: { isDark: initial } }));
 
     const onSync = (e: Event) => {
       const custom = e as CustomEvent<{ isDark?: boolean }>;

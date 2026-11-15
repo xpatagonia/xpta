@@ -23,6 +23,7 @@ import {
 import { haversineKm } from "../lib/patagoniaRouting.ts";
 import {
   resolveTenantContext,
+  ensureModuleAccess,
   upsertLinkedContactFromArn,
   registerSaasAndFleetRoutes,
 } from "./saasAndFleetRoutes.ts";
@@ -1115,6 +1116,8 @@ export function registerArnAndModuleRoutes(
   // ==========================================
   app.get("/api/warehousing/inventory", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "warehousing");
+      if (!access.allowed) return;
       if (!hasDatabaseConfig()) return res.json({ items: [] });
       await ensureProductionTables();
       const rows = await pool.query(
@@ -1129,6 +1132,8 @@ export function registerArnAndModuleRoutes(
 
   app.post("/api/warehousing/inventory", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "warehousing");
+      if (!access.allowed) return;
       const { sku, name, category, quantity, location } = req.body || {};
       if (!name) return res.status(400).json({ error: "Nombre de ítem requerido" });
       if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
@@ -1157,9 +1162,11 @@ export function registerArnAndModuleRoutes(
   // ==========================================
   // 5. LOGÍSTICA: BOLSA DE CARGAS REAL (logistics_loads)
   // ==========================================
-  app.get("/api/logistics/loads", async (req, res) => {
+  app.get("/api/logistics/loads", requireAuth as any, async (req: AuthRequest, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
       if (!hasDatabaseConfig()) return res.json({ loads: [] });
       await ensureProductionTables();
       const rows = await pool.query(
@@ -1173,6 +1180,8 @@ export function registerArnAndModuleRoutes(
 
   app.post("/api/logistics/loads", requireAuth as any, async (req: AuthRequest, res) => {
     try {
+      const access = await ensureModuleAccess(req, res, "logistica_flota");
+      if (!access.allowed) return;
       const b = req.body || {};
       if (!b.originName || !b.destinationName) {
         return res.status(400).json({ error: "Origen y destino son obligatorios." });

@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
+import ModuleAccessGate from '../components/ModuleAccessGate';
 
 interface ProductItem {
   id: string;
@@ -23,7 +24,7 @@ const FALLBACK_PRODUCTS: ProductItem[] = [
   { id: '3', sku: 'VLV-050', name: 'Válvula Esférica 4"', category: 'Componentes', price: 850, stock: 145, compliance: ['ISO 9001'], isPublic: false },
 ];
 
-export default function EcommerceModule() {
+function EcommerceWorkspace() {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'catalogo' | 'pedidos'>('catalogo');
@@ -475,3 +476,12 @@ export default function EcommerceModule() {
     </div>
   );
 }
+
+export default function EcommerceModule() {
+  return (
+    <ModuleAccessGate moduleSlug="ecommerce_b2b">
+      <EcommerceWorkspace />
+    </ModuleAccessGate>
+  );
+}
+

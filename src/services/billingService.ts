@@ -1,6 +1,12 @@
 import crypto from "crypto";
 import { pool, hasDatabaseConfig } from "../db/index.ts";
-import { SAAS_PLANS, LOGISTICS_MEMBERSHIP, resolvePlanConfig } from "./saasPlans.ts";
+import {
+  SAAS_PLANS,
+  LOGISTICS_MEMBERSHIP,
+  SAAS_MODULES,
+  resolvePlanConfig,
+  normalizeModuleSlug,
+} from "./saasPlans.ts";
 import { ensureProductionTables } from "./arnSchema.ts";
 
 export interface BillingCatalogItem {
@@ -38,8 +44,32 @@ export const BILLING_CATALOG: Record<string, BillingCatalogItem> = {
   warehousing: {
     targetType: "module",
     slug: "warehousing",
-    title: "Módulo Warehousing & Almacenamiento",
-    amountArs: 45000,
+    title: SAAS_MODULES.warehousing.title,
+    amountArs: SAAS_MODULES.warehousing.priceMonthlyArs,
+  },
+  kyb_compliance: {
+    targetType: "module",
+    slug: "kyb_compliance",
+    title: SAAS_MODULES.kyb_compliance.title,
+    amountArs: SAAS_MODULES.kyb_compliance.priceMonthlyArs,
+  },
+  erp_sync: {
+    targetType: "module",
+    slug: "erp_sync",
+    title: SAAS_MODULES.erp_sync.title,
+    amountArs: SAAS_MODULES.erp_sync.priceMonthlyArs,
+  },
+  ecommerce_b2b: {
+    targetType: "module",
+    slug: "ecommerce_b2b",
+    title: SAAS_MODULES.ecommerce_b2b.title,
+    amountArs: SAAS_MODULES.ecommerce_b2b.priceMonthlyArs,
+  },
+  chat_b2b: {
+    targetType: "module",
+    slug: "chat_b2b",
+    title: SAAS_MODULES.chat_b2b.title,
+    amountArs: SAAS_MODULES.chat_b2b.priceMonthlyArs,
   },
 };
 
@@ -131,13 +161,35 @@ export async function applyApprovedBillingUpgrade(txRow: {
        WHERE id = $3`,
       [plan.slug, plan.seatLimit, orgId]
     );
-  } else if (txRow.target_type === "logistics" && orgId) {
-    await pool.query(
-      `UPDATE public.organizations
-       SET logistics_plan_active = true, updated_at = now()
-       WHERE id = $1`,
+  } else if ((txRow.target_type === "logistics" || txRow.target_type === "module") && orgId) {
+    const canonicalSlug = normalizeModuleSlug(txRow.target_slug) || txRow.target_slug;
+    const orgRes = await pool.query(
+      `SELECT active_modules, logistics_plan_active FROM public.organizations WHERE id = $1`,
       [orgId]
     );
+    const existingRaw = Array.isArray(orgRes.rows?.[0]?.active_modules)
+      ? orgRes.rows[0].active_modules
+      : [];
+    const nextSet = new Set<string>(existingRaw.map((s: any) => String(s)));
+    nextSet.add(canonicalSlug);
+    const activatesLogistics =
+      txRow.target_type === "logistics" || canonicalSlug === "logistica_flota";
+
+    await pool.query(
+      `UPDATE public.organizations
+       SET active_modules = $1::jsonb,
+           logistics_plan_active = (logistics_plan_active OR $2),
+           updated_at = now()
+       WHERE id = $3`,
+      [JSON.stringify(Array.from(nextSet)), activatesLogistics, orgId]
+    );
+
+    await pool.query(
+      `UPDATE public.module_requests
+       SET status = 'approved'
+       WHERE user_uid = $1 AND (module_id = $2 OR module_id = $3) AND status = 'pending'`,
+      [txRow.user_uid, txRow.target_slug, canonicalSlug]
+    ).catch(() => {});
   } else if (txRow.target_type === "module") {
     await pool.query(
       `UPDATE public.module_requests
@@ -151,19 +203,20 @@ export async function applyApprovedBillingUpgrade(txRow: {
 export async function hasApprovedPaidEntitlement(params: {
   organizationId: number;
   userUid: string;
-  targetType: "plan" | "logistics";
+  targetType: "plan" | "logistics" | "module";
   targetSlug: string;
 }): Promise<boolean> {
   if (!hasDatabaseConfig()) return false;
   await ensureProductionTables();
+  const canonical = normalizeModuleSlug(params.targetSlug);
   const res = await pool.query(
     `SELECT id FROM public.billing_transactions
      WHERE status = 'approved'
-       AND target_type = $1
-       AND target_slug = $2
+       AND (target_type = $1 OR ($1 IN ('logistics', 'module') AND target_type IN ('logistics', 'module')))
+       AND (target_slug = $2 OR ($5::text IS NOT NULL AND target_slug = $5))
        AND (organization_id = $3 OR user_uid = $4)
      ORDER BY updated_at DESC LIMIT 1`,
-    [params.targetType, params.targetSlug, params.organizationId, params.userUid]
+    [params.targetType, params.targetSlug, params.organizationId, params.userUid, canonical]
   );
   return (res.rows || []).length > 0;
 }

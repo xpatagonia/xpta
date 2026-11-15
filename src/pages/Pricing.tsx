@@ -5,13 +5,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { auth } from '../lib/db';
 import { SiteSettings, fetchSiteSettings, getCachedSiteSettings, SITE_SETTINGS_EVENT } from '../lib/siteSettings';
 import CheckoutModal from '../components/CheckoutModal';
+import AuthModal from '../components/AuthModal';
+import { SAAS_MODULES, SaasModuleSlug } from '../services/saasPlans';
 
 const tiers = [
   {
     name: 'Plan Gratis / Inicial',
     id: 'tier-basic',
     slug: 'gratis',
-    badge: 'Hasta 2 Usuarios PyME',
+    audienceMeta: 'Hasta 2 Usuarios PyME · Inicio',
     priceMonthly: 'Gratis',
     currency: 'Base / $25.000 ARS',
     billingPeriod: '/mes opcional destacado',
@@ -19,14 +21,14 @@ const tiers = [
     features: [
       'Hasta 2 usuarios de equipo en el Panel y CRM',
       'Agenda de Contactos CRM + enlace básico con ARN IA',
-      'Presencia en el directorio (Orden Nivel 3)',
+      'Módulo Chat B2B (Patagonia Link) dentro de Zona de Miembros',
       'Hasta 3 respuestas a Cotizaciones (RFQs) / mes',
-      'Acceso a bandeja de correo corporativo básico',
+      'Presencia en el directorio (Orden Nivel 3)',
     ],
     notIncluded: [
       'Desbloqueo total de base de datos en CRM (CUIT y decisores)',
-      'Automatización híbrida ilimitada ARN IA + Odoo n8n',
-      'Gestión de Flota y Contratos de Transporte (Membresía Logística)',
+      'E-commerce Mayorista B2B y sincronización Odoo ERP (n8n)',
+      'Rutas OSRM, Bolsa de Cargas y Control de Flota (Membresía Logística)',
     ],
     cta: 'Comenzar Plan Gratis (2 Usuarios)',
     popular: false,
@@ -38,7 +40,7 @@ const tiers = [
     name: 'Plan Pro Industria',
     id: 'tier-pro',
     slug: 'pro',
-    badge: 'Hasta 5 Usuarios • Más Elegido',
+    audienceMeta: 'Hasta 5 Usuarios · Más Elegido',
     priceMonthly: '$65.000',
     currency: 'ARS',
     billingPeriod: '/mes',
@@ -46,14 +48,14 @@ const tiers = [
     features: [
       'Hasta 5 usuarios de equipo (Admin, Comercial, Operador)',
       'ARN IA Híbrido + Contactos CRM bidireccionales completos',
+      'E-commerce Mayorista B2B y Chat B2B incluidos',
       'Posicionamiento Destacado (Orden Nivel 2 en Directorio)',
       'Desbloqueo de datos completos (CUIT, Decisores, Teléfonos)',
-      'Respuestas a RFQs, Chat B2B y Plantillas ilimitadas',
-      'Insignia de Empresa Verificada en Catálogo',
+      'Respuestas a RFQs y carga de hasta 100 productos B2B',
     ],
     notIncluded: [
-      'Hasta 10 usuarios multi-área y prioridad Nivel 1',
-      'Suite de Control de Flota (requiere Membresía Logística)',
+      'Warehousing WMS, Validación KYB (ARCA/BCRA) y Conector Odoo ERP',
+      'Rutas OSRM, Bolsa de Cargas y Flota (requiere Membresía Logística)',
     ],
     cta: 'Activar Plan Pro (5 Usuarios)',
     popular: true,
@@ -65,7 +67,7 @@ const tiers = [
     name: 'Plan Corporativo',
     id: 'tier-corp',
     slug: 'corporativo',
-    badge: 'Hasta 10 Usuarios • Nivel 1',
+    audienceMeta: 'Hasta 10 Usuarios · Nivel 1',
     priceMonthly: '$140.000',
     currency: 'ARS',
     billingPeriod: '/mes',
@@ -73,10 +75,10 @@ const tiers = [
     features: [
       'Hasta 10 usuarios de equipo con roles por área operativa',
       'Máxima prioridad en resultados (Orden Nivel 1 Corporativo)',
-      'ARN IA Autónomo + CRM + Sincronización Odoo ERP (n8n)',
-      'Acceso total a base de datos B2B y Matching ADN pgvector',
-      'Módulos Warehousing WMS y E-commerce B2B incluidos',
-      'Soporte técnico dedicado y publicación en Insights',
+      'ADN Vectorial pgvector + Conector Odoo ERP (n8n) incluido',
+      'Módulo Warehousing WMS & Cámaras de Frío incluido',
+      'Validación KYB (ARCA/BCRA) & Vendor Pack PDF incluido',
+      'E-commerce B2B y Chat B2B ilimitados',
     ],
     notIncluded: [],
     cta: 'Activar Corporativo (10 Usuarios)',
@@ -95,6 +97,7 @@ export default function Pricing() {
     title: string;
     price: string;
   } | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -120,24 +123,34 @@ export default function Pricing() {
 
   const handleSelectPaidPlan = (targetSlug: string, title: string, price: string) => {
     if (!isSignedIn) {
-      navigate('/dashboard?area=team');
+      setAuthModalOpen(true);
       return;
     }
     setCheckoutTarget({ targetSlug, title, price });
   };
 
+  const individualAddonSlugs: SaasModuleSlug[] = [
+    'warehousing',
+    'kyb_compliance',
+    'erp_sync',
+    'ecommerce_b2b',
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-14">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-bold uppercase tracking-wider border border-purple-500/20 mb-4">
-            <Database className="w-3.5 h-3.5" /> SaaS B2B Multi-Usuario · ARN IA + CRM
-          </span>
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-display font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
-            Planes PyME y Membresía Logística
+          <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-3 flex items-center justify-center gap-1.5">
+            <Database className="w-3.5 h-3.5" />
+            <span>SaaS B2B Multi-Usuario</span>
+            <span aria-hidden="true">·</span>
+            <span>ARN IA + CRM + Módulos Operativos</span>
+          </p>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-display font-bold text-slate-900 dark:text-white mb-4 tracking-tight text-balance">
+            Planes PyME y Módulos SaaS
           </h1>
           <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400">
-            Escalá tu equipo comercial según la capacidad de tu empresa (<strong>2, 5 o 10 usuarios</strong>) con ARN IA y CRM unificados, o activá la membresía dedicada para empresas de transporte y logística.
+            Escalá tu equipo comercial según la capacidad de tu empresa (<strong>2, 5 o 10 usuarios</strong>), sumá módulos add-on o activá la membresía dedicada de Logística OSRM & Control de Flota.
           </p>
         </div>
 
@@ -193,18 +206,12 @@ export default function Pricing() {
                 }`}
               >
                 <div className="mb-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+                  <div className="flex items-center justify-between gap-2 mb-4">
+                    <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
                       <Icon className={`w-5 h-5 ${tier.color}`} />
                     </div>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md ${
-                        tier.popular
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      {tier.badge}
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      {tier.audienceMeta}
                     </span>
                   </div>
                   <h3 className="text-xl font-display font-bold text-slate-900 dark:text-white mb-1.5">
@@ -287,34 +294,37 @@ export default function Pricing() {
         <div className="max-w-6xl mx-auto mt-10 bg-white dark:bg-[#1A1625] border border-orange-500/40 rounded-2xl p-7 sm:p-8 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-3 max-w-3xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[11px] font-bold uppercase tracking-wider border border-orange-500/20">
-                <Truck className="w-3.5 h-3.5" /> Membresía Aparte · Empresas de Logística y Transporte
+              <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 text-xs font-semibold">
+                <Truck className="w-4 h-4 shrink-0" />
+                <span>Membresía Operador</span>
+                <span aria-hidden="true">·</span>
+                <span>Exclusivo Zona de Miembros</span>
               </div>
               <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white">
-                Suite Logística: Gestión, Control de Flota y Contratación de Fletes
+                Logística Pro, Rutas OSRM, Bolsa de Cargas & Control de Flota
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                Membresía independiente diseñada para transportistas, flotas de carretones, carga refrigerada y operadores patagónicos que operan licitaciones y contratación directa desde la plataforma.
+                Membresía independiente diseñada para transportistas, flotas de carretones, carga refrigerada y dadores de carga que operan cálculo vial OSRM, retornos vacíos (-35%) y licitaciones desde la zona privada de xPatagonia.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs text-slate-700 dark:text-slate-300">
                 <div className="flex items-start gap-2">
                   <Truck className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                  <span><strong>Control de Flota:</strong> Unidades, patentes, vencimientos de VTV, seguros y estados en ruta.</span>
+                  <span><strong>Rutas OSRM & Costos:</strong> Distancia real Patagonia, gasoil e impacto CO2.</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <Users className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                  <span><strong>Choferes LINTI:</strong> Legajo de conductores habilitados y asignación por unidad.</span>
+                  <span><strong>Flota & LINTI:</strong> Unidades, vencimientos VTV/Seguro y legajo de choferes.</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <FileCheck className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                  <span><strong>Contratación Activa:</strong> Oferta y adjudicación directa sobre cargas y retornos vacíos.</span>
+                  <span><strong>Bolsa de Cargas:</strong> Publicación directa desde ruta OSRM y licitación inversa.</span>
                 </div>
               </div>
             </div>
 
             <div className="shrink-0 bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl p-5 flex flex-col justify-between min-w-[260px]">
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Arancel Mensual Operador</p>
+                <p className="text-xs font-semibold text-slate-500">Arancel Mensual Operador</p>
                 <p className="text-3xl font-mono font-bold tabular-nums text-slate-900 dark:text-white mt-1">
                   $95.000 <span className="text-xs font-sans font-bold text-slate-500">ARS/mes</span>
                 </p>
@@ -325,15 +335,73 @@ export default function Pricing() {
                 onClick={() =>
                   handleSelectPaidPlan(
                     'logistica_flota',
-                    'Membresía Suite Logística & Flota',
+                    'Logística Pro, Rutas OSRM & Control de Flota',
                     '$95.000 ARS/mes'
                   )
                 }
-                className="mt-5 w-full py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition flex items-center justify-center gap-2 whitespace-nowrap"
+                className="mt-5 w-full py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
               >
                 <Truck className="w-4 h-4" /> Activar Membresía Logística
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Individual Modular SaaS Add-ons */}
+        <div className="max-w-6xl mx-auto mt-10">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-5">
+            <div>
+              <h2 className="text-xl font-display font-bold text-slate-900 dark:text-white">
+                Módulos SaaS Individuales (Add-ons)
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                Contratá herramientas puntuales sobre tu Plan Gratis o Pro sin migrar de plan base.
+              </p>
+            </div>
+            <Link
+              to="/apps"
+              className="text-xs font-semibold text-orange-600 dark:text-orange-400 hover:underline whitespace-nowrap shrink-0"
+            >
+              Ver catálogo completo de módulos →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {individualAddonSlugs.map((slug) => {
+              const mod = SAAS_MODULES[slug];
+              return (
+                <div
+                  key={slug}
+                  className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-5 flex flex-col justify-between gap-4"
+                >
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      {mod.includedInPlans.includes('pro')
+                        ? 'Incluido en Pro y Corporativo'
+                        : 'Incluido en Corporativo'}
+                    </p>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">
+                      {mod.shortName}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                      {mod.description}
+                    </p>
+                  </div>
+                  <div className="pt-3 border-t border-slate-100 dark:border-white/10 flex items-center justify-between gap-2">
+                    <span className="font-mono tabular-nums text-sm font-bold text-slate-900 dark:text-white">
+                      {mod.priceLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPaidPlan(mod.billingSlug, mod.title, mod.priceLabel)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 transition whitespace-nowrap shrink-0"
+                    >
+                      Contratar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -351,6 +419,12 @@ export default function Pricing() {
           }}
         />
       )}
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        initialMode="login"
+      />
     </div>
   );
 }

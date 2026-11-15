@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ResponsiveContainer,
@@ -26,8 +26,10 @@ import {
   isLightColor,
   parseCustomChartSeries,
   parseHeroVideoSource,
+  resolveContrastSafeTextColor,
   resolveFontFamilyCss,
 } from '../lib/siteSettings';
+import { THEME_CHANGE_EVENT, isDocumentDarkMode } from './ThemeToggle';
 
 export type SurfaceTone = 'light' | 'dark' | null;
 
@@ -143,10 +145,12 @@ function SectionEmbeddedChart({
   chart,
   sectionAccent,
   surfaceTone,
+  isDarkSurface,
 }: {
   chart: SectionChartBlock;
   sectionAccent?: string;
   surfaceTone: SurfaceTone;
+  isDarkSurface: boolean;
 }) {
   const dataset = useMemo(() => {
     if (chart.dataPreset === 'custom') {
@@ -170,7 +174,6 @@ function SectionEmbeddedChart({
 
   const primaryColor = chart.accentColor || sectionAccent || '#f97316';
   const secondaryColor = '#6366f1';
-  const isDarkSurface = surfaceTone === 'dark';
   const axisTickColor = isDarkSurface ? '#CBD5E1' : '#64748B';
   const gridStroke = isDarkSurface ? 'rgba(255,255,255,0.1)' : 'rgba(148,163,184,0.22)';
   const cardSurface = getSectionCardClass('bordered', surfaceTone);
@@ -453,6 +456,37 @@ export default function ConfigurableSection({
   children,
   noPaddingWrapper = false,
 }: ConfigurableSectionProps) {
+  const [isDocDark, setIsDocDark] = useState<boolean>(isDocumentDarkMode);
+
+  useEffect(() => {
+    setIsDocDark(isDocumentDarkMode());
+    const onThemeChange = (e: Event) => {
+      const custom = e as CustomEvent<{ isDark?: boolean }>;
+      if (typeof custom.detail?.isDark === 'boolean') {
+        setIsDocDark(custom.detail.isDark);
+      } else {
+        setIsDocDark(document.documentElement.classList.contains('dark'));
+      }
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
+
+    let observer: MutationObserver | null = null;
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+      observer = new MutationObserver(() => {
+        setIsDocDark(document.documentElement.classList.contains('dark'));
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    }
+
+    return () => {
+      window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
+      observer?.disconnect();
+    };
+  }, []);
+
   const bgType = config?.backgroundType || 'default';
   const parsedBgVideo =
     bgType === 'video' && config?.backgroundVideoUrl
@@ -460,6 +494,8 @@ export default function ConfigurableSection({
       : null;
 
   const surfaceTone = resolveSectionSurfaceTone(config);
+  const effectiveSurfaceIsLight =
+    surfaceTone === 'light' ? true : surfaceTone === 'dark' ? false : !isDocDark;
 
   const sectionInlineStyle: React.CSSProperties = {};
   if (bgType === 'solid' && config?.backgroundColor) {
@@ -470,12 +506,14 @@ export default function ConfigurableSection({
     sectionInlineStyle.backgroundImage = `linear-gradient(135deg, ${from} 0%, ${to} 100%)`;
   }
 
-  if (config?.textColor) {
-    sectionInlineStyle.color = config.textColor;
-  } else if (surfaceTone === 'light') {
-    sectionInlineStyle.color = '#0F172A';
-  } else if (surfaceTone === 'dark') {
-    sectionInlineStyle.color = '#F8FAFC';
+  const safeTextColor = resolveContrastSafeTextColor(
+    config?.textColor,
+    effectiveSurfaceIsLight
+  );
+  if (safeTextColor) {
+    sectionInlineStyle.color = safeTextColor;
+  } else {
+    sectionInlineStyle.color = effectiveSurfaceIsLight ? '#0F172A' : '#F8FAFC';
   }
 
   if (config?.bodyFont && config.bodyFont !== 'inherit') {
@@ -570,6 +608,7 @@ export default function ConfigurableSection({
               chart={config.chartBlock}
               sectionAccent={config.accentColor}
               surfaceTone={surfaceTone}
+              isDarkSurface={!effectiveSurfaceIsLight}
             />
           )}
         </div>
@@ -602,6 +641,7 @@ export default function ConfigurableSection({
               chart={config.chartBlock}
               sectionAccent={config.accentColor}
               surfaceTone={surfaceTone}
+              isDarkSurface={!effectiveSurfaceIsLight}
             />
           )}
           {showMedia && config?.mediaBlock.position === 'bottom' && (

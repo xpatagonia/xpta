@@ -491,6 +491,21 @@ export function isLightColor(rawColor?: string | null): boolean | null {
   return luminance > 0.56;
 }
 
+export function resolveContrastSafeTextColor(
+  textColor?: string | null,
+  surfaceIsLight?: boolean | null
+): string | undefined {
+  const trimmed = (textColor || '').trim();
+  if (!trimmed) return undefined;
+  const textLight = isLightColor(trimmed);
+  if (textLight !== null && surfaceIsLight !== null && surfaceIsLight !== undefined) {
+    // Reject light text on light surfaces and dark text on dark surfaces
+    if (surfaceIsLight === true && textLight === true) return undefined;
+    if (surfaceIsLight === false && textLight === false) return undefined;
+  }
+  return trimmed;
+}
+
 export const CHART_DATASET_PRESETS: Record<
   Exclude<SectionChartPreset, 'custom'>,
   {
@@ -619,13 +634,19 @@ export const DEFAULT_SECTION_ORDER: HomeSectionId[] = [
   'contact',
 ];
 
+export const PUBLIC_RESTRICTED_PATHS = new Set<string>([
+  '/logistica',
+  '/chat',
+  '/comunicaciones-b2b',
+  '/warehousing',
+  '/ecommerce',
+]);
+
 export const DEFAULT_MENU_ITEMS: MenuLinkItem[] = [
   { id: 'insights', label: 'Insights', path: '/insights', visible: true },
   { id: 'directory', label: 'Directorio B2B', path: '/servicios', visible: true },
   { id: 'marketplace', label: 'Catálogo RFQ', path: '/marketplace', visible: true },
-  { id: 'logistics', label: 'Logística', path: '/logistica', visible: true },
-  { id: 'chat', label: 'Chat B2B', path: '/chat', visible: true },
-  { id: 'plans', label: 'Planes & CRM', path: '/planes', visible: true },
+  { id: 'plans', label: 'Planes & Módulos', path: '/planes', visible: true },
 ];
 
 export interface AestheticThemePreset {
@@ -657,12 +678,12 @@ export const AESTHETIC_THEME_PRESETS: AestheticThemePreset[] = [
     menuBg: '',
     menuText: '',
     sectionBackgrounds: {
-      indicators: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
-      insights: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
-      ecosystem: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
-      categories: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
-      howItWorks: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
-      contact: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      indicators: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
+      insights: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
+      ecosystem: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
+      categories: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
+      howItWorks: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
+      contact: { backgroundType: 'default', textColor: '', accentColor: '#f97316', cardStyle: 'bordered', columnStyle: 'auto' },
     },
   },
   {
@@ -720,12 +741,12 @@ export const AESTHETIC_THEME_PRESETS: AestheticThemePreset[] = [
     menuBg: '',
     menuText: '',
     sectionBackgrounds: {
-      indicators: { backgroundType: 'default', accentColor: '#2563eb', cardStyle: 'elevated' },
-      insights: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: 'bento', cardStyle: 'bordered' },
+      indicators: { backgroundType: 'default', textColor: '', accentColor: '#2563eb', cardStyle: 'elevated' },
+      insights: { backgroundType: 'default', textColor: '', accentColor: '#2563eb', columnStyle: 'bento', cardStyle: 'bordered' },
       ecosystem: { backgroundType: 'gradient', gradientFrom: '#0A0E1A', gradientTo: '#172554', textColor: '#F8FAFC', accentColor: '#3b82f6', cardStyle: 'glass' },
-      categories: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: '2-col', cardStyle: 'elevated' },
-      howItWorks: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: '4-col', cardStyle: 'bordered' },
-      contact: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: 'split-left', cardStyle: 'elevated' },
+      categories: { backgroundType: 'default', textColor: '', accentColor: '#2563eb', columnStyle: '2-col', cardStyle: 'elevated' },
+      howItWorks: { backgroundType: 'default', textColor: '', accentColor: '#2563eb', columnStyle: '4-col', cardStyle: 'bordered' },
+      contact: { backgroundType: 'default', textColor: '', accentColor: '#2563eb', columnStyle: 'split-left', cardStyle: 'elevated' },
     },
   },
 ];
@@ -975,10 +996,17 @@ export function mergeSettings(partial?: Partial<SiteSettings> | null): SiteSetti
     menu: {
       ...DEFAULT_SITE_SETTINGS.menu,
       ...(partial.menu || {}),
-      items:
-        Array.isArray(partial.menu?.items) && partial.menu.items.length > 0
-          ? partial.menu.items
-          : DEFAULT_SITE_SETTINGS.menu.items.map((item) => ({ ...item })),
+      items: (() => {
+        if (!Array.isArray(partial.menu?.items) || partial.menu.items.length === 0) {
+          return DEFAULT_SITE_SETTINGS.menu.items.map((item) => ({ ...item }));
+        }
+        const filtered = partial.menu.items.filter(
+          (item) => item && !PUBLIC_RESTRICTED_PATHS.has(item.path)
+        );
+        return filtered.length > 0
+          ? filtered
+          : DEFAULT_SITE_SETTINGS.menu.items.map((item) => ({ ...item }));
+      })(),
     },
     designTheme: {
       ...DEFAULT_SITE_SETTINGS.designTheme,

@@ -298,6 +298,7 @@ export interface RouteCalculationParams {
   fuelConsumptionL100?: number;
   fuelPriceArs?: number;
   truckType?: 'semirremolque' | 'termico' | 'chasis' | 'carreton';
+  authToken?: string | null;
 }
 
 export interface RouteCalculationResult {
@@ -387,10 +388,11 @@ export async function calculatePatagoniaRoute(
   const apiBase = getApiUrl();
 
   // 1. Try backend proxy (/api/logistics/route) first (same-origin on Vercel or external API), then direct OSRM
-  const tryEndpoints: { url: string; label: RouteCalculationResult['engineUsed'] }[] = [
+  const tryEndpoints: { url: string; label: RouteCalculationResult['engineUsed']; useAuth?: boolean }[] = [
     {
       url: `${apiBase}/api/logistics/route?from=${origin.lng},${origin.lat}&to=${dest.lng},${dest.lat}`,
       label: 'Supermicro OSRM',
+      useAuth: true,
     },
   ];
   if (osrmUrl.includes('rutas.xpatagonia.online')) {
@@ -408,7 +410,11 @@ export async function calculatePatagoniaRoute(
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3800);
-      const res = await fetch(endpoint.url, { signal: controller.signal });
+      const headers: Record<string, string> = {};
+      if (endpoint.useAuth && params.authToken) {
+        headers.Authorization = `Bearer ${params.authToken}`;
+      }
+      const res = await fetch(endpoint.url, { signal: controller.signal, headers });
       clearTimeout(timeout);
       if (!res.ok) continue;
       const data = await res.json();

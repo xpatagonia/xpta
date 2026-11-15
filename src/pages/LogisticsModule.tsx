@@ -38,6 +38,7 @@ import {
   LogisticNode,
 } from '../lib/patagoniaRouting';
 import { getApiUrl, getOsrmUrl } from '../lib/apiConfig';
+import ModuleAccessGate from '../components/ModuleAccessGate';
 
 const CARRIERS = [
   {
@@ -93,7 +94,7 @@ const SHIPMENTS = [
   },
 ];
 
-export default function LogisticsModule() {
+function LogisticsWorkspace() {
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<
     | 'rutas'
@@ -129,6 +130,7 @@ export default function LogisticsModule() {
   // Collaborative / Empty Returns (Bolsa de Cargas)
   const [emptyReturns, setEmptyReturns] = useState<EmptyReturnOffer[]>(INITIAL_EMPTY_RETURNS);
   const [returnSearch, setReturnSearch] = useState('');
+  const [corridorFilter, setCorridorFilter] = useState<'ALL' | 'RN3' | 'RN22' | 'RN40' | 'PATAGONICA'>('ALL');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [newTruckOrigin, setNewTruckOrigin] = useState('Comodoro Rivadavia (Golfo San Jorge)');
   const [newTruckDest, setNewTruckDest] = useState('Buenos Aires (CABA / Puerto)');
@@ -175,9 +177,15 @@ export default function LogisticsModule() {
   useEffect(() => {
     const loadServerLoads = async () => {
       try {
-        const res = await fetch(`${getApiUrl()}/api/logistics/loads`, { cache: 'no-store' });
+        const token = await auth.getToken();
+        if (!token) return;
+        const res = await fetch(`${getApiUrl()}/api/logistics/loads`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
         const data = await res.json();
-        if (res.ok && Array.isArray(data.loads) && data.loads.length > 0) {
+        if (Array.isArray(data.loads) && data.loads.length > 0) {
           const mapped: EmptyReturnOffer[] = data.loads.map((row: any) => ({
             id: String(row.id),
             carrier: row.load_type === 'cargo_tender' ? 'Licitación ARN IA / Red B2B' : 'Flota Registrada xPatagonia',
@@ -227,6 +235,7 @@ export default function LogisticsModule() {
   const runRouteCalculation = async (orig = routeOrigin, dst = routeDest) => {
     setIsCalculatingRoute(true);
     try {
+      const token = await auth.getToken().catch(() => null);
       const res = await calculatePatagoniaRoute({
         originQuery: orig,
         destQuery: dst,
@@ -234,6 +243,7 @@ export default function LogisticsModule() {
         fuelConsumptionL100: Number(fuelConsumption) || 34,
         fuelPriceArs: Number(fuelPrice) || 1380,
         truckType,
+        authToken: token,
       });
       setCalculatedRoute(res);
     } finally {
@@ -262,16 +272,34 @@ export default function LogisticsModule() {
     e.preventDefault();
     setIsQuoting(true);
     try {
+      const token = await auth.getToken().catch(() => null);
       const res = await calculatePatagoniaRoute({
         originQuery: quoteOrigin,
         destQuery: quoteDest,
         weightKg: Number(quoteWeight) || 4500,
+        authToken: token,
       });
       setQuoteRouteResult(res);
       setShowResults(true);
     } finally {
       setIsQuoting(false);
     }
+  };
+
+  const handleOpenBolsaFromRoute = (routeData: RouteCalculationResult) => {
+    const unitLabelMap: Record<typeof truckType, string> = {
+      semirremolque: 'Semirremolque Sider 28t',
+      termico: 'Furgón Térmico -25°C (24t)',
+      chasis: 'Chasis & Acoplado 18t',
+      carreton: 'Carretón Petrolero 45t',
+    };
+    setNewTruckOrigin(routeData.origin.name);
+    setNewTruckDest(routeData.destination.name);
+    setNewTruckType(unitLabelMap[truckType] || 'Semirremolque 28t');
+    setNewTruckTons(String(Math.max(1, Math.round((Number(routeWeight) || 14000) / 1000))));
+    setNewTruckDiscount('35');
+    setActiveTab('colaborativa');
+    setShowPublishModal(true);
   };
 
   const handleTriggerReverseAuction = async (routeData: RouteCalculationResult | null, weightKg: number) => {
@@ -293,8 +321,8 @@ export default function LogisticsModule() {
           estimatedBaseArs: routeData.estimatedFreightArs,
         }),
       });
-      if (res.status === 401) {
-        notify('Inicia sesión como miembro para emitir licitaciones de flete en producción.');
+      if (res.status === 401 || res.status === 403) {
+        notify('Se requiere membresía Logística Pro & OSRM activa para emitir licitaciones.');
         return;
       }
     } catch {
@@ -307,12 +335,13 @@ export default function LogisticsModule() {
 
   const handlePublishEmptyTruck = async (e: React.FormEvent) => {
     e.preventDefault();
+    const token = await auth.getToken().catch(() => null);
     const res = await calculatePatagoniaRoute({
       originQuery: newTruckOrigin,
       destQuery: newTruckDest,
       weightKg: (Number(newTruckTons) || 20) * 1000,
+      authToken: token,
     });
-    const token = await auth.getToken();
     if (token) {
       await fetch(`${getApiUrl()}/api/logistics/loads`, {
         method: 'POST',
@@ -353,6 +382,13 @@ export default function LogisticsModule() {
   };
 
   const filteredReturns = emptyReturns.filter((r) => {
+    const corr = r.corridor.toLowerCase();
+    if (corridorFilter === 'RN3' && !corr.includes('rn 3') && !corr.includes('rn3')) return false;
+    if (corridorFilter === 'RN22' && !corr.includes('rn 22') && !corr.includes('rn22')) return false;
+    if (corridorFilter === 'RN40' && !corr.includes('rn 40') && !corr.includes('rn40')) return false;
+    if (corridorFilter === 'PATAGONICA' && !corr.includes('patag') && !corr.includes('austral') && !corr.includes('vaca muerta')) {
+      return false;
+    }
     if (!returnSearch.trim()) return true;
     const q = returnSearch.toLowerCase();
     return (
@@ -762,19 +798,27 @@ export default function LogisticsModule() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-3 pt-2">
+                    <div className="flex flex-wrap gap-2.5 pt-2">
                       <button
                         type="button"
                         onClick={() => handleTriggerReverseAuction(calculatedRoute, Number(routeWeight) || 12000)}
-                        className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center justify-center gap-2 whitespace-nowrap"
+                        className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
                       >
                         <Truck className="w-4 h-4" />
-                        Abrir Licitación Inversa de Flete
+                        Abrir Licitación Inversa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBolsaFromRoute(calculatedRoute)}
+                        className="py-2.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Publicar Ruta en Bolsa de Cargas
                       </button>
                       <button
                         type="button"
                         onClick={() => setActiveTab('colaborativa')}
-                        className="py-2.5 px-4 rounded-xl border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-500/10 transition whitespace-nowrap"
+                        className="py-2.5 px-4 rounded-xl border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-500/10 transition whitespace-nowrap shrink-0"
                       >
                         Ver Retornos Vacíos
                       </button>
@@ -831,9 +875,9 @@ export default function LogisticsModule() {
                 </div>
               </div>
 
-              {/* Filter Search */}
-              <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="relative w-full sm:max-w-md">
+              {/* Filter Search & Corridors */}
+              <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="relative w-full lg:max-w-md">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
@@ -843,8 +887,34 @@ export default function LogisticsModule() {
                     className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-white focus:outline-none"
                   />
                 </div>
-                <div className="text-xs text-slate-500 font-mono tabular-nums">
-                  {filteredReturns.length} viajes con bodega disponible
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-[#110E17] rounded-lg border border-slate-200 dark:border-white/10">
+                    {(
+                      [
+                        { id: 'ALL', label: 'Todos' },
+                        { id: 'RN3', label: 'RN 3' },
+                        { id: 'RN22', label: 'RN 22' },
+                        { id: 'RN40', label: 'RN 40' },
+                        { id: 'PATAGONICA', label: 'Patagónica' },
+                      ] as const
+                    ).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setCorridorFilter(item.id)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                          corridorFilter === item.id
+                            ? 'bg-white dark:bg-white/15 text-slate-900 dark:text-white shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono tabular-nums whitespace-nowrap shrink-0 pl-1">
+                    {filteredReturns.length} viajes disponibles
+                  </div>
                 </div>
               </div>
 
@@ -1397,3 +1467,12 @@ export default function LogisticsModule() {
     </div>
   );
 }
+
+export default function LogisticsModule() {
+  return (
+    <ModuleAccessGate moduleSlug="logistica_flota">
+      <LogisticsWorkspace />
+    </ModuleAccessGate>
+  );
+}
+

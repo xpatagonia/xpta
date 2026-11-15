@@ -626,7 +626,7 @@ export default function DesignCustomizerControls({
               <div className="flex items-center gap-2">
                 <input
                   type="color"
-                  value={menu.textColor || '#F8FAFC'}
+                  value={menu.textColor || '#0F172A'}
                   onChange={(e) =>
                     onChange((prev) => ({
                       ...prev,
@@ -955,7 +955,12 @@ export default function DesignCustomizerControls({
                       key={opt.id}
                       type="button"
                       onClick={() =>
-                        updateSectionConfig(selectedSectionId, { backgroundType: opt.id })
+                        updateSectionConfig(
+                          selectedSectionId,
+                          opt.id === 'default'
+                            ? { backgroundType: 'default', textColor: '' }
+                            : { backgroundType: opt.id }
+                        )
                       }
                       className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${
                         activeConfig.backgroundType === opt.id
@@ -1123,7 +1128,7 @@ export default function DesignCustomizerControls({
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
-                      value={activeConfig.textColor || '#F8FAFC'}
+                      value={activeConfig.textColor || '#0F172A'}
                       onChange={(e) =>
                         updateSectionConfig(selectedSectionId, { textColor: e.target.value })
                       }

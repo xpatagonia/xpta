@@ -181,6 +181,8 @@ test('ARN IA and private B2B module endpoints strictly enforce Bearer authentica
     { method: 'POST', path: '/api/arn/copilot', body: { question: 'Resumen del pipeline' } },
     { method: 'POST', path: '/api/products', body: { name: 'Válvula 4 pulgadas', category: 'Válvulas' } },
     { method: 'GET', path: '/api/warehousing/inventory' },
+    { method: 'GET', path: '/api/logistics/loads' },
+    { method: 'GET', path: '/api/logistics/route?from=-58.38,-34.60&to=-68.78,-38.35' },
     { method: 'POST', path: '/api/logistics/loads', body: { originName: 'Neuquén', destinationName: 'Añelo' } },
     { method: 'GET', path: '/api/chat/messages?channelId=chan-logistica' },
     { method: 'PUT', path: '/api/company/profile', body: { companyName: 'Test S.A.' } },

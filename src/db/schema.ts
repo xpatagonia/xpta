@@ -232,6 +232,7 @@ export const organizations = pgTable('organizations', {
   planSlug: text('plan_slug').notNull().default('gratis'), // 'gratis' (2) | 'pro' (5) | 'corporativo' (10)
   seatLimit: integer('seat_limit').notNull().default(2),
   logisticsPlanActive: boolean('logistics_plan_active').notNull().default(false),
+  activeModules: jsonb('active_modules').default('[]'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

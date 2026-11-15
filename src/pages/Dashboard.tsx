@@ -647,9 +647,6 @@ export default function Dashboard() {
           <span className="text-[10px] font-bold uppercase tracking-widest text-orange-700 dark:text-orange-300">
             04 · Logística &amp; Flota
           </span>
-          {orgInfo?.hasLogisticsAccess && (
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          )}
         </div>
         <div className="space-y-1">
           <button
@@ -1229,6 +1226,12 @@ export default function Dashboard() {
                               }),
                             });
                             const data = await res.json();
+                            if (res.status === 403 && data?.code === 'MODULE_ENTITLEMENT_REQUIRED') {
+                              setOdooSyncStatus(
+                                'El conector Odoo ERP & ADN requiere Plan Corporativo o contratar el módulo Odoo ERP & ADN IA ($55.000 ARS/mes) en Módulos (/apps).'
+                              );
+                              return;
+                            }
                             if (!res.ok) throw new Error(data?.error || 'Error de sincronización');
                             setOdooSyncStatus(
                               data.forwardedToN8n
@@ -1240,7 +1243,7 @@ export default function Dashboard() {
                               `No se pudo sincronizar con el servidor: ${err?.message || 'reintentar'}`
                             );
                           }
-                          setTimeout(() => setOdooSyncStatus(null), 4000);
+                          setTimeout(() => setOdooSyncStatus(null), 5000);
                         }}
                         className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition flex items-center gap-2 whitespace-nowrap"
                       >

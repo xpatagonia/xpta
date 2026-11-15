@@ -12,19 +12,24 @@ import {
   Newspaper,
   Database,
   Lock,
+  Truck,
+  Warehouse,
+  ShoppingBag,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import ThemeToggle, { THEME_CHANGE_EVENT } from './ThemeToggle';
+import ThemeToggle, { THEME_CHANGE_EVENT, isDocumentDarkMode } from './ThemeToggle';
 import AuthModal from './AuthModal';
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 import {
+  PUBLIC_RESTRICTED_PATHS,
   SiteSettings,
   SITE_SETTINGS_EVENT,
   fetchSiteSettings,
   getCachedSiteSettings,
   isLightColor,
+  resolveContrastSafeTextColor,
   resolveFontFamilyCss,
 } from '../lib/siteSettings';
 
@@ -33,9 +38,7 @@ export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
-  const [isDocDark, setIsDocDark] = useState<boolean>(() =>
-    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : true
-  );
+  const [isDocDark, setIsDocDark] = useState<boolean>(isDocumentDarkMode);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -108,7 +111,9 @@ export default function Navbar() {
 
   const isActive = (path: string) => location.pathname === path;
   const menuCfg = siteSettings.menu;
-  const visibleItems = (menuCfg.items || []).filter((item) => item.visible);
+  const visibleItems = (menuCfg.items || []).filter(
+    (item) => item.visible && !PUBLIC_RESTRICTED_PATHS.has(item.path)
+  );
   const accentColor = menuCfg.accentColor || siteSettings.designTheme.accentColor || '#f97316';
   const customBgLight = isLightColor(menuCfg.backgroundColor);
   const effectiveIsLightSurface = customBgLight !== null ? customBgLight : !isDocDark;
@@ -120,8 +125,9 @@ export default function Navbar() {
       ? 'bg-white/95 dark:bg-[#110E17]/95 border-b border-slate-200/50 dark:border-white/5'
       : 'bg-white/90 dark:bg-[#110E17]/90 backdrop-blur-xl border-b border-slate-200/80 dark:border-white/10';
 
+  const safeCustomText = resolveContrastSafeTextColor(menuCfg.textColor, effectiveIsLightSurface);
   const resolvedNavTextColor =
-    menuCfg.textColor ||
+    safeCustomText ||
     (customBgLight === true ? '#0F172A' : customBgLight === false ? '#F8FAFC' : undefined);
 
   const navStyle: React.CSSProperties = {
@@ -175,7 +181,7 @@ export default function Navbar() {
 
           {/* Zone 3: Primary Action & Member Account */}
           <div className="hidden lg:flex items-center gap-3 shrink-0">
-            <ThemeToggle lightSurface={customBgLight} />
+            <ThemeToggle lightSurface={effectiveIsLightSurface} />
 
             {user ? (
               <div className="relative group">
@@ -214,6 +220,27 @@ export default function Navbar() {
                   >
                     <MessageSquare className="w-4 h-4 text-blue-500" />
                     <span>Sistema de Correos</span>
+                  </Link>
+                  <Link
+                    to="/logistica"
+                    className="px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5 text-xs font-semibold"
+                  >
+                    <Truck className="w-4 h-4 text-orange-500" />
+                    <span>Logística, OSRM &amp; Flota</span>
+                  </Link>
+                  <Link
+                    to="/warehousing"
+                    className="px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5 text-xs font-semibold"
+                  >
+                    <Warehouse className="w-4 h-4 text-cyan-500" />
+                    <span>Warehousing &amp; Cámaras</span>
+                  </Link>
+                  <Link
+                    to="/ecommerce"
+                    className="px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors flex items-center gap-2.5 border-t border-slate-100 dark:border-white/5 text-xs font-semibold"
+                  >
+                    <ShoppingBag className="w-4 h-4 text-amber-500" />
+                    <span>E-commerce Mayorista</span>
                   </Link>
                   <Link
                     to="/chat"
@@ -282,7 +309,7 @@ export default function Navbar() {
 
           {/* Mobile Menu Trigger */}
           <div className="flex lg:hidden items-center gap-3 shrink-0">
-            <ThemeToggle lightSurface={customBgLight} />
+            <ThemeToggle lightSurface={effectiveIsLightSurface} />
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -333,11 +360,46 @@ export default function Navbar() {
                     <LayoutDashboard className="w-4 h-4 text-orange-500" /> Panel &amp; CRM
                   </Link>
                   <Link
+                    to="/logistica"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2"
+                  >
+                    <Truck className="w-4 h-4 text-orange-500" /> Logística, OSRM &amp; Flota
+                  </Link>
+                  <Link
+                    to="/warehousing"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2"
+                  >
+                    <Warehouse className="w-4 h-4 text-cyan-500" /> Warehousing &amp; Cámaras
+                  </Link>
+                  <Link
+                    to="/ecommerce"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2"
+                  >
+                    <ShoppingBag className="w-4 h-4 text-amber-500" /> E-commerce Mayorista
+                  </Link>
+                  <Link
+                    to="/chat"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-500" /> Chat B2B (Patagonia Link)
+                  </Link>
+                  <Link
                     to="/inbox"
                     onClick={() => setIsMobileMenuOpen(false)}
                     className="flex items-center gap-2"
                   >
                     <MessageSquare className="w-4 h-4 text-blue-500" /> Sistema de Correos
+                  </Link>
+                  <Link
+                    to="/apps"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2"
+                  >
+                    <Grid2X2 className="w-4 h-4 text-orange-500" /> Módulos Operativos
                   </Link>
                   <Link
                     to="/perfil-empresa"

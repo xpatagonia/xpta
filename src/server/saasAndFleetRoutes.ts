@@ -6,10 +6,16 @@ import { ensureProductionTables } from "../services/arnSchema.ts";
 import {
   SAAS_PLANS,
   LOGISTICS_MEMBERSHIP,
+  SAAS_MODULES,
   resolvePlanConfig,
   canAddOrganizationSeat,
   canAccessLogisticsSuite,
+  normalizeModuleSlug,
+  resolveEffectiveModules,
+  buildEntitlementsMap,
+  hasModuleEntitlement,
   type PymePlanSlug,
+  type SaasModuleSlug,
 } from "../services/saasPlans.ts";
 import { hasApprovedPaidEntitlement } from "../services/billingService.ts";
 
@@ -26,6 +32,8 @@ export interface TenantContext {
   orgRole: string;
   logisticsPlanActive: boolean;
   hasLogisticsAccess: boolean;
+  activeModules: SaasModuleSlug[];
+  entitlements: Record<SaasModuleSlug, boolean>;
 }
 
 export async function resolveTenantContext(
@@ -139,11 +147,22 @@ export async function resolveTenantContext(
   const pendingInvitesCount = Number(invitesCountRes.rows?.[0]?.cnt || 0);
   const plan = resolvePlanConfig(orgRow.plan_slug || membershipName);
   const seatLimit = Number(orgRow.seat_limit) || plan.seatLimit;
-  const hasLogisticsAccess = canAccessLogisticsSuite({
+  const activeModules = resolveEffectiveModules({
+    planSlug: plan.slug,
     logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    rawActiveModules: orgRow.active_modules,
     membershipName,
     roleName,
   });
+  const entitlements = buildEntitlementsMap(activeModules);
+  const hasLogisticsAccess =
+    entitlements.logistica_flota ||
+    canAccessLogisticsSuite({
+      logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+      membershipName,
+      roleName,
+      rawActiveModules: orgRow.active_modules,
+    });
 
   return {
     organizationId: Number(orgRow.id),
@@ -156,9 +175,72 @@ export async function resolveTenantContext(
     activeMembersCount,
     pendingInvitesCount,
     orgRole,
-    logisticsPlanActive: Boolean(orgRow.logistics_plan_active),
+    logisticsPlanActive: Boolean(orgRow.logistics_plan_active) || entitlements.logistica_flota,
     hasLogisticsAccess,
+    activeModules,
+    entitlements,
   };
+}
+
+export async function ensureModuleAccess(
+  req: AuthRequest,
+  res: any,
+  moduleSlug: SaasModuleSlug
+): Promise<{ allowed: boolean; tenant: TenantContext | null }> {
+  if (!req.user?.uid) {
+    res.status(401).json({ error: "Autenticación requerida" });
+    return { allowed: false, tenant: null };
+  }
+
+  if (req.user.roleName === "system_admin") {
+    const tenant = await resolveTenantContext(
+      req.user.uid,
+      req.user.email,
+      req.user.membershipName,
+      req.user.roleName
+    ).catch(() => null);
+    return { allowed: true, tenant };
+  }
+
+  const tenant = await resolveTenantContext(
+    req.user.uid,
+    req.user.email,
+    req.user.membershipName,
+    req.user.roleName
+  ).catch(() => null);
+
+  const allowed = tenant
+    ? hasModuleEntitlement(
+        {
+          planSlug: tenant.planSlug,
+          logisticsPlanActive: tenant.logisticsPlanActive,
+          activeModules: tenant.activeModules,
+          membershipName: req.user.membershipName,
+          roleName: req.user.roleName,
+        },
+        moduleSlug
+      )
+    : hasModuleEntitlement(
+        {
+          membershipName: req.user.membershipName,
+          roleName: req.user.roleName,
+        },
+        moduleSlug
+      );
+
+  if (!allowed) {
+    const modMeta = SAAS_MODULES[moduleSlug];
+    res.status(403).json({
+      error: `El módulo "${modMeta.title}" requiere suscripción activa o plan habilitado.`,
+      code: "MODULE_ENTITLEMENT_REQUIRED",
+      requiresModule: moduleSlug,
+      moduleTitle: modMeta.title,
+      priceMonthlyArs: modMeta.priceMonthlyArs,
+    });
+    return { allowed: false, tenant };
+  }
+
+  return { allowed: true, tenant };
 }
 
 export async function upsertLinkedContactFromArn(params: {
@@ -303,6 +385,12 @@ export function registerSaasAndFleetRoutes(
         req.user!.roleName
       );
       if (!tenant) {
+        const fallbackModules = resolveEffectiveModules({
+          planSlug: "gratis",
+          membershipName: req.user!.membershipName,
+          roleName: req.user!.roleName,
+        });
+        const fallbackEntitlements = buildEntitlementsMap(fallbackModules);
         return res.json({
           organization: {
             id: 0,
@@ -311,8 +399,10 @@ export function registerSaasAndFleetRoutes(
             planName: SAAS_PLANS.gratis.displayName,
             seatLimit: 2,
             usedSeats: 1,
-            logisticsPlanActive: false,
-            hasLogisticsAccess: false,
+            logisticsPlanActive: fallbackEntitlements.logistica_flota,
+            hasLogisticsAccess: fallbackEntitlements.logistica_flota,
+            activeModules: fallbackModules,
+            entitlements: fallbackEntitlements,
           },
           members: [
             {
@@ -324,6 +414,7 @@ export function registerSaasAndFleetRoutes(
           ],
           invitations: [],
           plansCatalog: Object.values(SAAS_PLANS),
+          modulesCatalog: Object.values(SAAS_MODULES),
           logisticsMembership: LOGISTICS_MEMBERSHIP,
         });
       }
@@ -350,6 +441,7 @@ export function registerSaasAndFleetRoutes(
         members: membersRes.rows || [],
         invitations: invitesRes.rows || [],
         plansCatalog: Object.values(SAAS_PLANS),
+        modulesCatalog: Object.values(SAAS_MODULES),
         logisticsMembership: LOGISTICS_MEMBERSHIP,
       });
     } catch (err: any) {
@@ -534,6 +626,9 @@ export function registerSaasAndFleetRoutes(
         typeof body.logisticsPlanActive === "boolean"
           ? body.logisticsPlanActive
           : tenant.logisticsPlanActive;
+      const requestedModule = body.activateModuleSlug
+        ? normalizeModuleSlug(String(body.activateModuleSlug))
+        : null;
       const nextName = typeof body.orgName === "string" && body.orgName.trim() ? body.orgName.trim() : tenant.orgName;
 
       const isSysAdmin = req.user!.roleName === "system_admin";
@@ -574,6 +669,24 @@ export function registerSaasAndFleetRoutes(
             });
           }
         }
+
+        if (requestedModule && !tenant.activeModules.includes(requestedModule)) {
+          const paidModule = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user!.uid,
+            targetType: "module",
+            targetSlug: requestedModule,
+          });
+          if (!paidModule) {
+            const modMeta = SAAS_MODULES[requestedModule];
+            return res.status(402).json({
+              error: `El módulo "${modMeta.title}" requiere pago acreditado antes de activarse.`,
+              requiresPayment: true,
+              targetType: requestedModule === "logistica_flota" ? "logistics" : "module",
+              targetSlug: requestedModule,
+            });
+          }
+        }
       }
 
       if (tenant.usedSeats > nextPlan.seatLimit) {
@@ -582,11 +695,35 @@ export function registerSaasAndFleetRoutes(
         });
       }
 
+      const orgModsRes = await pool.query(
+        `SELECT active_modules FROM public.organizations WHERE id = $1`,
+        [tenant.organizationId]
+      );
+      const storedRawMods = Array.isArray(orgModsRes.rows?.[0]?.active_modules)
+        ? orgModsRes.rows[0].active_modules
+        : [];
+      const modSet = new Set<string>(storedRawMods.map((s: any) => String(s)));
+      if (requestedModule) modSet.add(requestedModule);
+      if (nextLogistics) modSet.add("logistica_flota");
+      if (body.logisticsPlanActive === false) modSet.delete("logistica_flota");
+
       await pool.query(
         `UPDATE public.organizations
-         SET plan_slug = $1, seat_limit = $2, logistics_plan_active = $3, name = $4, updated_at = now()
-         WHERE id = $5`,
-        [nextPlan.slug, nextPlan.seatLimit, nextLogistics, nextName, tenant.organizationId]
+         SET plan_slug = $1,
+             seat_limit = $2,
+             logistics_plan_active = $3,
+             active_modules = $4::jsonb,
+             name = $5,
+             updated_at = now()
+         WHERE id = $6`,
+        [
+          nextPlan.slug,
+          nextPlan.seatLimit,
+          nextLogistics || modSet.has("logistica_flota"),
+          JSON.stringify(Array.from(modSet)),
+          nextName,
+          tenant.organizationId,
+        ]
       );
 
       await deps.recordAutomationEvent("outbound_n8n", "saas.plan.updated", "processed", {
@@ -594,6 +731,7 @@ export function registerSaasAndFleetRoutes(
         planSlug: nextPlan.slug,
         seatLimit: nextPlan.seatLimit,
         logisticsPlanActive: nextLogistics,
+        requestedModule,
       });
 
       const updatedTenant = await resolveTenantContext(
