@@ -371,8 +371,51 @@ ALTER TABLE IF EXISTS public.automation_logs
   ADD COLUMN IF NOT EXISTS last_error text,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
--- 14. Clasificación Multi-Perfil en Directorio B2B (Empresa | Emprendimiento | Profesional | Servicio)
+-- 14. Clasificación Multi-Perfil y KYB ARCA/BCRA en Directorio B2B
 ALTER TABLE IF EXISTS public.company_profiles
   ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
   ADD COLUMN IF NOT EXISTS credential_label text,
-  ADD COLUMN IF NOT EXISTS service_modality text;
+  ADD COLUMN IF NOT EXISTS service_modality text,
+  ADD COLUMN IF NOT EXISTS fiscal_condition text,
+  ADD COLUMN IF NOT EXISTS arca_clae_codes jsonb DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS bcra_situation text,
+  ADD COLUMN IF NOT EXISTS arca_verified_at timestamptz;
+
+-- 15. Facturación MercadoPago / Transferencias y Comparador RFQ
+CREATE TABLE IF NOT EXISTS public.billing_transactions (
+  id serial PRIMARY KEY,
+  organization_id integer,
+  user_uid text NOT NULL,
+  user_email text,
+  target_type text NOT NULL,
+  target_slug text NOT NULL,
+  provider text NOT NULL,
+  external_reference text NOT NULL UNIQUE,
+  external_payment_id text,
+  receipt_reference text,
+  amount_ars integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'pending',
+  metadata jsonb DEFAULT '{}'::jsonb,
+  reviewed_by_uid text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.rfq_quotes (
+  id serial PRIMARY KEY,
+  rfq_id integer NOT NULL,
+  supplier_uid text,
+  supplier_org_id integer,
+  supplier_name text NOT NULL,
+  supplier_location text DEFAULT 'Patagonia',
+  verified boolean DEFAULT false,
+  unit_price_ars integer NOT NULL DEFAULT 0,
+  total_price_ars integer NOT NULL DEFAULT 0,
+  currency text DEFAULT 'ARS',
+  delivery_days integer NOT NULL DEFAULT 7,
+  payment_terms text DEFAULT 'Factura A 30 días',
+  distance_km integer DEFAULT 0,
+  notes text,
+  status text NOT NULL DEFAULT 'submitted',
+  created_at timestamptz DEFAULT now()
+);

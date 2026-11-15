@@ -58,7 +58,13 @@ export default function AppStore() {
   const [selectedApp, setSelectedApp] = useState<any>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const navigate = useNavigate();
+
+  const showNotice = (type: 'ok' | 'err', text: string) => {
+    setNotice({ type, text });
+    setTimeout(() => setNotice(null), 6000);
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -88,33 +94,36 @@ export default function AppStore() {
 
   const initiateCheckout = () => {
     if (!user) {
-      alert("Debes iniciar sesión para contratar módulos.");
+      showNotice('err', 'Debes iniciar sesión para contratar módulos.');
       return;
     }
     setIsCheckoutOpen(true);
   };
 
-  const handleConfirmPayment = async (paymentMethod: string) => {
+  const handleConfirmPayment = async (result: {
+    provider: string;
+    status: 'pending' | 'redirected';
+    message: string;
+  }) => {
     if (!user || !selectedApp) return;
 
     try {
-      // Create request in module_requests
       const reqRef = doc(collection(db, 'module_requests'));
       await setDoc(reqRef, {
         userId: user.uid,
         moduleId: selectedApp.id,
         moduleName: selectedApp.name,
         status: 'pending',
-        paymentMethod: paymentMethod,
-        createdAt: new Date().toISOString()
+        paymentMethod: result.provider,
+        createdAt: new Date().toISOString(),
       });
 
-      alert(`Pago confirmado. Su solicitud de suscripción a ${selectedApp.name} está bajo revisión.`);
+      showNotice('ok', result.message);
       setIsCheckoutOpen(false);
       setSelectedApp(null);
     } catch (error) {
-       console.error('Error requesting module:', error);
-       alert("Error al procesar la solicitud.");
+      console.error('Error requesting module:', error);
+      showNotice('err', 'Error al registrar la solicitud del módulo.');
     }
   };
 
@@ -126,6 +135,17 @@ export default function AppStore() {
           <p className="text-slate-600 dark:text-slate-400">
             Escala las capacidades de tu cuenta instalando aplicaciones y servicios integrados a tu ecosistema B2B.
           </p>
+          {notice && (
+            <div
+              className={`mt-4 px-4 py-3 rounded-xl border text-xs font-semibold ${
+                notice.type === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+              }`}
+            >
+              {notice.text}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -305,6 +325,7 @@ export default function AppStore() {
           onConfirm={handleConfirmPayment}
           moduleName={selectedApp.name}
           price={selectedApp.price}
+          targetSlug={selectedApp.id}
         />
       )}
     </div>

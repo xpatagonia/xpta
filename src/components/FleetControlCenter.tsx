@@ -10,9 +10,15 @@ import {
   Lock,
   CheckCircle2,
   X,
+  FileDown,
+  ExternalLink,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { QRCodeCanvas } from 'qrcode.react';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
+import { generateLogisticsRemitoPdf } from '../lib/pdfDocuments';
+import CheckoutModal from './CheckoutModal';
 
 interface FleetVehicle {
   id: number;
@@ -61,6 +67,7 @@ export default function FleetControlCenter({ onMembershipActivated }: Props) {
   const [openLoads, setOpenLoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activating, setActivating] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // Add Vehicle modal
@@ -139,7 +146,11 @@ export default function FleetControlCenter({ onMembershipActivated }: Props) {
         },
         body: JSON.stringify({ logisticsPlanActive: true }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 402 || data?.requiresPayment) {
+        setShowCheckout(true);
+        return;
+      }
       if (!res.ok) throw new Error(data?.error || 'No se pudo activar la membresía logística');
       await loadOverview();
       onMembershipActivated?.();
@@ -356,10 +367,24 @@ export default function FleetControlCenter({ onMembershipActivated }: Props) {
               className="px-6 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4" />
-              {activating ? 'Activando...' : 'Activar Membresía Logística ($95.000 ARS/mes)'}
+              {activating ? 'Verificando...' : 'Activar Membresía Logística ($95.000 ARS/mes)'}
             </button>
           </div>
         </div>
+        {showCheckout && (
+          <CheckoutModal
+            isOpen={showCheckout}
+            onClose={() => setShowCheckout(false)}
+            targetSlug="logistica_flota"
+            moduleName="Membresía Suite Logística & Flota"
+            price="$95.000 ARS / mes"
+            onConfirm={async (res) => {
+              setShowCheckout(false);
+              await loadOverview();
+              notify('ok', res.message);
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -586,14 +611,50 @@ export default function FleetControlCenter({ onMembershipActivated }: Props) {
                 {contracts.map((c) => (
                   <div key={c.id} className="px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
                     <div>
-                      <div className="font-mono font-bold text-slate-900 dark:text-white">
-                        {c.tracking_code} · {c.origin_name} → {c.destination_name}
+                      <div className="font-mono font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>{c.tracking_code}</span>
+                        <span>· {c.origin_name} → {c.destination_name}</span>
                       </div>
                       <div className="text-slate-500 mt-0.5 font-mono tabular-nums">
                         Transportista: {c.carrier_name} · Tarifa: ${Number(c.agreed_price_ars).toLocaleString()} ARS · Estado: {c.status}
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="hidden" aria-hidden="true">
+                        <QRCodeCanvas
+                          id={`qr-canvas-${c.tracking_code}`}
+                          value={`https://www.xpatagonia.online/tracking/${c.tracking_code}`}
+                          size={160}
+                        />
+                      </div>
+                      <Link
+                        to={`/tracking/${c.tracking_code}`}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 font-bold inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-orange-500" /> Tracking
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const canvas = document.getElementById(
+                            `qr-canvas-${c.tracking_code}`
+                          ) as HTMLCanvasElement | null;
+                          const qrDataUrl = canvas ? canvas.toDataURL('image/png') : undefined;
+                          generateLogisticsRemitoPdf({
+                            trackingCode: c.tracking_code,
+                            originName: c.origin_name,
+                            destinationName: c.destination_name,
+                            carrierName: c.carrier_name,
+                            agreedPriceArs: Number(c.agreed_price_ars) || 0,
+                            status: c.status,
+                            notes: c.notes,
+                            qrDataUrl,
+                          });
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 font-bold inline-flex items-center gap-1"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-orange-500" /> Remito QR (PDF)
+                      </button>
                       {c.status === 'ofertado' && (
                         <button
                           onClick={() => handleContractStatus(c.id, 'adjudicado')}

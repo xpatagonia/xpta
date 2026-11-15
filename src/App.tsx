@@ -33,6 +33,7 @@ const Inbox = lazy(() => import('./pages/Inbox'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Insights = lazy(() => import('./pages/Insights'));
 const B2BMessenger = lazy(() => import('./pages/B2BMessenger'));
+const PublicTracking = lazy(() => import('./pages/PublicTracking'));
 
 function Home() {
   const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
@@ -94,6 +95,8 @@ export default function App() {
               <Route path="/chat" element={<B2BMessenger />} />
               <Route path="/comunicaciones-b2b" element={<B2BMessenger />} />
               <Route path="/insights" element={<Insights />} />
+              <Route path="/tracking" element={<PublicTracking />} />
+              <Route path="/tracking/:code" element={<PublicTracking />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="*" element={<Home />} />
             </Routes>

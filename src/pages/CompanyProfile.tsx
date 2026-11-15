@@ -1,15 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Building2, MapPin, Briefcase, Users, Plus, Check, Save, UserPlus, X, Tag } from 'lucide-react';
+import {
+  Building2,
+  MapPin,
+  Briefcase,
+  Users,
+  Plus,
+  Check,
+  Save,
+  UserPlus,
+  X,
+  Tag,
+  ShieldCheck,
+  FileDown,
+  Loader2,
+} from 'lucide-react';
 import { MAIN_CATEGORIES, INDUSTRIAL_CATEGORIES } from '../lib/categories';
 import { doc, getDoc, setDoc } from '../lib/db';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { auth, db } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
+import { generateVendorPackPdf } from '../lib/pdfDocuments';
 
 const API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
 
+interface KybSummary {
+  legalName: string | null;
+  fiscalCondition: string | null;
+  bcraSituation: string | null;
+  claeCodes: string[];
+  verifiedBadge: boolean;
+  checkedAt?: string;
+}
 
 export default function CompanyProfile() {
   const [formData, setFormData] = useState({
@@ -36,6 +59,8 @@ export default function CompanyProfile() {
   const [selectedSubcategories, setSelectedSubcategories] = useState<Record<string, string[]>>({});
   const [showCategorySelect, setShowCategorySelect] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [verifyingCuit, setVerifyingCuit] = useState(false);
+  const [kybInfo, setKybInfo] = useState<KybSummary | null>(null);
   const [users, setUsers] = useState([
     { id: 1, email: 'admin@empresa.com', role: 'Administrador' }
   ]);
@@ -81,6 +106,16 @@ export default function CompanyProfile() {
                   lat: Number(p.base_lat) || -45.8641,
                   lng: Number(p.base_lng) || -67.4965,
                 }));
+                if (p.legal_name || p.bcra_situation || p.fiscal_condition) {
+                  setKybInfo({
+                    legalName: p.legal_name || null,
+                    fiscalCondition: p.fiscal_condition || null,
+                    bcraSituation: p.bcra_situation || null,
+                    claeCodes: Array.isArray(p.arca_clae_codes) ? p.arca_clae_codes : [],
+                    verifiedBadge: p.verification_status === 'verified',
+                    checkedAt: p.arca_verified_at || undefined,
+                  });
+                }
                 if (Array.isArray(p.services) && p.services.length > 0) {
                   setSelectedCategories(p.services);
                 }
@@ -210,6 +245,76 @@ export default function CompanyProfile() {
     return digit === verificador;
   };
 
+  const handleVerifyCuit = async () => {
+    if (!formData.cuit.trim()) {
+      showBanner('err', 'Ingresá un CUIT para verificar en ARCA / BCRA.');
+      return;
+    }
+    setVerifyingCuit(true);
+    try {
+      const token = await auth.getToken();
+      if (!token) {
+        showBanner('err', 'Iniciá sesión para validar el CUIT en línea.');
+        return;
+      }
+      const res = await fetch(`${getApiUrl()}/api/kyb/verify-cuit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ cuit: formData.cuit, applyToProfile: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'No se pudo validar el CUIT.');
+      }
+      const r = data.result;
+      setFormData((prev) => ({
+        ...prev,
+        cuit: r.cuitFormatted || prev.cuit,
+        companyName: prev.companyName || r.legalName || '',
+        province: prev.province || r.province || 'Chubut',
+        city: prev.city || r.city || 'Comodoro Rivadavia',
+        address: prev.address || r.address || '',
+      }));
+      setKybInfo({
+        legalName: r.legalName || null,
+        fiscalCondition: r.fiscalCondition || null,
+        bcraSituation: r.bcraSituation || null,
+        claeCodes: Array.isArray(r.claeCodes) ? r.claeCodes : [],
+        verifiedBadge: Boolean(r.verifiedBadge),
+        checkedAt: r.checkedAt,
+      });
+      showBanner('ok', r.message || 'CUIT verificado y registrado en legajo KYB.');
+    } catch (err: any) {
+      showBanner('err', err?.message || 'Error consultando ARCA / BCRA.');
+    } finally {
+      setVerifyingCuit(false);
+    }
+  };
+
+  const handleExportVendorPack = () => {
+    generateVendorPackPdf({
+      companyName: formData.companyName || kybInfo?.legalName || 'Organización B2B',
+      legalName: kybInfo?.legalName || undefined,
+      entityType: formData.entityType,
+      cuit: formData.cuit,
+      fiscalCondition: kybInfo?.fiscalCondition || undefined,
+      bcraSituation: kybInfo?.bcraSituation || undefined,
+      province: formData.province,
+      city: formData.city,
+      address: formData.address || undefined,
+      credentialLabel: formData.credentialLabel || undefined,
+      serviceModality: formData.serviceModality || undefined,
+      description: formData.description,
+      categories: selectedCategories,
+      website: formData.website || undefined,
+      contactEmail: formData.contactEmail || undefined,
+      phone: formData.contactPhone || undefined,
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) {
@@ -281,14 +386,24 @@ export default function CompanyProfile() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A080C] pt-24 pb-12">
       <div className="max-w-4xl mx-auto px-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Perfil de Empresa</h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Completa la información de tu organización para mejorar la visibilidad en la Patagonia y alimentar el motor vectorial ADN.
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Perfil de Empresa</h1>
+            <p className="text-slate-600 dark:text-slate-400">
+              Completa la información de tu organización para mejorar la visibilidad en la Patagonia y alimentar el motor vectorial ADN.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleExportVendorPack}
+            className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 self-start sm:self-auto"
+          >
+            <FileDown className="w-4 h-4" /> Descargar Legajo Técnico (PDF)
+          </button>
+        </div>
           {statusBanner && (
             <div
-              className={`mt-4 px-4 py-3 rounded-xl border text-xs font-semibold ${
+              className={`mb-6 px-4 py-3 rounded-xl border text-xs font-semibold ${
                 statusBanner.type === 'ok'
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
                   : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
@@ -297,7 +412,6 @@ export default function CompanyProfile() {
               {statusBanner.text}
             </div>
           )}
-        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
@@ -392,16 +506,27 @@ export default function CompanyProfile() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
-                      CUIT
+                      CUIT (Verificación ARCA / BCRA)
                     </label>
-                    <input
-                      type="text"
-                      name="cuit"
-                      value={formData.cuit}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-orange-500/50 outline-none transition-all text-slate-900 dark:text-white"
-                      placeholder="Ej. 30-12345678-9"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        name="cuit"
+                        value={formData.cuit}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-orange-500/50 outline-none transition-all font-mono text-slate-900 dark:text-white"
+                        placeholder="Ej. 30-12345678-9"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyCuit}
+                        disabled={verifyingCuit}
+                        className="px-3.5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                      >
+                        {verifyingCuit ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                        {verifyingCuit ? 'Verificando...' : 'Verificar ARCA/BCRA'}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2">
@@ -421,6 +546,40 @@ export default function CompanyProfile() {
                     </select>
                   </div>
                 </div>
+
+                {kybInfo && (
+                  <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4" />
+                        Validación Fiscal & Crediticia KYB
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-bold uppercase">
+                        {kybInfo.verifiedBadge ? 'Verificada' : 'Registrada'}
+                      </span>
+                    </div>
+                    {kybInfo.legalName && (
+                      <p className="text-slate-700 dark:text-slate-200">
+                        <strong>Razón Social ARCA/BCRA:</strong> {kybInfo.legalName}
+                      </p>
+                    )}
+                    {kybInfo.fiscalCondition && (
+                      <p className="text-slate-700 dark:text-slate-200">
+                        <strong>Condición Impositiva:</strong> {kybInfo.fiscalCondition}
+                      </p>
+                    )}
+                    {kybInfo.bcraSituation && (
+                      <p className="text-slate-700 dark:text-slate-200 font-mono tabular-nums">
+                        <strong>Central de Deudores BCRA:</strong> {kybInfo.bcraSituation}
+                      </p>
+                    )}
+                    {kybInfo.claeCodes && kybInfo.claeCodes.length > 0 && (
+                      <p className="text-slate-600 dark:text-slate-300">
+                        <strong>Actividades CLAE:</strong> {kybInfo.claeCodes.slice(0, 3).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>

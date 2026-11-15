@@ -47,6 +47,12 @@ export const companyProfiles = pgTable('company_profiles', {
   credentialLabel: text('credential_label'),
   serviceModality: text('service_modality'),
 
+  // Verificación Fiscal & Crediticia KYB (ARCA + BCRA)
+  fiscalCondition: text('fiscal_condition'),
+  arcaClaeCodes: jsonb('arca_clae_codes').default('[]'),
+  bcraSituation: text('bcra_situation'),
+  arcaVerifiedAt: timestamp('arca_verified_at'),
+
   // Innovative Trust & AI Features
   trustScore: integer('trust_score').default(50), // 0-100 AI-calculated score based on profile completion and successful transactions
   verificationStatus: text('verification_status').default('unverified'), // unverified, pending, verified (KYC/KYB)
@@ -417,4 +423,46 @@ export const logisticsContracts = pgTable('logistics_contracts', {
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ==========================================
+// FACTURACIÓN REAL, MERCADOPAGO & COMPARADOR RFQ
+// ==========================================
+
+export const billingTransactions = pgTable('billing_transactions', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id'),
+  userUid: text('user_uid').notNull(),
+  userEmail: text('user_email'),
+  targetType: text('target_type').notNull(), // 'plan' | 'logistics' | 'module'
+  targetSlug: text('target_slug').notNull(), // 'pro' | 'corporativo' | 'logistica_flota' | 'warehousing'
+  provider: text('provider').notNull(), // 'mercadopago' | 'bank_transfer'
+  externalReference: text('external_reference').notNull().unique(),
+  externalPaymentId: text('external_payment_id'),
+  receiptReference: text('receipt_reference'),
+  amountArs: integer('amount_ars').notNull().default(0),
+  status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'rejected'
+  metadata: jsonb('metadata').default('{}'),
+  reviewedByUid: text('reviewed_by_uid'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const rfqQuotes = pgTable('rfq_quotes', {
+  id: serial('id').primaryKey(),
+  rfqId: integer('rfq_id').notNull(),
+  supplierUid: text('supplier_uid'),
+  supplierOrgId: integer('supplier_org_id'),
+  supplierName: text('supplier_name').notNull(),
+  supplierLocation: text('supplier_location').default('Patagonia'),
+  verified: boolean('verified').default(false),
+  unitPriceArs: integer('unit_price_ars').notNull().default(0),
+  totalPriceArs: integer('total_price_ars').notNull().default(0),
+  currency: text('currency').default('ARS'),
+  deliveryDays: integer('delivery_days').notNull().default(7),
+  paymentTerms: text('payment_terms').default('Factura A 30 días'),
+  distanceKm: integer('distance_km').default(0),
+  notes: text('notes'),
+  status: text('status').notNull().default('submitted'), // 'submitted' | 'shortlisted' | 'awarded' | 'rejected'
+  createdAt: timestamp('created_at').defaultNow(),
 });

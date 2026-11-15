@@ -5,6 +5,7 @@ import {
   MapPin, AlertCircle, RefreshCw, Sparkles, QrCode, FileText, 
   CheckCircle2, ArrowRight, Activity, Download, Copy, Check
 } from 'lucide-react';
+import { generateLogisticsRemitoPdf } from '../lib/pdfDocuments';
 
 interface ActiveTruck {
   id: string;
@@ -123,6 +124,7 @@ export default function LogisticsLiveMonitoring() {
   const [pingSuccess, setPingSuccess] = useState(false);
   const [showManifestModal, setShowManifestModal] = useState(false);
   const [copiedTracking, setCopiedTracking] = useState(false);
+  const [manifestNotice, setManifestNotice] = useState<string | null>(null);
 
   const activeTruck = trucks.find(t => t.id === selectedTruckId) || trucks[0];
 
@@ -193,6 +195,13 @@ export default function LogisticsLiveMonitoring() {
           </button>
         </div>
       </div>
+
+      {manifestNotice && (
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+          <span>{manifestNotice}</span>
+        </div>
+      )}
 
       {pingSuccess && (
         <motion.div
@@ -487,8 +496,17 @@ export default function LogisticsLiveMonitoring() {
                 </button>
                 <button
                   onClick={() => {
-                    alert('El Manifiesto de Carga Electrónica ha sido generado y preparado para impresión / PDF.');
+                    generateLogisticsRemitoPdf({
+                      trackingCode: activeTruck.id,
+                      originName: activeTruck.origin,
+                      destinationName: activeTruck.destination,
+                      carrierName: activeTruck.carrier,
+                      status: 'en_transito',
+                      notes: `${activeTruck.cargo} (${activeTruck.weight}) · Precinto ${activeTruck.senasaSeal}`,
+                    });
                     setShowManifestModal(false);
+                    setManifestNotice(`Manifiesto ${activeTruck.id} descargado en PDF oficial.`);
+                    setTimeout(() => setManifestNotice(null), 5000);
                   }}
                   className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20"
                 >

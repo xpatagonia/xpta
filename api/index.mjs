@@ -15,6 +15,7 @@ __export(schema_exports, {
   arnOpportunities: () => arnOpportunities,
   arnRules: () => arnRules,
   automationLogs: () => automationLogs,
+  billingTransactions: () => billingTransactions,
   chatMessages: () => chatMessages,
   companyProfiles: () => companyProfiles,
   contacts: () => contacts,
@@ -32,6 +33,7 @@ __export(schema_exports, {
   permissions: () => permissions,
   processedEmailUids: () => processedEmailUids,
   products: () => products,
+  rfqQuotes: () => rfqQuotes,
   rfqs: () => rfqs,
   rolePermissions: () => rolePermissions,
   roles: () => roles,
@@ -41,7 +43,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
-var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, processedEmailUids, fleetExpiryAlerts, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts;
+var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, processedEmailUids, fleetExpiryAlerts, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts, billingTransactions, rfqQuotes;
 var init_schema = __esm({
   "src/db/schema.ts"() {
     users = pgTable("users", {
@@ -87,6 +89,11 @@ var init_schema = __esm({
       entityType: text("entity_type").default("empresa"),
       credentialLabel: text("credential_label"),
       serviceModality: text("service_modality"),
+      // Verificación Fiscal & Crediticia KYB (ARCA + BCRA)
+      fiscalCondition: text("fiscal_condition"),
+      arcaClaeCodes: jsonb("arca_clae_codes").default("[]"),
+      bcraSituation: text("bcra_situation"),
+      arcaVerifiedAt: timestamp("arca_verified_at"),
       // Innovative Trust & AI Features
       trustScore: integer("trust_score").default(50),
       // 0-100 AI-calculated score based on profile completion and successful transactions
@@ -435,6 +442,47 @@ var init_schema = __esm({
       notes: text("notes"),
       createdAt: timestamp("created_at").defaultNow(),
       updatedAt: timestamp("updated_at").defaultNow()
+    });
+    billingTransactions = pgTable("billing_transactions", {
+      id: serial("id").primaryKey(),
+      organizationId: integer("organization_id"),
+      userUid: text("user_uid").notNull(),
+      userEmail: text("user_email"),
+      targetType: text("target_type").notNull(),
+      // 'plan' | 'logistics' | 'module'
+      targetSlug: text("target_slug").notNull(),
+      // 'pro' | 'corporativo' | 'logistica_flota' | 'warehousing'
+      provider: text("provider").notNull(),
+      // 'mercadopago' | 'bank_transfer'
+      externalReference: text("external_reference").notNull().unique(),
+      externalPaymentId: text("external_payment_id"),
+      receiptReference: text("receipt_reference"),
+      amountArs: integer("amount_ars").notNull().default(0),
+      status: text("status").notNull().default("pending"),
+      // 'pending' | 'approved' | 'rejected'
+      metadata: jsonb("metadata").default("{}"),
+      reviewedByUid: text("reviewed_by_uid"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    rfqQuotes = pgTable("rfq_quotes", {
+      id: serial("id").primaryKey(),
+      rfqId: integer("rfq_id").notNull(),
+      supplierUid: text("supplier_uid"),
+      supplierOrgId: integer("supplier_org_id"),
+      supplierName: text("supplier_name").notNull(),
+      supplierLocation: text("supplier_location").default("Patagonia"),
+      verified: boolean("verified").default(false),
+      unitPriceArs: integer("unit_price_ars").notNull().default(0),
+      totalPriceArs: integer("total_price_ars").notNull().default(0),
+      currency: text("currency").default("ARS"),
+      deliveryDays: integer("delivery_days").notNull().default(7),
+      paymentTerms: text("payment_terms").default("Factura A 30 d\xEDas"),
+      distanceKm: integer("distance_km").default(0),
+      notes: text("notes"),
+      status: text("status").notNull().default("submitted"),
+      // 'submitted' | 'shortlisted' | 'awarded' | 'rejected'
+      createdAt: timestamp("created_at").defaultNow()
     });
   }
 });
@@ -1173,7 +1221,49 @@ async function ensureProductionTables() {
       ALTER TABLE IF EXISTS public.company_profiles
         ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
         ADD COLUMN IF NOT EXISTS credential_label text,
-        ADD COLUMN IF NOT EXISTS service_modality text;
+        ADD COLUMN IF NOT EXISTS service_modality text,
+        ADD COLUMN IF NOT EXISTS fiscal_condition text,
+        ADD COLUMN IF NOT EXISTS arca_clae_codes jsonb DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS bcra_situation text,
+        ADD COLUMN IF NOT EXISTS arca_verified_at timestamptz;
+
+      CREATE TABLE IF NOT EXISTS public.billing_transactions (
+        id serial PRIMARY KEY,
+        organization_id integer,
+        user_uid text NOT NULL,
+        user_email text,
+        target_type text NOT NULL,
+        target_slug text NOT NULL,
+        provider text NOT NULL,
+        external_reference text NOT NULL UNIQUE,
+        external_payment_id text,
+        receipt_reference text,
+        amount_ars integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT 'pending',
+        metadata jsonb DEFAULT '{}'::jsonb,
+        reviewed_by_uid text,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.rfq_quotes (
+        id serial PRIMARY KEY,
+        rfq_id integer NOT NULL,
+        supplier_uid text,
+        supplier_org_id integer,
+        supplier_name text NOT NULL,
+        supplier_location text DEFAULT 'Patagonia',
+        verified boolean DEFAULT false,
+        unit_price_ars integer NOT NULL DEFAULT 0,
+        total_price_ars integer NOT NULL DEFAULT 0,
+        currency text DEFAULT 'ARS',
+        delivery_days integer NOT NULL DEFAULT 7,
+        payment_terms text DEFAULT 'Factura A 30 d\xEDas',
+        distance_km integer DEFAULT 0,
+        notes text,
+        status text NOT NULL DEFAULT 'submitted',
+        created_at timestamptz DEFAULT now()
+      );
     `);
     arnTablesEnsured = true;
   } catch (err) {
@@ -2305,8 +2395,140 @@ var init_saasPlans = __esm({
   }
 });
 
-// src/server/saasAndFleetRoutes.ts
+// src/services/billingService.ts
 import crypto from "crypto";
+function getBankTransferInstructions() {
+  const cbu = String(process.env.BANK_TRANSFER_CBU || "").trim();
+  const alias = String(process.env.BANK_TRANSFER_ALIAS || "").trim();
+  const holder = String(process.env.BANK_TRANSFER_HOLDER || "xPatagonia B2B").trim();
+  const bank = String(process.env.BANK_TRANSFER_BANK || "Banco Corporativo").trim();
+  const configured = Boolean(cbu || alias);
+  return {
+    configured,
+    bank,
+    holder,
+    cbu: cbu || "Solicitar CBU verificado en administraci\xF3n",
+    alias: alias || "Solicitar Alias verificado en administraci\xF3n",
+    note: configured ? "Transfer\xED el importe exacto e inform\xE1 el n\xFAmero de comprobante o COELSA para activaci\xF3n." : "Carg\xE1 el n\xFAmero de referencia de transferencia o solicit\xE1 los datos bancarios oficiales a pagos@xpatagonia.online."
+  };
+}
+function isMercadoPagoConfigured() {
+  const token = String(process.env.MP_ACCESS_TOKEN || "").trim();
+  return token.length > 15;
+}
+function verifyMercadoPagoWebhookSignature(params) {
+  const secret = String(params.secret || process.env.MP_WEBHOOK_SECRET || "").trim();
+  if (!secret) return true;
+  const header = String(params.signatureHeader || "").trim();
+  if (!header || !params.dataId) return false;
+  let ts = "";
+  let v1 = "";
+  for (const part of header.split(",")) {
+    const [k, v] = part.split("=").map((s) => s.trim());
+    if (k === "ts") ts = v || "";
+    if (k === "v1") v1 = v || "";
+  }
+  if (!ts || !v1) return false;
+  const manifest = `id:${params.dataId};request-id:${params.requestIdHeader || ""};ts:${ts};`;
+  const expected = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+  const expectedBuf = Buffer.from(expected);
+  const actualBuf = Buffer.from(v1);
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
+}
+async function applyApprovedBillingUpgrade(txRow) {
+  if (!hasDatabaseConfig()) return;
+  await ensureProductionTables();
+  let orgId = txRow.organization_id;
+  if (!orgId) {
+    const orgRes = await pool.query(
+      `SELECT id FROM public.organizations WHERE owner_uid = $1 LIMIT 1`,
+      [txRow.user_uid]
+    );
+    orgId = orgRes.rows?.[0]?.id ? Number(orgRes.rows[0].id) : null;
+  }
+  if (txRow.target_type === "plan" && orgId) {
+    const plan = resolvePlanConfig(txRow.target_slug);
+    await pool.query(
+      `UPDATE public.organizations
+       SET plan_slug = $1, seat_limit = $2, updated_at = now()
+       WHERE id = $3`,
+      [plan.slug, plan.seatLimit, orgId]
+    );
+  } else if (txRow.target_type === "logistics" && orgId) {
+    await pool.query(
+      `UPDATE public.organizations
+       SET logistics_plan_active = true, updated_at = now()
+       WHERE id = $1`,
+      [orgId]
+    );
+  } else if (txRow.target_type === "module") {
+    await pool.query(
+      `UPDATE public.module_requests
+       SET status = 'approved'
+       WHERE user_uid = $1 AND module_id = $2 AND status = 'pending'`,
+      [txRow.user_uid, txRow.target_slug]
+    ).catch(() => {
+    });
+  }
+}
+async function hasApprovedPaidEntitlement(params) {
+  if (!hasDatabaseConfig()) return false;
+  await ensureProductionTables();
+  const res = await pool.query(
+    `SELECT id FROM public.billing_transactions
+     WHERE status = 'approved'
+       AND target_type = $1
+       AND target_slug = $2
+       AND (organization_id = $3 OR user_uid = $4)
+     ORDER BY updated_at DESC LIMIT 1`,
+    [params.targetType, params.targetSlug, params.organizationId, params.userUid]
+  );
+  return (res.rows || []).length > 0;
+}
+var BILLING_CATALOG;
+var init_billingService = __esm({
+  "src/services/billingService.ts"() {
+    init_db();
+    init_saasPlans();
+    init_arnSchema();
+    BILLING_CATALOG = {
+      pro: {
+        targetType: "plan",
+        slug: "pro",
+        title: SAAS_PLANS.pro.displayName,
+        amountArs: SAAS_PLANS.pro.priceMonthlyArs
+      },
+      corporativo: {
+        targetType: "plan",
+        slug: "corporativo",
+        title: SAAS_PLANS.corporativo.displayName,
+        amountArs: SAAS_PLANS.corporativo.priceMonthlyArs
+      },
+      logistica_flota: {
+        targetType: "logistics",
+        slug: "logistica_flota",
+        title: LOGISTICS_MEMBERSHIP.displayName,
+        amountArs: LOGISTICS_MEMBERSHIP.priceMonthlyArs
+      },
+      logistica: {
+        targetType: "module",
+        slug: "logistica",
+        title: "M\xF3dulo Log\xEDstica Integral y Transporte",
+        amountArs: 29900
+      },
+      warehousing: {
+        targetType: "module",
+        slug: "warehousing",
+        title: "M\xF3dulo Warehousing & Almacenamiento",
+        amountArs: 45e3
+      }
+    };
+  }
+});
+
+// src/server/saasAndFleetRoutes.ts
+import crypto2 from "crypto";
 async function resolveTenantContext(uid, email, membershipName, roleName) {
   if (!hasDatabaseConfig()) return null;
   await ensureProductionTables();
@@ -2603,7 +2825,7 @@ function registerSaasAndFleetRoutes(app, deps) {
           usedSeats: tenant.usedSeats
         });
       }
-      const token = crypto.randomBytes(16).toString("hex");
+      const token = crypto2.randomBytes(16).toString("hex");
       const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1e3);
       const inserted = await pool.query(
         `INSERT INTO public.org_invitations (organization_id, email, org_role, invited_by_uid, token, status, expires_at)
@@ -2719,6 +2941,43 @@ Ingres\xE1 o registrate en https://www.xpatagonia.online con este correo (${invi
       const nextPlan = body.planSlug ? resolvePlanConfig(body.planSlug) : resolvePlanConfig(tenant.planSlug);
       const nextLogistics = typeof body.logisticsPlanActive === "boolean" ? body.logisticsPlanActive : tenant.logisticsPlanActive;
       const nextName = typeof body.orgName === "string" && body.orgName.trim() ? body.orgName.trim() : tenant.orgName;
+      const isSysAdmin = req.user.roleName === "system_admin";
+      if (!isSysAdmin) {
+        const isUpgradingPlan = nextPlan.slug !== "gratis" && nextPlan.slug !== tenant.planSlug;
+        if (isUpgradingPlan) {
+          const paid = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user.uid,
+            targetType: "plan",
+            targetSlug: nextPlan.slug
+          });
+          if (!paid) {
+            return res.status(402).json({
+              error: `El ${nextPlan.displayName} requiere pago acreditado por MercadoPago o transferencia conciliada antes de activarse.`,
+              requiresPayment: true,
+              targetType: "plan",
+              targetSlug: nextPlan.slug
+            });
+          }
+        }
+        const isEnablingLogistics = nextLogistics === true && !tenant.logisticsPlanActive;
+        if (isEnablingLogistics) {
+          const paidLogistics = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user.uid,
+            targetType: "logistics",
+            targetSlug: "logistica_flota"
+          });
+          if (!paidLogistics) {
+            return res.status(402).json({
+              error: "La Membres\xEDa Log\xEDstica & Control de Flota requiere pago aprobado por MercadoPago o transferencia bancaria conciliada.",
+              requiresPayment: true,
+              targetType: "logistics",
+              targetSlug: "logistica_flota"
+            });
+          }
+        }
+      }
       if (tenant.usedSeats > nextPlan.seatLimit) {
         return res.status(400).json({
           error: `Actualmente ten\xE9s ${tenant.usedSeats} asientos ocupados. Liber\xE1 miembros o invitaciones antes de bajar a un plan de ${nextPlan.seatLimit} usuarios.`
@@ -3245,6 +3504,233 @@ var init_saasAndFleetRoutes = __esm({
     init_auth();
     init_arnSchema();
     init_saasPlans();
+    init_billingService();
+  }
+});
+
+// src/services/kybService.ts
+function validateArgentineCuit(cuit) {
+  const clean = String(cuit || "").replace(/\D/g, "");
+  if (clean.length !== 11) return false;
+  const digits = clean.slice(0, 10).split("").map(Number);
+  const verifier = Number(clean[10]);
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const sum = digits.reduce((acc, d, idx) => acc + d * weights[idx], 0);
+  const mod = sum % 11;
+  const expected = mod === 0 ? 0 : mod === 1 ? 9 : 11 - mod;
+  return expected === verifier;
+}
+function formatCuit(digits) {
+  const clean = digits.replace(/\D/g, "");
+  if (clean.length !== 11) return digits;
+  return `${clean.slice(0, 2)}-${clean.slice(2, 10)}-${clean.slice(10)}`;
+}
+function mapBcraSituationLabel(code) {
+  switch (code) {
+    case 1:
+      return "Situaci\xF3n 1 \xB7 Normal (Sin atrasos)";
+    case 2:
+      return "Situaci\xF3n 2 \xB7 Riesgo bajo / Seguimiento";
+    case 3:
+      return "Situaci\xF3n 3 \xB7 Riesgo medio";
+    case 4:
+      return "Situaci\xF3n 4 \xB7 Riesgo alto";
+    case 5:
+      return "Situaci\xF3n 5 \xB7 Irrecuperable";
+    case 6:
+      return "Situaci\xF3n 6 \xB7 Irrecuperable disp. t\xE9cnica";
+    default:
+      return "Sin deudas informadas en BCRA";
+  }
+}
+async function queryBcraPublic(cuitDigits) {
+  let denominacion = null;
+  let worstSituation = null;
+  let totalDebtArs = 0;
+  let rejectedChecksCount = 0;
+  let live = false;
+  try {
+    const res = await fetch(
+      `https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/${cuitDigits}`,
+      {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(4500)
+      }
+    );
+    if (res.ok) {
+      const json = await res.json();
+      live = true;
+      const results = json?.results;
+      if (results?.denominacion) {
+        denominacion = String(results.denominacion).trim();
+      }
+      const latestPeriod = Array.isArray(results?.periodos) ? results.periodos[0] : null;
+      const entities = Array.isArray(latestPeriod?.entidades) ? latestPeriod.entidades : [];
+      for (const ent of entities) {
+        const sit = Number(ent?.situacion || 0);
+        if (sit > 0 && (worstSituation === null || sit > worstSituation)) {
+          worstSituation = sit;
+        }
+        totalDebtArs += Number(ent?.monto || 0) * 1e3;
+      }
+    } else if (res.status === 404) {
+      live = true;
+    }
+  } catch {
+  }
+  try {
+    const chkRes = await fetch(
+      `https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/${cuitDigits}`,
+      {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(4e3)
+      }
+    );
+    if (chkRes.ok) {
+      const chkJson = await chkRes.json();
+      const causales = Array.isArray(chkJson?.results?.causales) ? chkJson.results.causales : [];
+      for (const c of causales) {
+        const entidades = Array.isArray(c?.entidades) ? c.entidades : [];
+        for (const e of entidades) {
+          rejectedChecksCount += Array.isArray(e?.detalle) ? e.detalle.length : 1;
+        }
+      }
+    }
+  } catch {
+  }
+  return { live, denominacion, worstSituation, totalDebtArs, rejectedChecksCount };
+}
+async function queryArcaGateway(cuitDigits) {
+  const apiUrl = String(process.env.ARCA_API_URL || "").trim();
+  const apiKey = String(process.env.ARCA_API_KEY || "").trim();
+  if (!apiUrl) {
+    return {
+      live: false,
+      legalName: null,
+      fiscalCondition: null,
+      province: null,
+      city: null,
+      address: null,
+      claeCodes: []
+    };
+  }
+  try {
+    const endpoint = apiUrl.includes("{cuit}") ? apiUrl.replace("{cuit}", cuitDigits) : `${apiUrl}${apiUrl.includes("?") ? "&" : "?"}cuit=${cuitDigits}`;
+    const res = await fetch(endpoint, {
+      headers: {
+        Accept: "application/json",
+        ...apiKey ? { Authorization: `Bearer ${apiKey}`, "x-api-key": apiKey } : {}
+      },
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) {
+      return {
+        live: false,
+        legalName: null,
+        fiscalCondition: null,
+        province: null,
+        city: null,
+        address: null,
+        claeCodes: []
+      };
+    }
+    const d = await res.json();
+    const root = d?.data || d?.contribuyente || d;
+    const legalName = root?.razonSocial || root?.razon_social || root?.nombre || root?.denominacion || null;
+    const fiscalCondition = root?.condicionIva || root?.condicion_iva || root?.impuestoIva || null;
+    const dom = root?.domicilioFiscal || root?.domicilio || {};
+    const province = dom?.provincia || root?.provincia || null;
+    const city = dom?.localidad || root?.localidad || null;
+    const address = dom?.direccion || root?.direccion || null;
+    const rawActivities = Array.isArray(root?.actividades) ? root.actividades : [];
+    const claeCodes = rawActivities.map(
+      (a) => typeof a === "string" ? a : `${a?.codigo || a?.id || ""} ${a?.descripcion || a?.desc || ""}`.trim()
+    ).filter(Boolean);
+    return {
+      live: true,
+      legalName: legalName ? String(legalName).trim() : null,
+      fiscalCondition: fiscalCondition ? String(fiscalCondition).trim() : null,
+      province: province ? String(province).trim() : null,
+      city: city ? String(city).trim() : null,
+      address: address ? String(address).trim() : null,
+      claeCodes
+    };
+  } catch {
+    return {
+      live: false,
+      legalName: null,
+      fiscalCondition: null,
+      province: null,
+      city: null,
+      address: null,
+      claeCodes: []
+    };
+  }
+}
+async function verifyCuitKyb(rawCuit) {
+  const cuitDigits = String(rawCuit || "").replace(/\D/g, "");
+  const validFormat = validateArgentineCuit(cuitDigits);
+  const cuitFormatted = formatCuit(cuitDigits);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  if (!validFormat) {
+    return {
+      validFormat: false,
+      cuitDigits,
+      cuitFormatted,
+      legalName: null,
+      fiscalCondition: null,
+      province: null,
+      city: null,
+      address: null,
+      claeCodes: [],
+      bcraSituation: "CUIT inv\xE1lido",
+      bcraSituationCode: null,
+      bcraTotalDebtArs: 0,
+      rejectedChecksCount: 0,
+      arcaLive: false,
+      bcraLive: false,
+      verifiedBadge: false,
+      checkedAt,
+      message: "El CUIT no supera la validaci\xF3n matem\xE1tica de d\xEDgito verificador ARCA/AFIP."
+    };
+  }
+  const [bcra, arca] = await Promise.all([
+    queryBcraPublic(cuitDigits),
+    queryArcaGateway(cuitDigits)
+  ]);
+  const legalName = arca.legalName || bcra.denominacion || null;
+  const bcraSituation = mapBcraSituationLabel(bcra.worstSituation);
+  const cleanBcra = bcra.worstSituation === null || bcra.worstSituation <= 2;
+  const verifiedBadge = Boolean(
+    validFormat && (arca.live || bcra.live && cleanBcra && bcra.rejectedChecksCount === 0)
+  );
+  const parts = ["D\xEDgito verificador ARCA v\xE1lido"];
+  if (arca.live) parts.push("Padr\xF3n ARCA consultado en vivo");
+  if (bcra.live) parts.push(`BCRA: ${bcraSituation}`);
+  if (bcra.rejectedChecksCount > 0) parts.push(`${bcra.rejectedChecksCount} cheque(s) rechazado(s)`);
+  return {
+    validFormat: true,
+    cuitDigits,
+    cuitFormatted,
+    legalName,
+    fiscalCondition: arca.fiscalCondition,
+    province: arca.province,
+    city: arca.city,
+    address: arca.address,
+    claeCodes: arca.claeCodes,
+    bcraSituation,
+    bcraSituationCode: bcra.worstSituation,
+    bcraTotalDebtArs: bcra.totalDebtArs,
+    rejectedChecksCount: bcra.rejectedChecksCount,
+    arcaLive: arca.live,
+    bcraLive: bcra.live,
+    verifiedBadge,
+    checkedAt,
+    message: parts.join(" \xB7 ")
+  };
+}
+var init_kybService = __esm({
+  "src/services/kybService.ts"() {
   }
 });
 
@@ -3258,17 +3744,6 @@ __export(arnRoutes_exports, {
   validateArgentineCuit: () => validateArgentineCuit
 });
 import { createClient as createClient3 } from "@supabase/supabase-js";
-function validateArgentineCuit(cuit) {
-  const clean = String(cuit || "").replace(/\D/g, "");
-  if (clean.length !== 11) return false;
-  const digits = clean.slice(0, 10).split("").map(Number);
-  const verifier = Number(clean[10]);
-  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
-  const sum = digits.reduce((acc, d, idx) => acc + d * weights[idx], 0);
-  const mod = sum % 11;
-  const expected = mod === 0 ? 0 : mod === 1 ? 9 : 11 - mod;
-  return expected === verifier;
-}
 async function resolveOptionalMember(req) {
   const authHeader = req.headers?.authorization || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -4306,6 +4781,7 @@ var init_arnRoutes = __esm({
     init_b2bDirectoryData();
     init_patagoniaRouting();
     init_saasAndFleetRoutes();
+    init_kybService();
   }
 });
 
@@ -4318,7 +4794,7 @@ init_users();
 import fs from "fs";
 import express from "express";
 import path from "path";
-import crypto2 from "crypto";
+import crypto4 from "crypto";
 import cors from "cors";
 import { createClient as createClient4 } from "@supabase/supabase-js";
 
@@ -4898,6 +5374,432 @@ function registerWorkerAndWebhookRoutes(app) {
       }
     }
   );
+}
+
+// src/server/billingAndKybRoutes.ts
+init_db();
+init_auth();
+init_arnSchema();
+init_saasAndFleetRoutes();
+init_billingService();
+init_kybService();
+import crypto3 from "crypto";
+function registerBillingAndKybRoutes(app, recordAutomationEvent) {
+  app.get("/api/billing/config", (_req, res) => {
+    res.json({
+      mercadopagoConfigured: isMercadoPagoConfigured(),
+      bankTransfer: getBankTransferInstructions(),
+      catalog: Object.values(BILLING_CATALOG)
+    });
+  });
+  app.get("/api/billing/transactions", requireAuth, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      if (!hasDatabaseConfig()) return res.json({ transactions: [] });
+      await ensureProductionTables();
+      const isAdmin = ["system_admin", "support_operator"].includes(req.user?.roleName || "");
+      const statusFilter = String(req.query.status || "").trim().toLowerCase();
+      if (isAdmin && req.query.scope === "all") {
+        const rows2 = await pool.query(
+          `SELECT * FROM public.billing_transactions
+           WHERE ($1 = '' OR status = $1)
+           ORDER BY created_at DESC LIMIT 100`,
+          [statusFilter]
+        );
+        return res.json({ transactions: rows2.rows || [] });
+      }
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      const rows = await pool.query(
+        `SELECT * FROM public.billing_transactions
+         WHERE (organization_id = $1 OR user_uid = $2)
+           AND ($3 = '' OR status = $3)
+         ORDER BY created_at DESC LIMIT 50`,
+        [tenant?.organizationId || null, req.user.uid, statusFilter]
+      );
+      res.json({ transactions: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/billing/checkout", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) {
+        return res.status(500).json({ error: "Base de datos no configurada para facturaci\xF3n." });
+      }
+      await ensureProductionTables();
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      if (!tenant) return res.status(500).json({ error: "No se pudo resolver la organizaci\xF3n." });
+      const targetSlug = String(req.body?.targetSlug || "").trim().toLowerCase();
+      const provider = req.body?.provider === "mercadopago" ? "mercadopago" : "bank_transfer";
+      const receiptReference = String(req.body?.receiptReference || "").trim();
+      const item = BILLING_CATALOG[targetSlug];
+      if (!item) {
+        return res.status(400).json({ error: "Plan o m\xF3dulo de facturaci\xF3n inv\xE1lido." });
+      }
+      if (provider === "bank_transfer" && !receiptReference) {
+        return res.status(400).json({
+          error: "Ingres\xE1 el n\xFAmero de operaci\xF3n, comprobante o CBU origen de la transferencia."
+        });
+      }
+      const externalReference = `XPT-${tenant.organizationId}-${targetSlug.toUpperCase()}-${Date.now()}-${crypto3.randomBytes(3).toString("hex")}`;
+      if (provider === "mercadopago") {
+        const mpToken = String(process.env.MP_ACCESS_TOKEN || "").trim();
+        if (!mpToken) {
+          return res.status(400).json({
+            error: "MercadoPago no tiene credenciales configuradas en este entorno. Seleccion\xE1 Transferencia Bancaria para emitir orden de pago auditable.",
+            mercadopagoConfigured: false
+          });
+        }
+        const appUrl = String(process.env.APP_URL || "https://www.xpatagonia.online").replace(/\/$/, "");
+        const prefRes = await fetch("https://api.mercadopago.com/checkout/preferences", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${mpToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                id: item.slug,
+                title: `xPatagonia B2B \xB7 ${item.title}`,
+                quantity: 1,
+                currency_id: "ARS",
+                unit_price: item.amountArs
+              }
+            ],
+            payer: { email: req.user.email },
+            external_reference: externalReference,
+            notification_url: `${appUrl}/api/webhooks/mercadopago`,
+            back_urls: {
+              success: `${appUrl}/dashboard?area=team&payment=success`,
+              pending: `${appUrl}/dashboard?area=team&payment=pending`,
+              failure: `${appUrl}/planes?payment=failure`
+            },
+            auto_return: "approved"
+          }),
+          signal: AbortSignal.timeout(8e3)
+        });
+        const prefData = await prefRes.json().catch(() => ({}));
+        if (!prefRes.ok || !prefData?.init_point) {
+          return res.status(502).json({
+            error: prefData?.message || "No se pudo crear la preferencia en MercadoPago."
+          });
+        }
+        const inserted2 = await pool.query(
+          `INSERT INTO public.billing_transactions (
+            organization_id, user_uid, user_email, target_type, target_slug,
+            provider, external_reference, amount_ars, status, metadata
+          ) VALUES ($1,$2,$3,$4,$5,'mercadopago',$6,$7,'pending',$8)
+          RETURNING *`,
+          [
+            tenant.organizationId,
+            req.user.uid,
+            req.user.email || null,
+            item.targetType,
+            item.slug,
+            externalReference,
+            item.amountArs,
+            JSON.stringify({ preferenceId: prefData.id, orgName: tenant.orgName })
+          ]
+        );
+        return res.json({
+          success: true,
+          provider: "mercadopago",
+          initPoint: prefData.init_point,
+          transaction: inserted2.rows[0]
+        });
+      }
+      const inserted = await pool.query(
+        `INSERT INTO public.billing_transactions (
+          organization_id, user_uid, user_email, target_type, target_slug,
+          provider, external_reference, receipt_reference, amount_ars, status, metadata
+        ) VALUES ($1,$2,$3,$4,$5,'bank_transfer',$6,$7,$8,'pending',$9)
+        RETURNING *`,
+        [
+          tenant.organizationId,
+          req.user.uid,
+          req.user.email || null,
+          item.targetType,
+          item.slug,
+          externalReference,
+          receiptReference,
+          item.amountArs,
+          JSON.stringify({ orgName: tenant.orgName, title: item.title })
+        ]
+      );
+      await recordAutomationEvent("outbound_n8n", "billing.transfer.pending", "processed", {
+        transactionId: inserted.rows[0].id,
+        organizationId: tenant.organizationId,
+        targetSlug: item.slug,
+        amountArs: item.amountArs,
+        receiptReference
+      });
+      res.json({
+        success: true,
+        provider: "bank_transfer",
+        transaction: inserted.rows[0],
+        message: "Comprobante registrado. La activaci\xF3n queda pendiente de conciliaci\xF3n administrativa."
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/webhooks/mercadopago", async (req, res) => {
+    try {
+      const paymentId = String(req.body?.data?.id || req.query?.["data.id"] || req.query?.id || "").trim();
+      const validSig = verifyMercadoPagoWebhookSignature({
+        signatureHeader: String(req.headers["x-signature"] || ""),
+        requestIdHeader: String(req.headers["x-request-id"] || ""),
+        dataId: paymentId
+      });
+      if (!validSig) {
+        return res.status(401).json({ error: "Invalid MercadoPago webhook signature" });
+      }
+      if (!paymentId || !isMercadoPagoConfigured() || !hasDatabaseConfig()) {
+        return res.status(200).json({ received: true, processed: false });
+      }
+      const mpToken = String(process.env.MP_ACCESS_TOKEN || "").trim();
+      const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: { Authorization: `Bearer ${mpToken}` },
+        signal: AbortSignal.timeout(6e3)
+      });
+      if (!mpRes.ok) {
+        return res.status(200).json({ received: true, processed: false });
+      }
+      const payment = await mpRes.json();
+      const extRef = String(payment?.external_reference || "").trim();
+      if (!extRef) return res.status(200).json({ received: true, processed: false });
+      await ensureProductionTables();
+      const nextStatus = payment.status === "approved" ? "approved" : payment.status === "rejected" || payment.status === "cancelled" ? "rejected" : "pending";
+      const upd = await pool.query(
+        `UPDATE public.billing_transactions
+         SET status = $1, external_payment_id = $2, updated_at = now()
+         WHERE external_reference = $3
+         RETURNING *`,
+        [nextStatus, paymentId, extRef]
+      );
+      const txRow = upd.rows?.[0];
+      if (txRow && nextStatus === "approved") {
+        await applyApprovedBillingUpgrade(txRow);
+        await recordAutomationEvent("outbound_n8n", "billing.mercadopago.approved", "processed", {
+          transactionId: txRow.id,
+          paymentId,
+          targetSlug: txRow.target_slug
+        });
+      }
+      res.status(200).json({ received: true, status: nextStatus });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Webhook error" });
+    }
+  });
+  app.post(
+    "/api/admin/billing/:id/approve",
+    requireAuth,
+    requireRoles(["system_admin"]),
+    async (req, res) => {
+      try {
+        await ensureProductionTables();
+        const txId = Number(req.params.id);
+        const upd = await pool.query(
+          `UPDATE public.billing_transactions
+           SET status = 'approved', reviewed_by_uid = $1, updated_at = now()
+           WHERE id = $2 RETURNING *`,
+          [req.user.uid, txId]
+        );
+        const txRow = upd.rows?.[0];
+        if (!txRow) return res.status(404).json({ error: "Transacci\xF3n no encontrada." });
+        await applyApprovedBillingUpgrade(txRow);
+        await recordAutomationEvent("outbound_n8n", "billing.transfer.approved", "processed", {
+          transactionId: txRow.id,
+          targetSlug: txRow.target_slug,
+          organizationId: txRow.organization_id
+        });
+        res.json({ success: true, transaction: txRow });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.post(
+    "/api/admin/billing/:id/reject",
+    requireAuth,
+    requireRoles(["system_admin"]),
+    async (req, res) => {
+      try {
+        await ensureProductionTables();
+        const txId = Number(req.params.id);
+        const upd = await pool.query(
+          `UPDATE public.billing_transactions
+           SET status = 'rejected', reviewed_by_uid = $1, updated_at = now()
+           WHERE id = $2 RETURNING *`,
+          [req.user.uid, txId]
+        );
+        if (!upd.rows?.[0]) return res.status(404).json({ error: "Transacci\xF3n no encontrada." });
+        res.json({ success: true, transaction: upd.rows[0] });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.post("/api/kyb/verify-cuit", requireAuth, async (req, res) => {
+    try {
+      const cuit = String(req.body?.cuit || "").trim();
+      const applyToProfile = req.body?.applyToProfile !== false;
+      const result = await verifyCuitKyb(cuit);
+      if (!result.validFormat) {
+        return res.status(400).json({ error: result.message, result });
+      }
+      if (applyToProfile && hasDatabaseConfig()) {
+        await ensureProductionTables();
+        await pool.query(
+          `INSERT INTO public.company_profiles (
+            user_uid, cuit, legal_name, fiscal_condition, arca_clae_codes,
+            bcra_situation, arca_verified_at, verification_status, trust_score, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,now(),$7,$8,now())
+          ON CONFLICT (user_uid) DO UPDATE SET
+            cuit = EXCLUDED.cuit,
+            legal_name = COALESCE(EXCLUDED.legal_name, company_profiles.legal_name),
+            fiscal_condition = COALESCE(EXCLUDED.fiscal_condition, company_profiles.fiscal_condition),
+            arca_clae_codes = CASE
+              WHEN jsonb_array_length(EXCLUDED.arca_clae_codes) > 0 THEN EXCLUDED.arca_clae_codes
+              ELSE company_profiles.arca_clae_codes
+            END,
+            bcra_situation = EXCLUDED.bcra_situation,
+            arca_verified_at = now(),
+            verification_status = CASE WHEN $7 = 'verified' THEN 'verified' ELSE company_profiles.verification_status END,
+            trust_score = GREATEST(COALESCE(company_profiles.trust_score, 50), $8),
+            updated_at = now()`,
+          [
+            req.user.uid,
+            result.cuitFormatted,
+            result.legalName,
+            result.fiscalCondition,
+            JSON.stringify(result.claeCodes || []),
+            result.bcraSituation,
+            result.verifiedBadge ? "verified" : "pending",
+            result.verifiedBadge ? 84 : 64
+          ]
+        ).catch(() => {
+        });
+      }
+      res.json({ success: true, result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Error verificando CUIT" });
+    }
+  });
+  app.get("/api/rfqs/:id/quotes", requireAuth, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      if (!hasDatabaseConfig()) return res.json({ quotes: [] });
+      await ensureProductionTables();
+      const rfqId = Number(req.params.id);
+      const rows = await pool.query(
+        `SELECT * FROM public.rfq_quotes WHERE rfq_id = $1 ORDER BY total_price_ars ASC, delivery_days ASC`,
+        [rfqId]
+      );
+      res.json({ quotes: rows.rows || [] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.post("/api/rfqs/:id/quotes", requireAuth, async (req, res) => {
+    try {
+      if (!hasDatabaseConfig()) return res.status(500).json({ error: "DB no configurada" });
+      await ensureProductionTables();
+      const rfqId = Number(req.params.id);
+      const tenant = await resolveTenantContext(
+        req.user.uid,
+        req.user.email,
+        req.user.membershipName,
+        req.user.roleName
+      );
+      const b = req.body || {};
+      const supplierName = String(b.supplierName || tenant?.orgName || "Proveedor B2B").trim();
+      const totalPriceArs = Math.max(0, Number(b.totalPriceArs) || 0);
+      if (!totalPriceArs) {
+        return res.status(400).json({ error: "El importe total de la cotizaci\xF3n debe ser mayor a 0." });
+      }
+      const inserted = await pool.query(
+        `INSERT INTO public.rfq_quotes (
+          rfq_id, supplier_uid, supplier_org_id, supplier_name, supplier_location,
+          verified, unit_price_ars, total_price_ars, currency, delivery_days,
+          payment_terms, distance_km, notes, status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'submitted')
+        RETURNING *`,
+        [
+          rfqId,
+          req.user.uid,
+          tenant?.organizationId || null,
+          supplierName,
+          String(b.supplierLocation || "Patagonia"),
+          Boolean(b.verified),
+          Math.max(0, Number(b.unitPriceArs) || totalPriceArs),
+          totalPriceArs,
+          String(b.currency || "ARS"),
+          Math.max(1, Number(b.deliveryDays) || 7),
+          String(b.paymentTerms || "Factura A 30 d\xEDas"),
+          Math.max(0, Number(b.distanceKm) || 0),
+          b.notes ? String(b.notes) : null
+        ]
+      );
+      res.json({ success: true, quote: inserted.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
+  app.get("/api/public/tracking/:code", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const code = String(req.params.code || "").trim().toUpperCase();
+      if (!code || code.length < 4) {
+        return res.status(400).json({ error: "C\xF3digo de seguimiento inv\xE1lido." });
+      }
+      if (!hasDatabaseConfig()) {
+        return res.status(404).json({ error: "Env\xEDo no encontrado." });
+      }
+      await ensureProductionTables();
+      const rows = await pool.query(
+        `SELECT lc.tracking_code, lc.origin_name, lc.destination_name, lc.carrier_name,
+                lc.status, lc.notes, lc.created_at, lc.updated_at,
+                fv.name AS vehicle_name, fv.vehicle_type, fv.corridor
+         FROM public.logistics_contracts lc
+         LEFT JOIN public.fleet_vehicles fv ON fv.id = lc.vehicle_id
+         WHERE upper(lc.tracking_code) = $1
+         ORDER BY lc.updated_at DESC LIMIT 1`,
+        [code]
+      );
+      const row = rows.rows?.[0];
+      if (!row) {
+        return res.status(404).json({ error: `No se encontr\xF3 el env\xEDo ${code}.` });
+      }
+      res.json({
+        tracking: {
+          trackingCode: row.tracking_code,
+          originName: row.origin_name,
+          destinationName: row.destination_name,
+          carrierName: row.carrier_name,
+          status: row.status,
+          vehicleLabel: row.vehicle_name ? `${row.vehicle_name} (${row.vehicle_type || "Unidad habilitada"})` : "Unidad asignada por transportista",
+          corridor: row.corridor || "Red Vial Patag\xF3nica",
+          notes: row.notes || null,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ error: formatPgError(err) });
+    }
+  });
 }
 
 // src/services/marketService.ts
@@ -6403,7 +7305,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
           return res.status(400).json({ error: "Missing filename or base64Data" });
         }
         const cleanExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, "") || ".bin";
-        const safeName = `hero-${Date.now()}-${crypto2.randomBytes(4).toString("hex")}${cleanExt}`;
+        const safeName = `hero-${Date.now()}-${crypto4.randomBytes(4).toString("hex")}${cleanExt}`;
         const rawBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
         const buffer = Buffer.from(rawBase64, "base64");
         const resolvedMime = mimeType || "application/octet-stream";
@@ -6525,6 +7427,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   });
   registerArnAndModuleRoutes(app, recordAutomationEvent);
   registerWorkerAndWebhookRoutes(app);
+  registerBillingAndKybRoutes(app, recordAutomationEvent);
   return { app, runAutoInsight };
 }
 

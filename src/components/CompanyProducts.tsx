@@ -28,6 +28,12 @@ export default function CompanyProducts() {
   const [productImage, setProductImage] = useState<string | null>(null);
   const [qrModalProduct, setQrModalProduct] = useState<any | null>(null);
   const [companyProfile, setCompanyProfile] = useState<any>(null);
+  const [productNotice, setProductNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const showNotice = (type: 'ok' | 'err', text: string) => {
+    setProductNotice({ type, text });
+    setTimeout(() => setProductNotice(null), 5000);
+  };
   
   const [newProduct, setNewProduct] = useState({
     sku: '',
@@ -243,7 +249,7 @@ export default function CompanyProducts() {
     if (isSaving) return;
 
     if (!auth.currentUser) {
-       alert("Por favor inicie sesión para realizar esta acción.");
+       showNotice('err', 'Por favor inicie sesión para realizar esta acción.');
        return;
     }
 
@@ -304,7 +310,7 @@ export default function CompanyProducts() {
       });
     } catch (e) {
       console.error("Error saving product: ", e);
-      alert("Error al guardar el producto: " + (e as any).message);
+      showNotice('err', 'Error al guardar el producto: ' + ((e as any)?.message || 'Error desconocido'));
     } finally {
       setIsSaving(false);
     }
@@ -337,6 +343,17 @@ export default function CompanyProducts() {
 
   return (
     <div className="space-y-6">
+      {productNotice && (
+        <div
+          className={`px-4 py-3 rounded-xl border text-xs font-semibold ${
+            productNotice.type === 'ok'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+          }`}
+        >
+          {productNotice.text}
+        </div>
+      )}
       <div className="bg-white dark:bg-[#1A1625] px-6 py-8 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm mb-8 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between gap-4 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-8 opacity-5">
            <Zap className="w-48 h-48 text-orange-500" />

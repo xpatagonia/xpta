@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X, Search, Mail, Calendar, AlertCircle, Layout, Activity } from 'lucide-react';
+import { Building2, Package, Users, CheckCircle, Clock, ExternalLink, Shield, Newspaper, Plus, Sparkles, Send, Trash2, Image as ImageIcon, Video, X, Search, Mail, Calendar, AlertCircle, Layout, Activity, CreditCard, CheckCircle2, XCircle } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { db, auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
@@ -9,21 +9,37 @@ import ReactMarkdown from 'react-markdown';
 import AdminSiteEditor from '../components/admin/AdminSiteEditor';
 import AdminAutomationPanel from '../components/admin/AdminAutomationPanel';
 
+type AdminTab = 'empresas' | 'solicitudes' | 'pagos' | 'insights' | 'membresias' | 'sitio' | 'odoo';
+
 export default function AdminDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
-  const resolvedInitialTab: 'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo' =
-    initialTab === 'sitio' || initialTab === 'empresas' || initialTab === 'insights' || initialTab === 'membresias' || initialTab === 'odoo'
+  const resolvedInitialTab: AdminTab =
+    initialTab === 'sitio' || initialTab === 'empresas' || initialTab === 'insights' || initialTab === 'membresias' || initialTab === 'odoo' || initialTab === 'pagos' || initialTab === 'solicitudes'
       ? initialTab
       : 'sitio';
 
-  const [activeTab, setActiveTab] = useState<'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo'>(resolvedInitialTab);
+  const [activeTab, setActiveTab] = useState<AdminTab>(resolvedInitialTab);
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [adminNotice, setAdminNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [processingTxId, setProcessingTxId] = useState<number | null>(null);
+
+  const notifyAdmin = (type: 'ok' | 'err', text: string) => {
+    setAdminNotice({ type, text });
+    setTimeout(() => setAdminNotice(null), 5500);
+  };
   
   // Create User Modal state
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
@@ -51,13 +67,14 @@ export default function AdminDashboard() {
       tabParam === 'insights' ||
       tabParam === 'membresias' ||
       tabParam === 'solicitudes' ||
+      tabParam === 'pagos' ||
       tabParam === 'odoo'
     ) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
 
-  const handleSelectTab = (tab: 'empresas' | 'solicitudes' | 'insights' | 'membresias' | 'sitio' | 'odoo') => {
+  const handleSelectTab = (tab: AdminTab) => {
     setActiveTab(tab);
     setSearchParams({ tab });
   };
@@ -95,12 +112,24 @@ export default function AdminDashboard() {
         setIsAdmin(true);
         try {
           if (token) {
-            const response = await fetch(`${getApiUrl()}/api/admin/users`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            const [response, billingRes] = await Promise.all([
+              fetch(`${getApiUrl()}/api/admin/users`, {
+                headers: { Authorization: `Bearer ${token}` },
+              }),
+              fetch(`${getApiUrl()}/api/billing/transactions?scope=all`, {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: 'no-store',
+              }).catch(() => null),
+            ]);
             if (response.ok) {
               const data = await response.json();
               setEmpresas(data.map((d: any) => ({ id: d.uid, ...d })));
+            }
+            if (billingRes && billingRes.ok) {
+              const bData = await billingRes.json().catch(() => ({}));
+              if (Array.isArray(bData.transactions)) {
+                setBillingTransactions(bData.transactions);
+              }
             }
           }
 
@@ -132,6 +161,32 @@ export default function AdminDashboard() {
     return () => unsubscribe();
   }, []);
 
+  const handleApproveBillingTx = async (txId: number, action: 'approve' | 'reject') => {
+    setProcessingTxId(txId);
+    try {
+      const token = await auth.getToken();
+      const res = await fetch(`${getApiUrl()}/api/admin/billing/${txId}/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Error procesando transacción');
+      setBillingTransactions((prev) =>
+        prev.map((tx) => (tx.id === txId ? { ...tx, status: action === 'approve' ? 'approved' : 'rejected' } : tx))
+      );
+      notifyAdmin(
+        'ok',
+        action === 'approve'
+          ? 'Pago conciliado y plan/membresía activado en la organización.'
+          : 'Comprobante marcado como rechazado.'
+      );
+    } catch (error: any) {
+      notifyAdmin('err', error?.message || 'No se pudo procesar el pago.');
+    } finally {
+      setProcessingTxId(null);
+    }
+  };
+
   const handleApprove = async (reqId: string, userId: string, moduleId: string) => {
     try {
       await updateDoc(doc(db, 'module_requests', reqId), { status: 'approved' });
@@ -145,10 +200,10 @@ export default function AdminDashboard() {
         await setDoc(userSettingsRef, { installed: [...installedIds, moduleId] }, { merge: true });
       }
       setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'approved' } : r));
-      alert('Módulo aprobado y enviado a Odoo para facturación.');
+      notifyAdmin('ok', 'Módulo aprobado y enviado a Odoo para facturación.');
     } catch (error) {
       console.error(error);
-      alert('Error aprobando módulo');
+      notifyAdmin('err', 'Error aprobando módulo.');
     }
   };
 
@@ -157,17 +212,14 @@ export default function AdminDashboard() {
     setIsCreatingUser(true);
     try {
       const token = await auth.currentUser?.getIdToken();
-      // generate random password since admin creates it, but we can just use a default or ask for it
-      // Let's ask for password in the form.
-      const password = Math.random().toString(36).slice(-8) + "Aa1@"; // Just generate a random password for internal users, or we can prompt for it
-      // Wait, we need to add password field to the modal. I'll do that below.
+      const password = Math.random().toString(36).slice(-8) + "Aa1@";
       
       const payload = {
         email: newUserEmail,
         password: password,
         roleName: newUserRole,
         membershipName: newUserMembership,
-        companyName: newUserId // using newUserId as companyName for simplicity in form
+        companyName: newUserId
       };
       
       const res = await fetch(`${getApiUrl()}/api/admin/users/create`, {
@@ -178,12 +230,11 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al crear usuario');
       
-      alert(`Usuario creado con éxito. Contraseña temporal: ${password}`);
+      notifyAdmin('ok', `Usuario ${newUserEmail} creado. Contraseña temporal: ${password}`);
       setIsCreateUserModalOpen(false);
       setNewUserEmail('');
-      setNewUserId(''); // companyName
+      setNewUserId('');
       
-      // refresh users
       const refreshRes = await fetch(`${getApiUrl()}/api/admin/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -193,7 +244,7 @@ export default function AdminDashboard() {
       }
     } catch (error: any) {
       console.error(error);
-      alert(`Error creando usuario: ${error.message}`);
+      notifyAdmin('err', `Error creando usuario: ${error.message}`);
     } finally {
       setIsCreatingUser(false);
     }
@@ -209,13 +260,13 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         setEmpresas(prev => prev.map(emp => emp.id === uid ? { ...emp, membershipName: membership } : emp));
-        alert('Membresía actualizada con éxito.');
+        notifyAdmin('ok', 'Membresía actualizada con éxito.');
       } else {
         throw new Error('Error en la respuesta del servidor');
       }
     } catch (error) {
       console.error(error);
-      alert('Error actualizando membresía');
+      notifyAdmin('err', 'Error actualizando membresía.');
     }
   };
 
@@ -229,13 +280,13 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         setEmpresas(prev => prev.map(emp => emp.id === uid ? { ...emp, roleName: role } : emp));
-        alert('Rol actualizado con éxito.');
+        notifyAdmin('ok', 'Rol actualizado con éxito.');
       } else {
         throw new Error('Error en la respuesta del servidor');
       }
     } catch (error) {
       console.error(error);
-      alert('Error actualizando rol');
+      notifyAdmin('err', 'Error actualizando rol.');
     }
   };
 
@@ -252,7 +303,7 @@ export default function AdminDashboard() {
       if (!insightTitle) setInsightTitle('Resumen Semanal de Patagonia');
     } catch (error: any) {
       console.error(error);
-      alert(`Error al generar con IA: ${error.message || 'Error desconocido'}`);
+      notifyAdmin('err', `Error al generar con IA: ${error.message || 'Error desconocido'}`);
     } finally {
       setIsGenerating(false);
     }
@@ -289,31 +340,39 @@ export default function AdminDashboard() {
       setInsightContent('');
       setInsightImage('');
       setInsightVideo('');
+      notifyAdmin('ok', 'Artículo publicado en Patagonia Insights.');
     } catch (error: any) {
       console.error(error);
-      alert(error?.message || 'Error al crear insight');
+      notifyAdmin('err', error?.message || 'Error al crear insight.');
     } finally {
       setIsSubmitting(false);
     }
   };
   
-  const handleDeleteInsight = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este artículo?')) return;
-    try {
-      const token = await auth.currentUser?.getIdToken();
-      const res = await fetch(`${getApiUrl()}/api/admin/insights/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Error eliminando insight');
-      }
-      setInsights(insights.filter(i => String(i.id) !== String(id)));
-    } catch (error: any) {
-      console.error(error);
-      alert(error?.message || 'Error eliminando insight');
-    }
+  const handleDeleteInsight = (id: string) => {
+    setConfirmAction({
+      title: 'Eliminar publicación',
+      message: '¿Estás seguro de eliminar este artículo de Patagonia Insights?',
+      confirmLabel: 'Eliminar Artículo',
+      onConfirm: async () => {
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const res = await fetch(`${getApiUrl()}/api/admin/insights/${id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data?.error || 'Error eliminando insight');
+          }
+          setInsights((prev) => prev.filter(i => String(i.id) !== String(id)));
+          notifyAdmin('ok', 'Artículo eliminado.');
+        } catch (error: any) {
+          console.error(error);
+          notifyAdmin('err', error?.message || 'Error eliminando insight.');
+        }
+      },
+    });
   };
 
   if (!isAdmin) {
@@ -348,12 +407,33 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {adminNotice && (
+          <div
+            className={`mb-6 px-4 py-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-3 ${
+              adminNotice.type === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+            }`}
+          >
+            <span>{adminNotice.text}</span>
+            <button onClick={() => setAdminNotice(null)} className="text-current opacity-70 hover:opacity-100">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-wrap bg-white dark:bg-[#1A1625] p-1 rounded-xl mb-8 w-max max-w-full border border-slate-200 dark:border-white/10 gap-1">
           <button
             onClick={() => handleSelectTab('sitio')}
             className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'sitio' ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
           >
             <Layout className="w-4 h-4" /> Sitio &amp; Hero (CMS)
+          </button>
+          <button
+            onClick={() => handleSelectTab('pagos')}
+            className={`px-4 md:px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${activeTab === 'pagos' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+          >
+            <CreditCard className="w-4 h-4" /> Pagos &amp; Transferencias
           </button>
           <button
             onClick={() => handleSelectTab('solicitudes')}
@@ -393,27 +473,129 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             {activeTab === 'sitio' && <AdminSiteEditor />}
             {activeTab === 'odoo' && <AdminAutomationPanel />}
+            {activeTab === 'pagos' && (
+              <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-emerald-500" />
+                      Conciliación de Pagos y Transferencias ({billingTransactions.length})
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Al aprobar una transferencia pendiente, la organización actualiza automáticamente su cupo SaaS o Membresía Logística en PostgreSQL.
+                    </p>
+                  </div>
+                </div>
+
+                {billingTransactions.length === 0 ? (
+                  <p className="text-slate-500 text-sm py-6 text-center">No hay transacciones de facturación registradas aún.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-[#110E17] text-slate-500 border-b border-slate-200 dark:border-white/10">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Email / Org</th>
+                          <th className="px-4 py-3 font-semibold">Plan / Módulo</th>
+                          <th className="px-4 py-3 font-semibold">Medio &amp; Comprobante</th>
+                          <th className="px-4 py-3 font-semibold text-right">Importe</th>
+                          <th className="px-4 py-3 font-semibold">Estado</th>
+                          <th className="px-4 py-3 font-semibold text-right">Conciliación</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                        {billingTransactions.map((tx) => {
+                          const isPending = tx.status === 'pending';
+                          const isApproved = tx.status === 'approved';
+                          return (
+                            <tr key={tx.id}>
+                              <td className="px-4 py-3.5">
+                                <div className="font-bold text-slate-900 dark:text-white">{tx.user_email || tx.user_uid}</div>
+                                <div className="text-[11px] font-mono text-slate-500">Org #{tx.organization_id || '-'}</div>
+                              </td>
+                              <td className="px-4 py-3.5 font-bold uppercase text-slate-800 dark:text-slate-200">
+                                {tx.target_slug}
+                              </td>
+                              <td className="px-4 py-3.5 font-mono text-slate-600 dark:text-slate-300">
+                                <div>{tx.provider === 'mercadopago' ? 'MercadoPago' : 'Transferencia'}</div>
+                                <div className="text-[11px] text-slate-500">{tx.receipt_reference || tx.external_reference}</div>
+                              </td>
+                              <td className="px-4 py-3.5 text-right font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                                ${Number(tx.amount_ars || 0).toLocaleString('es-AR')} ARS
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                    isApproved
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                      : isPending
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                  }`}
+                                >
+                                  {isApproved ? <CheckCircle2 className="w-3 h-3" /> : isPending ? <Clock className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                                  {tx.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                                {isPending && (
+                                  <div className="inline-flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={processingTxId === tx.id}
+                                      onClick={() => handleApproveBillingTx(tx.id, 'approve')}
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50"
+                                    >
+                                      Aprobar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={processingTxId === tx.id}
+                                      onClick={() => handleApproveBillingTx(tx.id, 'reject')}
+                                      className="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 font-bold disabled:opacity-50"
+                                    >
+                                      Rechazar
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
             {activeTab === 'insights' && (
               <div className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">Publicaciones de Insight</h2>
                   <div className="flex items-center gap-3 w-full sm:w-auto">
-                    <button onClick={async () => {
-                      if (window.confirm("¿Deseas forzar la ejecución del cron (Generar Noticia Automática)?")) {
-                        try {
-                           const token = await auth.currentUser?.getIdToken();
-                           const res = await fetch(`${getApiUrl()}/api/cron/publish-insight`, {
-                             method: 'POST',
-                             headers: { 'Authorization': `Bearer ${token}` }
-                           });
-                           const data = await res.json();
-                           if (!res.ok) throw new Error(data.error || 'Error ejecutando cron');
-                           alert('Se generó la noticia exitosamente. Recarga la página para verla.');
-                        } catch(e: any) {
-                           alert('Error: ' + e.message);
-                        }
+                    <button
+                      onClick={() =>
+                        setConfirmAction({
+                          title: 'Generar artículo con ARN IA',
+                          message: '¿Deseas ejecutar la generación automática de noticia semanal patagónica?',
+                          confirmLabel: 'Ejecutar Cron AI',
+                          onConfirm: async () => {
+                            try {
+                              const token = await auth.currentUser?.getIdToken();
+                              const res = await fetch(`${getApiUrl()}/api/cron/publish-insight`, {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${token}` },
+                              });
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || 'Error ejecutando cron');
+                              notifyAdmin('ok', 'Noticia generada automáticamente en Patagonia Insights.');
+                            } catch (e: any) {
+                              notifyAdmin('err', 'Error ejecutando Cron AI: ' + (e?.message || 'Desconocido'));
+                            }
+                          },
+                        })
                       }
-                    }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-900 dark:text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2">
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-900 dark:text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
+                    >
                       <Sparkles className="w-4 h-4" /> Ejecutar Cron AI
                     </button>
                     <button onClick={() => setIsInsightModalOpen(true)} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-purple-500/20">
@@ -843,6 +1025,38 @@ export default function AdminDashboard() {
                 </div>
               </form>
             </motion.div>
+          </div>
+        )}
+        {confirmAction && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => setConfirmAction(null)}
+            />
+            <div className="relative w-full max-w-md bg-white dark:bg-[#1A1625] rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10 p-6 space-y-4 z-10">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">{confirmAction.title}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-300">{confirmAction.message}</p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-bold text-slate-600 dark:text-slate-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const fn = confirmAction.onConfirm;
+                    setConfirmAction(null);
+                    await fn();
+                  }}
+                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold"
+                >
+                  {confirmAction.confirmLabel}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>

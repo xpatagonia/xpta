@@ -27,17 +27,8 @@ import {
   registerSaasAndFleetRoutes,
 } from "./saasAndFleetRoutes.ts";
 
-export function validateArgentineCuit(cuit: string): boolean {
-  const clean = String(cuit || "").replace(/\D/g, "");
-  if (clean.length !== 11) return false;
-  const digits = clean.slice(0, 10).split("").map(Number);
-  const verifier = Number(clean[10]);
-  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
-  const sum = digits.reduce((acc, d, idx) => acc + d * weights[idx], 0);
-  const mod = sum % 11;
-  const expected = mod === 0 ? 0 : mod === 1 ? 9 : 11 - mod;
-  return expected === verifier;
-}
+import { validateArgentineCuit } from "../services/kybService.ts";
+export { validateArgentineCuit };
 
 async function resolveOptionalMember(req: any): Promise<{
   authenticated: boolean;

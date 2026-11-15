@@ -18,6 +18,7 @@ import { insights, siteSettings, automationLogs, contacts } from "../db/schema.t
 import { eq, desc } from "drizzle-orm";
 import { registerArnAndModuleRoutes, runArnPipelineForEvent } from "./arnRoutes.ts";
 import { registerWorkerAndWebhookRoutes } from "./workerAndWebhookRoutes.ts";
+import { registerBillingAndKybRoutes } from "./billingAndKybRoutes.ts";
 import { computeNextRetryDate } from "../services/vpsWorkerService.ts";
 import { getMarketSnapshot } from "../services/marketService.ts";
 
@@ -1496,6 +1497,7 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
 
   registerArnAndModuleRoutes(app, recordAutomationEvent);
   registerWorkerAndWebhookRoutes(app);
+  registerBillingAndKybRoutes(app, recordAutomationEvent);
 
   return { app, runAutoInsight };
 }

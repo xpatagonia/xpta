@@ -9,9 +9,13 @@ import {
   Crown,
   Zap,
   AlertTriangle,
+  Clock,
+  XCircle,
+  CreditCard,
 } from 'lucide-react';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
+import CheckoutModal from './CheckoutModal';
 
 export interface OrganizationInfo {
   organizationId: number;
@@ -37,6 +41,7 @@ const PLAN_CARDS = [
     title: 'Plan Gratis / Inicial',
     seats: 2,
     price: 'Gratis (o Base $25.000 ARS)',
+    priceShort: 'Gratis',
     summary: 'Ideal para PyMEs que inician operación en Patagonia.',
     icon: Shield,
   },
@@ -45,6 +50,7 @@ const PLAN_CARDS = [
     title: 'Plan Pro Industria',
     seats: 5,
     price: '$65.000 ARS / mes',
+    priceShort: '$65.000 ARS / mes',
     summary: 'Equipos comerciales y compras con ARN IA + CRM completo.',
     icon: Zap,
   },
@@ -53,6 +59,7 @@ const PLAN_CARDS = [
     title: 'Plan Corporativo',
     seats: 10,
     price: '$140.000 ARS / mes',
+    priceShort: '$140.000 ARS / mes',
     summary: 'Operadoras y contratistas multi-área con hasta 10 usuarios.',
     icon: Crown,
   },
@@ -62,6 +69,7 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
   const [org, setOrg] = useState<OrganizationInfo | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [invitations, setInvitations] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [inviteEmail, setInviteEmail] = useState('');
@@ -69,10 +77,15 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
   const [inviting, setInviting] = useState(false);
   const [updatingPlan, setUpdatingPlan] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [checkoutTarget, setCheckoutTarget] = useState<{
+    targetSlug: string;
+    title: string;
+    price: string;
+  } | null>(null);
 
   const notify = (type: 'ok' | 'err', text: string) => {
     setNotice({ type, text });
-    setTimeout(() => setNotice(null), 5000);
+    setTimeout(() => setNotice(null), 6000);
   };
 
   const loadTeam = useCallback(async () => {
@@ -80,16 +93,28 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
     try {
       const token = await auth.getToken();
       if (!token) return;
-      const res = await fetch(`${getApiUrl()}/api/org/team`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      });
-      const data = await res.json();
-      if (res.ok && data.organization) {
+      const [teamRes, txRes] = await Promise.all([
+        fetch(`${getApiUrl()}/api/org/team`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }),
+        fetch(`${getApiUrl()}/api/billing/transactions`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }).catch(() => null),
+      ]);
+      const data = await teamRes.json();
+      if (teamRes.ok && data.organization) {
         setOrg(data.organization);
         setMembers(Array.isArray(data.members) ? data.members : []);
         setInvitations(Array.isArray(data.invitations) ? data.invitations : []);
         onOrganizationUpdated?.(data.organization);
+      }
+      if (txRes && txRes.ok) {
+        const txJson = await txRes.json().catch(() => ({}));
+        if (Array.isArray(txJson.transactions)) {
+          setTransactions(txJson.transactions);
+        }
       }
     } catch {
       notify('err', 'No se pudo cargar la configuración del equipo.');
@@ -192,7 +217,25 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
         },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 402 || data?.requiresPayment) {
+        const slug =
+          data?.targetSlug ||
+          (payload.logisticsPlanActive ? 'logistica_flota' : payload.planSlug || 'pro');
+        const matchedCard = PLAN_CARDS.find((c) => c.slug === slug);
+        setCheckoutTarget({
+          targetSlug: slug,
+          title:
+            slug === 'logistica_flota'
+              ? 'Membresía Suite Logística & Flota'
+              : matchedCard?.title || 'Upgrade Plan SaaS',
+          price:
+            slug === 'logistica_flota'
+              ? '$95.000 ARS / mes'
+              : matchedCard?.priceShort || '$65.000 ARS / mes',
+        });
+        return;
+      }
       if (!res.ok) throw new Error(data?.error || 'No se pudo actualizar el plan');
       await loadTeam();
       notify('ok', 'Plan y permisos de organización actualizados.');
@@ -460,7 +503,68 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
             )}
           </div>
         </div>
+
+        {/* Billing Transactions History */}
+        {transactions.length > 0 && (
+          <div className="bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-orange-500" /> Historial de Pagos y Transferencias ({transactions.length})
+              </h4>
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-white/5">
+              {transactions.slice(0, 8).map((tx) => {
+                const isApproved = tx.status === 'approved';
+                const isRejected = tx.status === 'rejected';
+                return (
+                  <div key={tx.id} className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div>
+                      <div className="font-bold text-slate-900 dark:text-white uppercase">
+                        {tx.target_slug} · <span className="font-mono text-slate-500">{tx.provider === 'mercadopago' ? 'MercadoPago' : 'Transferencia'}</span>
+                      </div>
+                      <div className="text-slate-500 font-mono tabular-nums mt-0.5">
+                        Ref: {tx.receipt_reference || tx.external_reference} · {tx.created_at ? new Date(tx.created_at).toLocaleDateString('es-AR') : ''}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                        ${Number(tx.amount_ars || 0).toLocaleString('es-AR')} ARS
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase ${
+                          isApproved
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                            : isRejected
+                            ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'
+                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                        }`}
+                      >
+                        {isApproved ? <CheckCircle2 className="w-3 h-3" /> : isRejected ? <XCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                        {isApproved ? 'Aprobado' : isRejected ? 'Rechazado' : 'Pendiente'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      {checkoutTarget && (
+        <CheckoutModal
+          isOpen={Boolean(checkoutTarget)}
+          onClose={() => setCheckoutTarget(null)}
+          targetSlug={checkoutTarget.targetSlug}
+          moduleName={checkoutTarget.title}
+          price={checkoutTarget.price}
+          onConfirm={async (res) => {
+            setCheckoutTarget(null);
+            await loadTeam();
+            notify('ok', res.message);
+          }}
+        />
+      )}
     </div>
   );
 }

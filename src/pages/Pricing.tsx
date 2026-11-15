@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock, Truck, Users, FileCheck } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { auth } from '../lib/db';
 import { SiteSettings, fetchSiteSettings, getCachedSiteSettings, SITE_SETTINGS_EVENT } from '../lib/siteSettings';
+import CheckoutModal from '../components/CheckoutModal';
 
 const tiers = [
   {
     name: 'Plan Gratis / Inicial',
     id: 'tier-basic',
+    slug: 'gratis',
     badge: 'Hasta 2 Usuarios PyME',
     priceMonthly: 'Gratis',
     currency: 'Base / $25.000 ARS',
@@ -34,6 +37,7 @@ const tiers = [
   {
     name: 'Plan Pro Industria',
     id: 'tier-pro',
+    slug: 'pro',
     badge: 'Hasta 5 Usuarios • Más Elegido',
     priceMonthly: '$65.000',
     currency: 'ARS',
@@ -60,6 +64,7 @@ const tiers = [
   {
     name: 'Plan Corporativo',
     id: 'tier-corp',
+    slug: 'corporativo',
     badge: 'Hasta 10 Usuarios • Nivel 1',
     priceMonthly: '$140.000',
     currency: 'ARS',
@@ -84,6 +89,14 @@ const tiers = [
 
 export default function Pricing() {
   const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
+  const [isSignedIn, setIsSignedIn] = useState<boolean>(() => Boolean(auth.currentUser));
+  const [checkoutTarget, setCheckoutTarget] = useState<{
+    targetSlug: string;
+    title: string;
+    price: string;
+  } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchSiteSettings().then(setSettings);
@@ -92,13 +105,25 @@ export default function Pricing() {
       setSettings(custom.detail || getCachedSiteSettings());
     };
     window.addEventListener(SITE_SETTINGS_EVENT, handler);
-    return () => window.removeEventListener(SITE_SETTINGS_EVENT, handler);
+    const unsub = auth.onAuthStateChanged((user) => setIsSignedIn(Boolean(user)));
+    return () => {
+      window.removeEventListener(SITE_SETTINGS_EVENT, handler);
+      unsub();
+    };
   }, []);
 
   const dynamicPrices: Record<string, string> = {
     'tier-basic': settings.platform.basicPrice || 'Gratis',
     'tier-pro': settings.platform.proPrice || '$65.000',
     'tier-corp': settings.platform.corpPrice || '$140.000',
+  };
+
+  const handleSelectPaidPlan = (targetSlug: string, title: string, price: string) => {
+    if (!isSignedIn) {
+      navigate('/dashboard?area=team');
+      return;
+    }
+    setCheckoutTarget({ targetSlug, title, price });
   };
 
   return (
@@ -115,6 +140,15 @@ export default function Pricing() {
             Escalá tu equipo comercial según la capacidad de tu empresa (<strong>2, 5 o 10 usuarios</strong>) con ARN IA y CRM unificados, o activá la membresía dedicada para empresas de transporte y logística.
           </p>
         </div>
+
+        {notice && (
+          <div className="max-w-4xl mx-auto mb-8 px-5 py-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center justify-between gap-4">
+            <span>{notice}</span>
+            <Link to="/dashboard?area=team" className="underline font-bold shrink-0">
+              Ir a Mi Organización
+            </Link>
+          </div>
+        )}
 
         {/* Public vs Subscribed Comparison Banner */}
         <div className="max-w-5xl mx-auto mb-12 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -145,6 +179,7 @@ export default function Pricing() {
         <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
           {tiers.map((tier, index) => {
             const Icon = tier.icon;
+            const resolvedPrice = dynamicPrices[tier.id] || tier.priceMonthly;
             return (
               <motion.div
                 key={tier.id}
@@ -183,7 +218,7 @@ export default function Pricing() {
                 <div className="mb-6 pb-6 border-b border-slate-100 dark:border-white/5">
                   <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
                     <span className="text-3xl font-bold text-slate-900 dark:text-white">
-                      {dynamicPrices[tier.id] || tier.priceMonthly}
+                      {resolvedPrice}
                     </span>
                     <span className="text-xs font-bold text-slate-500 uppercase">
                       {tier.currency}
@@ -215,17 +250,34 @@ export default function Pricing() {
                   ))}
                 </ul>
 
-                <Link
-                  to="/dashboard?area=team"
-                  className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
-                    tier.popular
-                      ? 'bg-orange-500 text-white hover:bg-orange-600'
-                      : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  {tier.cta}
-                </Link>
+                {tier.slug === 'gratis' ? (
+                  <Link
+                    to="/dashboard?area=team"
+                    className="w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    {tier.cta}
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectPaidPlan(
+                        tier.slug,
+                        tier.name,
+                        `${resolvedPrice} ${tier.currency}/mes`
+                      )
+                    }
+                    className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
+                      tier.popular
+                        ? 'bg-orange-500 text-white hover:bg-orange-600'
+                        : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    {tier.cta}
+                  </button>
+                )}
               </motion.div>
             );
           })}
@@ -268,16 +320,37 @@ export default function Pricing() {
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">Incluye hasta 10 usuarios operativos de tráfico y despacho.</p>
               </div>
-              <Link
-                to="/dashboard?area=fleet"
+              <button
+                type="button"
+                onClick={() =>
+                  handleSelectPaidPlan(
+                    'logistica_flota',
+                    'Membresía Suite Logística & Flota',
+                    '$95.000 ARS/mes'
+                  )
+                }
                 className="mt-5 w-full py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 <Truck className="w-4 h-4" /> Activar Membresía Logística
-              </Link>
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      {checkoutTarget && (
+        <CheckoutModal
+          isOpen={Boolean(checkoutTarget)}
+          onClose={() => setCheckoutTarget(null)}
+          targetSlug={checkoutTarget.targetSlug}
+          moduleName={checkoutTarget.title}
+          price={checkoutTarget.price}
+          onConfirm={(res) => {
+            setCheckoutTarget(null);
+            setNotice(res.message);
+          }}
+        />
+      )}
     </div>
   );
 }

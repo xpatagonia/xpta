@@ -11,6 +11,7 @@ import {
   canAccessLogisticsSuite,
   type PymePlanSlug,
 } from "../services/saasPlans.ts";
+import { hasApprovedPaidEntitlement } from "../services/billingService.ts";
 
 export interface TenantContext {
   organizationId: number;
@@ -534,6 +535,46 @@ export function registerSaasAndFleetRoutes(
           ? body.logisticsPlanActive
           : tenant.logisticsPlanActive;
       const nextName = typeof body.orgName === "string" && body.orgName.trim() ? body.orgName.trim() : tenant.orgName;
+
+      const isSysAdmin = req.user!.roleName === "system_admin";
+      if (!isSysAdmin) {
+        const isUpgradingPlan = nextPlan.slug !== "gratis" && nextPlan.slug !== tenant.planSlug;
+        if (isUpgradingPlan) {
+          const paid = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user!.uid,
+            targetType: "plan",
+            targetSlug: nextPlan.slug,
+          });
+          if (!paid) {
+            return res.status(402).json({
+              error: `El ${nextPlan.displayName} requiere pago acreditado por MercadoPago o transferencia conciliada antes de activarse.`,
+              requiresPayment: true,
+              targetType: "plan",
+              targetSlug: nextPlan.slug,
+            });
+          }
+        }
+
+        const isEnablingLogistics = nextLogistics === true && !tenant.logisticsPlanActive;
+        if (isEnablingLogistics) {
+          const paidLogistics = await hasApprovedPaidEntitlement({
+            organizationId: tenant.organizationId,
+            userUid: req.user!.uid,
+            targetType: "logistics",
+            targetSlug: "logistica_flota",
+          });
+          if (!paidLogistics) {
+            return res.status(402).json({
+              error:
+                "La Membresía Logística & Control de Flota requiere pago aprobado por MercadoPago o transferencia bancaria conciliada.",
+              requiresPayment: true,
+              targetType: "logistics",
+              targetSlug: "logistica_flota",
+            });
+          }
+        }
+      }
 
       if (tenant.usedSeats > nextPlan.seatLimit) {
         return res.status(400).json({
