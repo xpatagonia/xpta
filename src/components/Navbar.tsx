@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import ThemeToggle from './ThemeToggle';
+import ThemeToggle, { THEME_CHANGE_EVENT } from './ThemeToggle';
 import AuthModal from './AuthModal';
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
@@ -24,6 +24,7 @@ import {
   SITE_SETTINGS_EVENT,
   fetchSiteSettings,
   getCachedSiteSettings,
+  isLightColor,
   resolveFontFamilyCss,
 } from '../lib/siteSettings';
 
@@ -32,6 +33,9 @@ export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
+  const [isDocDark, setIsDocDark] = useState<boolean>(() =>
+    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : true
+  );
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -45,7 +49,16 @@ export default function Navbar() {
       const custom = e as CustomEvent<SiteSettings>;
       setSiteSettings(custom.detail || getCachedSiteSettings());
     };
+    const onThemeSync = (e: Event) => {
+      const custom = e as CustomEvent<{ isDark?: boolean }>;
+      if (typeof custom.detail?.isDark === 'boolean') {
+        setIsDocDark(custom.detail.isDark);
+      } else {
+        setIsDocDark(document.documentElement.classList.contains('dark'));
+      }
+    };
     window.addEventListener(SITE_SETTINGS_EVENT, onSettingsUpdate);
+    window.addEventListener(THEME_CHANGE_EVENT, onThemeSync);
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -79,6 +92,7 @@ export default function Navbar() {
 
     return () => {
       window.removeEventListener(SITE_SETTINGS_EVENT, onSettingsUpdate);
+      window.removeEventListener(THEME_CHANGE_EVENT, onThemeSync);
       subscription.unsubscribe();
     };
   }, []);
@@ -96,6 +110,8 @@ export default function Navbar() {
   const menuCfg = siteSettings.menu;
   const visibleItems = (menuCfg.items || []).filter((item) => item.visible);
   const accentColor = menuCfg.accentColor || siteSettings.designTheme.accentColor || '#f97316';
+  const customBgLight = isLightColor(menuCfg.backgroundColor);
+  const effectiveIsLightSurface = customBgLight !== null ? customBgLight : !isDocDark;
 
   const variantClasses =
     menuCfg.variant === 'solid'
@@ -104,9 +120,13 @@ export default function Navbar() {
       ? 'bg-white/95 dark:bg-[#110E17]/95 border-b border-slate-200/50 dark:border-white/5'
       : 'bg-white/90 dark:bg-[#110E17]/90 backdrop-blur-xl border-b border-slate-200/80 dark:border-white/10';
 
+  const resolvedNavTextColor =
+    menuCfg.textColor ||
+    (customBgLight === true ? '#0F172A' : customBgLight === false ? '#F8FAFC' : undefined);
+
   const navStyle: React.CSSProperties = {
     ...(menuCfg.backgroundColor ? { backgroundColor: menuCfg.backgroundColor } : {}),
-    ...(menuCfg.textColor ? { color: menuCfg.textColor } : {}),
+    ...(resolvedNavTextColor ? { color: resolvedNavTextColor } : {}),
     ...(menuCfg.fontFamily && menuCfg.fontFamily !== 'inherit'
       ? { fontFamily: resolveFontFamilyCss(menuCfg.fontFamily) }
       : {}),
@@ -121,12 +141,14 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center h-14 gap-8">
-          {/* Zone 1: Clean Single Brand Element */}
+          {/* Zone 1: Clean Single Brand Element with contrast-safe filter */}
           <Link to="/" className="flex items-center cursor-pointer shrink-0">
             <img
               src="/logo.png"
               alt="xPatagonia"
-              className="h-9 w-auto object-contain"
+              className={`h-9 w-auto object-contain transition-[filter] duration-200 ${
+                effectiveIsLightSurface ? 'invert hue-rotate-180' : ''
+              }`}
             />
           </Link>
 
@@ -140,7 +162,9 @@ export default function Navbar() {
                   to={item.path}
                   className="transition-colors whitespace-nowrap shrink-0 py-1 hover:underline underline-offset-4"
                   style={{
-                    color: active ? accentColor : menuCfg.textColor || undefined,
+                    color: active
+                      ? accentColor
+                      : resolvedNavTextColor || (effectiveIsLightSurface ? '#1E293B' : '#F1F5F9'),
                   }}
                 >
                   {item.label}
@@ -151,13 +175,17 @@ export default function Navbar() {
 
           {/* Zone 3: Primary Action & Member Account */}
           <div className="hidden lg:flex items-center gap-3 shrink-0">
-            <ThemeToggle />
+            <ThemeToggle lightSurface={customBgLight} />
 
             {user ? (
               <div className="relative group">
                 <button
                   type="button"
-                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-white/15 hover:border-orange-500/60 transition-colors flex items-center gap-2 text-xs font-bold whitespace-nowrap shrink-0"
+                  className={`px-4 py-2 rounded-xl border transition-colors flex items-center gap-2 text-xs font-bold whitespace-nowrap shrink-0 ${
+                    effectiveIsLightSurface
+                      ? 'border-slate-300 hover:border-orange-500/60 bg-slate-50/70'
+                      : 'border-white/15 hover:border-orange-500/60'
+                  }`}
                   style={{ color: accentColor }}
                 >
                   <LayoutDashboard className="w-4 h-4 shrink-0" />
@@ -232,7 +260,11 @@ export default function Navbar() {
                 <button
                   type="button"
                   onClick={() => setIsAuthOpen(true)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-white/15 hover:border-orange-500 transition-colors text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  className={`px-3.5 py-2 rounded-xl border hover:border-orange-500 transition-colors text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                    effectiveIsLightSurface
+                      ? 'border-slate-300 text-slate-800'
+                      : 'border-white/15 text-slate-100'
+                  }`}
                 >
                   <Lock className="w-3.5 h-3.5" style={{ color: accentColor }} />
                   <span>Ingresar</span>
@@ -250,12 +282,16 @@ export default function Navbar() {
 
           {/* Mobile Menu Trigger */}
           <div className="flex lg:hidden items-center gap-3 shrink-0">
-            <ThemeToggle />
+            <ThemeToggle lightSurface={customBgLight} />
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               aria-label={isMobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              className={`p-1.5 rounded-lg transition-colors ${
+                effectiveIsLightSurface
+                  ? 'text-slate-800 hover:bg-slate-100'
+                  : 'text-slate-100 hover:bg-white/10'
+              }`}
             >
               {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>

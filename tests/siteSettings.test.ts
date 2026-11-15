@@ -12,6 +12,8 @@ import {
   applyThemePresetToSettings,
   parseCustomChartSeries,
   resolveFontFamilyCss,
+  isLightColor,
+  SECTION_DEFAULT_BLOCKS,
 } from '../src/lib/siteSettings.ts';
 import { sanitizeApiBaseUrl } from '../src/lib/apiConfig.ts';
 
@@ -220,4 +222,54 @@ test('resolveFontFamilyCss distinguishes serif vs sans font stacks and honors in
   assert.equal(resolveFontFamilyCss('inherit', 'var(--xp-font-sans)'), 'var(--xp-font-sans)');
   assert.match(resolveFontFamilyCss('Fraunces'), /"Fraunces", Georgia, serif/);
   assert.match(resolveFontFamilyCss('Outfit'), /"Outfit", ui-sans-serif/);
+});
+
+test('isLightColor accurately detects light vs dark hex and rgb colors', () => {
+  assert.equal(isLightColor('#FFFFFF'), true);
+  assert.equal(isLightColor('#fff'), true);
+  assert.equal(isLightColor('#F8FAFC'), true);
+  assert.equal(isLightColor('rgb(255, 255, 255)'), true);
+  assert.equal(isLightColor('#0D0A13'), false);
+  assert.equal(isLightColor('#1A1625'), false);
+  assert.equal(isLightColor('rgb(15, 23, 42)'), false);
+  assert.equal(isLightColor(''), null);
+  assert.equal(isLightColor('not-a-color'), null);
+});
+
+test('mergeSettings preserves section blockOverrides and customBlocks while hydrating defaults', () => {
+  const merged = mergeSettings({
+    sectionConfigs: {
+      ecosystem: {
+        ...DEFAULT_SITE_SETTINGS.sectionConfigs.ecosystem,
+        blockOverrides: {
+          arn: {
+            title: 'CRM ARN Custom',
+            imageUrl: 'https://media.xpatagonia.online/arn.webp',
+          },
+        },
+        customBlocks: [
+          {
+            id: 'blk-1',
+            eyebrow: 'Nuevo',
+            title: 'Bloque Extra',
+            description: 'Descripción personalizada',
+            imageUrl: 'https://media.xpatagonia.online/extra.jpg',
+            ctaLabel: 'Ver más',
+            ctaPath: '/servicios',
+          },
+        ],
+      },
+    } as any,
+  });
+
+  assert.equal(merged.sectionConfigs.ecosystem.blockOverrides?.arn?.title, 'CRM ARN Custom');
+  assert.equal(
+    merged.sectionConfigs.ecosystem.blockOverrides?.arn?.imageUrl,
+    'https://media.xpatagonia.online/arn.webp'
+  );
+  assert.equal(merged.sectionConfigs.ecosystem.customBlocks?.length, 1);
+  assert.equal(merged.sectionConfigs.ecosystem.customBlocks?.[0].title, 'Bloque Extra');
+  for (const id of DEFAULT_SECTION_ORDER) {
+    assert.ok(SECTION_DEFAULT_BLOCKS[id].length > 0);
+  }
 });

@@ -15,11 +15,15 @@ import {
   Upload,
   Lock,
   Sparkles,
+  Image as ImageIcon,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   AESTHETIC_THEME_PRESETS,
   BODY_FONT_OPTIONS,
   CHART_DATASET_PRESETS,
+  CustomContentBlock,
   DEFAULT_SECTION_ORDER,
   DISPLAY_FONT_OPTIONS,
   DesignFontPreset,
@@ -27,7 +31,9 @@ import {
   HomeSectionDesignConfig,
   HomeSectionId,
   MenuLinkItem,
+  SECTION_DEFAULT_BLOCKS,
   SectionBackgroundType,
+  SectionBlockOverride,
   SectionCardStyle,
   SectionChartPreset,
   SectionColumnStyle,
@@ -36,7 +42,7 @@ import {
 } from '../../lib/siteSettings';
 
 export type CustomizerArea = 'theme' | 'menu' | 'sections';
-type SectionSubPanel = 'background' | 'typography' | 'copy' | 'chart' | 'media';
+type SectionSubPanel = 'background' | 'copy' | 'typography' | 'chart' | 'media';
 
 interface DesignCustomizerControlsProps {
   area: CustomizerArea;
@@ -61,7 +67,8 @@ export default function DesignCustomizerControls({
   const [selectedSectionId, setSelectedSectionId] = useState<HomeSectionId>(
     settings.sectionOrder[0] || 'indicators'
   );
-  const [sectionPanel, setSectionPanel] = useState<SectionSubPanel>('background');
+  const [sectionPanel, setSectionPanel] = useState<SectionSubPanel>('copy');
+  const [expandedBlockKey, setExpandedBlockKey] = useState<string | null>(null);
   const [newMenuLabel, setNewMenuLabel] = useState('');
   const [newMenuPath, setNewMenuPath] = useState('/servicios');
 
@@ -80,6 +87,134 @@ export default function DesignCustomizerControls({
         },
       },
     }));
+  };
+
+  const updateBlockOverride = (
+    sectionId: HomeSectionId,
+    blockKey: string,
+    patch: Partial<SectionBlockOverride>
+  ) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const currentOverrides = currentSection.blockOverrides || {};
+      const nextBlock = { ...(currentOverrides[blockKey] || {}), ...patch };
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            blockOverrides: {
+              ...currentOverrides,
+              [blockKey]: nextBlock,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const resetBlockOverride = (sectionId: HomeSectionId, blockKey: string) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const nextOverrides = { ...(currentSection.blockOverrides || {}) };
+      delete nextOverrides[blockKey];
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            blockOverrides: nextOverrides,
+          },
+        },
+      };
+    });
+  };
+
+  const addCustomBlock = (sectionId: HomeSectionId) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const existing = currentSection.customBlocks || [];
+      const nextBlock: CustomContentBlock = {
+        id: `blk-${Date.now()}`,
+        eyebrow: 'Bloque Destacado',
+        title: 'Nuevo Título del Bloque',
+        description: 'Descripcióneditable del servicio, novedad o caso destacado con imagen.',
+        imageUrl: '',
+        ctaLabel: 'Explorar más',
+        ctaPath: '/servicios',
+      };
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            customBlocks: [...existing, nextBlock],
+          },
+        },
+      };
+    });
+  };
+
+  const updateCustomBlock = (
+    sectionId: HomeSectionId,
+    index: number,
+    patch: Partial<CustomContentBlock>
+  ) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const blocks = [...(currentSection.customBlocks || [])];
+      blocks[index] = { ...blocks[index], ...patch };
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            customBlocks: blocks,
+          },
+        },
+      };
+    });
+  };
+
+  const moveCustomBlock = (sectionId: HomeSectionId, index: number, direction: -1 | 1) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const blocks = [...(currentSection.customBlocks || [])];
+      const nextIdx = index + direction;
+      if (nextIdx < 0 || nextIdx >= blocks.length) return prev;
+      [blocks[index], blocks[nextIdx]] = [blocks[nextIdx], blocks[index]];
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            customBlocks: blocks,
+          },
+        },
+      };
+    });
+  };
+
+  const removeCustomBlock = (sectionId: HomeSectionId, index: number) => {
+    onChange((prev) => {
+      const currentSection = prev.sectionConfigs[sectionId];
+      const blocks = (currentSection.customBlocks || []).filter((_, i) => i !== index);
+      return {
+        ...prev,
+        sectionConfigs: {
+          ...prev.sectionConfigs,
+          [sectionId]: {
+            ...currentSection,
+            customBlocks: blocks,
+          },
+        },
+      };
+    });
   };
 
   const moveSectionOrder = (id: HomeSectionId, direction: -1 | 1) => {
@@ -773,11 +908,11 @@ export default function DesignCustomizerControls({
           <div className="flex flex-wrap gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-[#110E17]">
             {(
               [
+                { id: 'copy', label: 'Bloques & Textos', icon: Type },
                 { id: 'background', label: 'Fondo & Color', icon: Palette },
                 { id: 'typography', label: 'Tipografía & Columnas', icon: Columns3 },
                 { id: 'chart', label: 'Insertar Gráfico', icon: BarChart3 },
                 { id: 'media', label: 'Video / Imagen', icon: Film },
-                { id: 'copy', label: 'Textos', icon: Type },
               ] as { id: SectionSubPanel; label: string; icon: any }[]
             ).map((tab) => {
               const Icon = tab.icon;
@@ -1492,48 +1627,420 @@ export default function DesignCustomizerControls({
           )}
 
           {sectionPanel === 'copy' && (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">
-                  Epígrafe personalizado (opcional)
-                </label>
-                <input
-                  type="text"
-                  value={activeConfig.eyebrowOverride || ''}
-                  onChange={(e) =>
-                    updateSectionConfig(selectedSectionId, { eyebrowOverride: e.target.value })
-                  }
-                  placeholder="Dejar vacío para usar el texto por defecto"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] text-xs text-slate-900 dark:text-white"
-                />
+            <div className="space-y-5">
+              {/* Section Header Override */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Encabezado de la Sección
+                </h4>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Epígrafe superior
+                  </label>
+                  <input
+                    type="text"
+                    value={activeConfig.eyebrowOverride || ''}
+                    onChange={(e) =>
+                      updateSectionConfig(selectedSectionId, { eyebrowOverride: e.target.value })
+                    }
+                    placeholder="Dejar vacío para usar el epígrafe base"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Título principal de la sección
+                  </label>
+                  <input
+                    type="text"
+                    value={activeConfig.titleOverride || ''}
+                    onChange={(e) =>
+                      updateSectionConfig(selectedSectionId, { titleOverride: e.target.value })
+                    }
+                    placeholder="Dejar vacío para usar el título base"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs font-semibold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Bajada / Subtítulo
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={activeConfig.subtitleOverride || ''}
+                    onChange={(e) =>
+                      updateSectionConfig(selectedSectionId, { subtitleOverride: e.target.value })
+                    }
+                    placeholder="Dejar vacío para usar el subtítulo base"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">
-                  Título principal personalizado (opcional)
-                </label>
-                <input
-                  type="text"
-                  value={activeConfig.titleOverride || ''}
-                  onChange={(e) =>
-                    updateSectionConfig(selectedSectionId, { titleOverride: e.target.value })
-                  }
-                  placeholder="Dejar vacío para usar el título por defecto"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] text-xs font-semibold text-slate-900 dark:text-white"
-                />
+
+              {/* Per-block Built-in Card Editors */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Bloques / Tarjetas de esta Sección
+                  </h4>
+                  <span className="text-[11px] text-slate-400">
+                    Editá títulos, textos, imágenes o visibilidad
+                  </span>
+                </div>
+
+                {(SECTION_DEFAULT_BLOCKS[selectedSectionId] || []).map((descriptor) => {
+                  const ov = activeConfig.blockOverrides?.[descriptor.key] || {};
+                  const isOpenBlock = expandedBlockKey === `${selectedSectionId}:${descriptor.key}`;
+                  const hasEdits = Boolean(
+                    ov.hidden ||
+                      ov.title ||
+                      ov.tagline ||
+                      ov.description ||
+                      ov.imageUrl ||
+                      ov.ctaLabel ||
+                      ov.ctaPath
+                  );
+
+                  return (
+                    <div
+                      key={descriptor.key}
+                      className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] overflow-hidden"
+                    >
+                      <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedBlockKey(
+                              isOpenBlock ? null : `${selectedSectionId}:${descriptor.key}`
+                            )
+                          }
+                          className="flex-1 text-left min-w-0 flex items-center gap-2"
+                        >
+                          {isOpenBlock ? (
+                            <ChevronUp className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                              <span>{ov.title || descriptor.label}</span>
+                              {hasEdits && (
+                                <span className="text-[10px] font-mono text-orange-500">
+                                  · editado
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 truncate">
+                              {ov.imageUrl ? 'Con imagen · ' : ''}
+                              {ov.title ? descriptor.label : descriptor.defaultTitle}
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateBlockOverride(selectedSectionId, descriptor.key, {
+                              hidden: !ov.hidden,
+                            })
+                          }
+                          title={ov.hidden ? 'Mostrar bloque' : 'Ocultar bloque'}
+                          className={`p-1.5 rounded-lg border shrink-0 ${
+                            !ov.hidden
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'border-slate-200 dark:border-white/10 text-slate-400'
+                          }`}
+                        >
+                          {!ov.hidden ? (
+                            <Eye className="w-3.5 h-3.5" />
+                          ) : (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      {isOpenBlock && (
+                        <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-200/60 dark:border-white/10 space-y-2.5">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                              Título del Bloque
+                            </label>
+                            <input
+                              type="text"
+                              value={ov.title || ''}
+                              onChange={(e) =>
+                                updateBlockOverride(selectedSectionId, descriptor.key, {
+                                  title: e.target.value,
+                                })
+                              }
+                              placeholder={descriptor.defaultTitle}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs font-semibold text-slate-900 dark:text-white"
+                            />
+                          </div>
+
+                          {descriptor.defaultTagline !== undefined && (
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Epígrafe / Bajada Corta
+                              </label>
+                              <input
+                                type="text"
+                                value={ov.tagline || ''}
+                                onChange={(e) =>
+                                  updateBlockOverride(selectedSectionId, descriptor.key, {
+                                    tagline: e.target.value,
+                                  })
+                                }
+                                placeholder={descriptor.defaultTagline}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                              />
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                              Texto / Descripción
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={ov.description || ''}
+                              onChange={(e) =>
+                                updateBlockOverride(selectedSectionId, descriptor.key, {
+                                  description: e.target.value,
+                                })
+                              }
+                              placeholder={descriptor.defaultDescription}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3 text-orange-500" />
+                              Imagen del Bloque (URL o Subida)
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <input
+                                type="url"
+                                value={ov.imageUrl || ''}
+                                onChange={(e) =>
+                                  updateBlockOverride(selectedSectionId, descriptor.key, {
+                                    imageUrl: e.target.value,
+                                  })
+                                }
+                                placeholder="https://... (dejar vacío para default)"
+                                className="flex-1 min-w-[160px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                              />
+                              {onUploadMedia && (
+                                <label className="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[11px] font-bold cursor-pointer flex items-center gap-1 shrink-0">
+                                  <Upload className="w-3 h-3" />
+                                  <span>{isUploading ? '...' : 'Subir'}</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      onUploadMedia(file, (url) =>
+                                        updateBlockOverride(selectedSectionId, descriptor.key, {
+                                          imageUrl: url,
+                                        })
+                                      );
+                                    }}
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+
+                          {descriptor.defaultCtaLabel !== undefined && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                value={ov.ctaLabel || ''}
+                                onChange={(e) =>
+                                  updateBlockOverride(selectedSectionId, descriptor.key, {
+                                    ctaLabel: e.target.value,
+                                  })
+                                }
+                                placeholder={descriptor.defaultCtaLabel}
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                              />
+                              {descriptor.defaultCtaPath !== undefined && (
+                                <input
+                                  type="text"
+                                  value={ov.ctaPath || ''}
+                                  onChange={(e) =>
+                                    updateBlockOverride(selectedSectionId, descriptor.key, {
+                                      ctaPath: e.target.value,
+                                    })
+                                  }
+                                  placeholder={descriptor.defaultCtaPath}
+                                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs font-mono text-slate-900 dark:text-white"
+                                />
+                              )}
+                            </div>
+                          )}
+
+                          {hasEdits && (
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => resetBlockOverride(selectedSectionId, descriptor.key)}
+                                className="text-[11px] font-bold text-slate-500 hover:text-rose-500"
+                              >
+                                Restaurar bloque original
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">
-                  Subtítulo personalizado (opcional)
-                </label>
-                <textarea
-                  rows={2}
-                  value={activeConfig.subtitleOverride || ''}
-                  onChange={(e) =>
-                    updateSectionConfig(selectedSectionId, { subtitleOverride: e.target.value })
-                  }
-                  placeholder="Dejar vacío para usar el subtítulo por defecto"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#110E17] text-xs text-slate-900 dark:text-white"
-                />
+
+              {/* Custom Blocks Builder (Add new cards with image, title, text, CTA) */}
+              <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Bloques Extra con Imagen &amp; Texto ({(activeConfig.customBlocks || []).length})
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Sumá tarjetas personalizadas con foto, título, descripción y enlace en esta sección.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => addCustomBlock(selectedSectionId)}
+                    className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Agregar Bloque
+                  </button>
+                </div>
+
+                {(activeConfig.customBlocks || []).map((blk, bIdx) => (
+                  <div
+                    key={blk.id}
+                    className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#110E17] border border-slate-200 dark:border-white/10 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-orange-500">
+                        Bloque Extra #{bIdx + 1}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveCustomBlock(selectedSectionId, bIdx, -1)}
+                          disabled={bIdx === 0}
+                          className="p-1 rounded border border-slate-200 dark:border-white/10 text-slate-500 disabled:opacity-30"
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveCustomBlock(selectedSectionId, bIdx, 1)}
+                          disabled={bIdx === (activeConfig.customBlocks || []).length - 1}
+                          className="p-1 rounded border border-slate-200 dark:border-white/10 text-slate-500 disabled:opacity-30"
+                        >
+                          <ArrowDown className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeCustomBlock(selectedSectionId, bIdx)}
+                          className="p-1 rounded border border-slate-200 dark:border-white/10 text-rose-500 hover:bg-rose-500/10"
+                          title="Eliminar bloque"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={blk.eyebrow || ''}
+                        onChange={(e) =>
+                          updateCustomBlock(selectedSectionId, bIdx, { eyebrow: e.target.value })
+                        }
+                        placeholder="Etiqueta / Epígrafe"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={blk.title}
+                        onChange={(e) =>
+                          updateCustomBlock(selectedSectionId, bIdx, { title: e.target.value })
+                        }
+                        placeholder="Título del bloque"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs font-semibold text-slate-900 dark:text-white"
+                      />
+                    </div>
+
+                    <textarea
+                      rows={2}
+                      value={blk.description}
+                      onChange={(e) =>
+                        updateCustomBlock(selectedSectionId, bIdx, { description: e.target.value })
+                      }
+                      placeholder="Texto descriptivo del bloque..."
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                    />
+
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="url"
+                        value={blk.imageUrl || ''}
+                        onChange={(e) =>
+                          updateCustomBlock(selectedSectionId, bIdx, { imageUrl: e.target.value })
+                        }
+                        placeholder="URL de imagen del bloque (https://...)"
+                        className="flex-1 min-w-[160px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                      />
+                      {onUploadMedia && (
+                        <label className="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[11px] font-bold cursor-pointer flex items-center gap-1 shrink-0">
+                          <Upload className="w-3 h-3" />
+                          <span>{isUploading ? '...' : 'Subir Img'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              onUploadMedia(file, (url) =>
+                                updateCustomBlock(selectedSectionId, bIdx, { imageUrl: url })
+                              );
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={blk.ctaLabel || ''}
+                        onChange={(e) =>
+                          updateCustomBlock(selectedSectionId, bIdx, { ctaLabel: e.target.value })
+                        }
+                        placeholder="Texto del botón (opcional)"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={blk.ctaPath || ''}
+                        onChange={(e) =>
+                          updateCustomBlock(selectedSectionId, bIdx, { ctaPath: e.target.value })
+                        }
+                        placeholder="/servicios"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1A1625] text-xs font-mono text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

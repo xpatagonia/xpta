@@ -37,6 +37,7 @@ import ConfigurableSection, {
   getSectionCardClass,
   getSectionGridClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
@@ -119,17 +120,22 @@ export default function Categories({ config }: { config?: HomeSectionDesignConfi
   }, {});
 
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const blockOverrides = config?.blockOverrides || {};
   const cardsGridClass = getSectionGridClass(
     config?.columnStyle,
     'grid grid-cols-1 md:grid-cols-2 gap-4'
   );
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const headingSizeClass = getSectionHeadingSizeClass(config?.headingScale);
   const isBento = config?.columnStyle === 'bento';
+
+  const inactiveTabClass =
+    surfaceTone === 'light'
+      ? 'bg-white text-slate-700 border border-slate-300 hover:border-purple-500/40'
+      : surfaceTone === 'dark'
+      ? 'bg-[#1A1625] text-slate-200 border border-white/15 hover:border-purple-500/40'
+      : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-purple-500/40';
 
   return (
     <ConfigurableSection
@@ -186,10 +192,9 @@ export default function Categories({ config }: { config?: HomeSectionDesignConfi
             type="button"
             onClick={() => setActiveEntityTab(tab.id)}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
-              activeEntityTab === tab.id
-                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-purple-500/40'
+              activeEntityTab === tab.id ? 'text-white' : inactiveTabClass
             }`}
+            style={activeEntityTab === tab.id ? { backgroundColor: accentColor } : undefined}
           >
             {tab.label}
           </button>
@@ -199,24 +204,40 @@ export default function Categories({ config }: { config?: HomeSectionDesignConfi
       {/* Ordered Preview Cards */}
       <div className={`${cardsGridClass} mb-12`}>
         {visiblePreview.map((company, idx) => {
+          const ov = blockOverrides[`preview-${idx}`];
+          if (ov?.hidden) return null;
           const typeKey = company.entityType || 'empresa';
           const TypeIcon = ENTITY_ICONS[typeKey] || Building2;
           const typeMeta = ENTITY_TYPE_CONFIG[typeKey];
 
+          const displayTitle = ov?.title || company.name;
+          const displayTag = ov?.tagline || `${typeMeta.label} · ${company.tierLabel}`;
+          const displayDesc = ov?.description || company.publicSummary;
+          const displayCta = ov?.ctaLabel || 'Ver ficha';
+          const displayPath = ov?.ctaPath || `/servicios?type=${typeKey}`;
+
           return (
             <div
               key={company.id}
-              className={`rounded-2xl p-5 flex flex-col justify-between transition-colors ${cardSurfaceClass} ${
+              className={`rounded-2xl p-5 flex flex-col justify-between transition-colors overflow-hidden ${cardSurfaceClass} ${
                 isBento && idx === 0 ? 'md:col-span-4' : isBento ? 'md:col-span-2' : ''
               }`}
             >
               <div>
+                {ov?.imageUrl && (
+                  <div className="-mx-5 -mt-5 mb-4 h-40 overflow-hidden bg-slate-900">
+                    <img
+                      src={ov.imageUrl}
+                      alt={displayTitle}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs opacity-75 mb-2">
                   <span className="inline-flex items-center gap-1.5 font-semibold">
                     <TypeIcon className="w-3.5 h-3.5 shrink-0" style={{ color: accentColor }} />
-                    {typeMeta.label}
-                    <span aria-hidden="true">·</span>
-                    <span>{company.tierLabel}</span>
+                    <span>{displayTag}</span>
                     {company.verified && (
                       <>
                         <span aria-hidden="true">·</span>
@@ -233,14 +254,14 @@ export default function Categories({ config }: { config?: HomeSectionDesignConfi
                 </div>
 
                 <h3 className="text-lg font-display font-bold mb-1 leading-snug">
-                  {company.name}
+                  {displayTitle}
                 </h3>
                 <p className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-2">
                   {company.category}
                   {company.serviceModality ? ` · ${company.serviceModality}` : ''}
                 </p>
                 <p className="text-xs sm:text-sm opacity-80 line-clamp-2 mb-4 leading-relaxed">
-                  {company.publicSummary}
+                  {displayDesc}
                 </p>
               </div>
 
@@ -250,11 +271,11 @@ export default function Categories({ config }: { config?: HomeSectionDesignConfi
                   CUIT / Matrícula &amp; Contacto CRM: Solo Miembros
                 </span>
                 <Link
-                  to={`/servicios?type=${typeKey}`}
+                  to={displayPath}
                   className="font-bold hover:underline flex items-center gap-1 shrink-0 whitespace-nowrap"
                   style={{ color: accentColor }}
                 >
-                  Ver ficha <ArrowRight className="w-3.5 h-3.5" />
+                  {displayCta} <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
             </div>

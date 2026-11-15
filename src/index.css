@@ -59,3 +59,21 @@ h1, h2, h3, h4, h5, h6, .font-display {
 .ticker-paused {
   animation-play-state: paused !important;
 }
+
+/* Contrast protection when a section uses a custom light background while Dark Mode is active (or vice versa) */
+section[data-surface-tone="light"] input,
+section[data-surface-tone="light"] select,
+section[data-surface-tone="light"] textarea {
+  background-color: #FFFFFF;
+  color: #0F172A;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+section[data-surface-tone="dark"] input,
+section[data-surface-tone="dark"] select,
+section[data-surface-tone="dark"] textarea {
+  background-color: #110E17;
+  color: #F8FAFC;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+

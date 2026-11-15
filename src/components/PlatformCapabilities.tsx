@@ -5,6 +5,7 @@ import ConfigurableSection, {
   getSectionCardClass,
   getSectionGridClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
@@ -89,15 +90,28 @@ const PILLARS: CapabilityPillar[] = [
 
 export default function PlatformCapabilities({ config }: { config?: HomeSectionDesignConfig }) {
   const [selectedId, setSelectedId] = useState<CapabilityPillar['id']>('arn');
-  const active = PILLARS.find((p) => p.id === selectedId) || PILLARS[0];
+  const blockOverrides = config?.blockOverrides || {};
+
+  const resolvedPillars = PILLARS.filter((p) => !blockOverrides[p.id]?.hidden).map((p) => {
+    const ov = blockOverrides[p.id];
+    return {
+      ...p,
+      title: ov?.title || p.title,
+      tagline: ov?.tagline || p.tagline,
+      description: ov?.description || p.description,
+      ctaLabel: ov?.ctaLabel || p.ctaLabel,
+      ctaPath: ov?.ctaPath || p.ctaPath,
+      imageUrl: ov?.imageUrl || '',
+    };
+  });
+
+  const active =
+    resolvedPillars.find((p) => p.id === selectedId) || resolvedPillars[0] || { ...PILLARS[0], imageUrl: '' };
   const ActiveIcon = active.icon;
 
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const headingSizeClass = getSectionHeadingSizeClass(config?.headingScale);
   const columnStyle = config?.columnStyle || 'auto';
   const useColumnCardsMode =
@@ -129,14 +143,24 @@ export default function PlatformCapabilities({ config }: { config?: HomeSectionD
 
       {useColumnCardsMode ? (
         <div className={getSectionGridClass(columnStyle, 'grid grid-cols-1 lg:grid-cols-3 gap-5')}>
-          {PILLARS.map((pillar) => {
+          {resolvedPillars.map((pillar) => {
             const Icon = pillar.icon;
             return (
               <div
                 key={pillar.id}
-                className={`rounded-2xl p-6 flex flex-col justify-between ${cardSurfaceClass}`}
+                className={`rounded-2xl p-6 flex flex-col justify-between overflow-hidden ${cardSurfaceClass}`}
               >
                 <div>
+                  {pillar.imageUrl && (
+                    <div className="-mx-6 -mt-6 mb-5 aspect-[16/9] overflow-hidden bg-slate-900">
+                      <img
+                        src={pillar.imageUrl}
+                        alt={pillar.title}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
@@ -189,7 +213,7 @@ export default function PlatformCapabilities({ config }: { config?: HomeSectionD
               columnStyle === 'split-right' ? 'lg:order-2' : ''
             }`}
           >
-            {PILLARS.map((pillar) => {
+            {resolvedPillars.map((pillar) => {
               const Icon = pillar.icon;
               const isSelected = pillar.id === active.id;
               return (
@@ -208,7 +232,11 @@ export default function PlatformCapabilities({ config }: { config?: HomeSectionD
                     className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
                       isSelected
                         ? 'text-white'
-                        : 'bg-white dark:bg-white/5 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10'
+                        : surfaceTone === 'light'
+                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                        : surfaceTone === 'dark'
+                        ? 'bg-white/5 text-slate-300 border border-white/10'
+                        : 'bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10'
                     }`}
                     style={isSelected ? { backgroundColor: accentColor } : undefined}
                   >
@@ -245,11 +273,21 @@ export default function PlatformCapabilities({ config }: { config?: HomeSectionD
           </div>
 
           <div
-            className={`lg:col-span-7 rounded-2xl p-6 sm:p-8 flex flex-col justify-between ${cardSurfaceClass} ${
+            className={`lg:col-span-7 rounded-2xl p-6 sm:p-8 flex flex-col justify-between overflow-hidden ${cardSurfaceClass} ${
               columnStyle === 'split-right' ? 'lg:order-1' : ''
             }`}
           >
             <div>
+              {active.imageUrl && (
+                <div className="-mx-6 sm:-mx-8 -mt-6 sm:-mt-8 mb-6 h-52 overflow-hidden bg-slate-900">
+                  <img
+                    src={active.imageUrl}
+                    alt={active.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-6 border-b border-slate-200/70 dark:border-white/10">
                 <div className="flex items-center gap-3">
                   <div

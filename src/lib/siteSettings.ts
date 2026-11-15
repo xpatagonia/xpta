@@ -70,6 +70,26 @@ export interface SectionMediaBlock {
   caption: string;
 }
 
+export interface SectionBlockOverride {
+  hidden?: boolean;
+  title?: string;
+  tagline?: string;
+  description?: string;
+  imageUrl?: string;
+  ctaLabel?: string;
+  ctaPath?: string;
+}
+
+export interface CustomContentBlock {
+  id: string;
+  eyebrow?: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  ctaLabel?: string;
+  ctaPath?: string;
+}
+
 export interface HomeSectionDesignConfig {
   id: HomeSectionId;
   eyebrowOverride?: string;
@@ -92,6 +112,8 @@ export interface HomeSectionDesignConfig {
   paddingScale: 'compact' | 'standard' | 'spacious';
   mediaBlock: SectionMediaBlock;
   chartBlock: SectionChartBlock;
+  blockOverrides?: Record<string, SectionBlockOverride>;
+  customBlocks?: CustomContentBlock[];
 }
 
 export interface MenuLinkItem {
@@ -244,6 +266,231 @@ export const HOME_SECTION_META: Record<
   },
 };
 
+export interface EditableBlockDescriptor {
+  key: string;
+  label: string;
+  defaultTitle: string;
+  defaultTagline?: string;
+  defaultDescription: string;
+  defaultCtaLabel?: string;
+  defaultCtaPath?: string;
+}
+
+export const SECTION_DEFAULT_BLOCKS: Record<HomeSectionId, EditableBlockDescriptor[]> = {
+  indicators: [
+    {
+      key: 'brent',
+      label: 'Tarjeta 1 · Energía',
+      defaultTitle: 'Petróleo Brent',
+      defaultTagline: 'Futuro ICE · En vivo',
+      defaultDescription: 'Contrato Futuro BZ=F',
+    },
+    {
+      key: 'blue',
+      label: 'Tarjeta 2 · Divisas',
+      defaultTitle: 'Dólar Blue',
+      defaultTagline: 'DolarApi · Referencia',
+      defaultDescription: 'Cotización compra / venta',
+    },
+    {
+      key: 'medanito',
+      label: 'Tarjeta 3 · Cuenca Neuquina',
+      defaultTitle: 'Crudo Medanito',
+      defaultTagline: 'Vaca Muerta · Paridad Brent',
+      defaultDescription: '35° API Liviano Neuquén',
+    },
+    {
+      key: 'btc',
+      label: 'Tarjeta 4 · Cripto',
+      defaultTitle: 'Bitcoin (BTC)',
+      defaultTagline: 'CoinGecko · En vivo',
+      defaultDescription: 'Conversión USD y ARS',
+    },
+  ],
+  insights: [
+    {
+      key: 'card-0',
+      label: 'Nota Principal (Bloque 1)',
+      defaultTitle: 'Nota destacada principal del portal Insights',
+      defaultTagline: 'Actualidad Industrial',
+      defaultDescription: 'Resumen editable para reemplazar o destacar el primer artículo en el Home.',
+      defaultCtaLabel: 'Leer más',
+      defaultCtaPath: '/insights',
+    },
+    {
+      key: 'card-1',
+      label: 'Nota Secundaria (Bloque 2)',
+      defaultTitle: 'Segundo reporte o novedad regional',
+      defaultTagline: 'Análisis B2B',
+      defaultDescription: 'Resumen editable del segundo bloque de Patagonia Insights.',
+      defaultCtaLabel: 'Leer más',
+      defaultCtaPath: '/insights',
+    },
+    {
+      key: 'card-2',
+      label: 'Nota Terciaria (Bloque 3)',
+      defaultTitle: 'Tercer reporte o cápsula multimedia',
+      defaultTagline: 'Tendencias',
+      defaultDescription: 'Resumen editable del tercer bloque de Patagonia Insights.',
+      defaultCtaLabel: 'Leer más',
+      defaultCtaPath: '/insights',
+    },
+  ],
+  ecosystem: [
+    {
+      key: 'arn',
+      label: 'Motor 01 · ARN IA + CRM',
+      defaultTitle: 'Motor Comercial ARN IA + CRM Híbrido',
+      defaultTagline: 'Automatización comercial bidireccional y escucha de correos 24/7',
+      defaultDescription:
+        'Cada correo comercial o consulta del directorio ingresa automáticamente al motor ARN IA, crea o actualiza el contacto en tu CRM, calcula scoring de oportunidad y redacta borradores con reglas híbridas.',
+      defaultCtaLabel: 'Abrir ARN IA & CRM',
+      defaultCtaPath: '/dashboard?area=arn_crm',
+    },
+    {
+      key: 'pyme',
+      label: 'Motor 02 · Suite PyME',
+      defaultTitle: 'Suite PyME Multi-Usuario por Asientos',
+      defaultTagline: 'Equipos comerciales y operativos trabajando sobre una misma cartera',
+      defaultDescription:
+        'Centraliza compradores, vendedores y supervisores bajo una sola organización en Patagonia.',
+      defaultCtaLabel: 'Gestionar Equipo y Asientos',
+      defaultCtaPath: '/dashboard?area=team',
+    },
+    {
+      key: 'fleet',
+      label: 'Motor 03 · Flota & Logística',
+      defaultTitle: 'Membresía Logística & Control de Flota',
+      defaultTagline: 'Infraestructura dedicada para transportistas y operadores viales',
+      defaultDescription:
+        'Controla unidades, vencimientos críticos, choferes con licencia LINTI y toma contratos directos con rutas OSRM.',
+      defaultCtaLabel: 'Abrir Centro de Flota',
+      defaultCtaPath: '/logistica?tab=flotas',
+    },
+  ],
+  categories: [
+    {
+      key: 'preview-0',
+      label: 'Ficha Destacada 1',
+      defaultTitle: 'Empresa destacada del Directorio',
+      defaultTagline: 'Empresa · Nivel Corporativo',
+      defaultDescription: 'Descripción comercial editable para la primera ficha mostrada en el Home.',
+      defaultCtaLabel: 'Ver ficha',
+      defaultCtaPath: '/servicios',
+    },
+    {
+      key: 'preview-1',
+      label: 'Ficha Destacada 2',
+      defaultTitle: 'Servicio Industrial destacado',
+      defaultTagline: 'Servicio · Pro Industria',
+      defaultDescription: 'Descripción comercial editable para la segunda ficha mostrada en el Home.',
+      defaultCtaLabel: 'Ver ficha',
+      defaultCtaPath: '/servicios',
+    },
+    {
+      key: 'preview-2',
+      label: 'Ficha Destacada 3',
+      defaultTitle: 'Profesional Matriculado destacado',
+      defaultTagline: 'Profesional · Verificado',
+      defaultDescription: 'Descripción editable para la tercera ficha mostrada en el Home.',
+      defaultCtaLabel: 'Ver ficha',
+      defaultCtaPath: '/servicios',
+    },
+    {
+      key: 'preview-3',
+      label: 'Ficha Destacada 4',
+      defaultTitle: 'Emprendimiento Regional destacado',
+      defaultTagline: 'Emprendimiento · Red B2B',
+      defaultDescription: 'Descripción editable para la cuarta ficha mostrada en el Home.',
+      defaultCtaLabel: 'Ver ficha',
+      defaultCtaPath: '/servicios',
+    },
+  ],
+  howItWorks: [
+    {
+      key: '01.',
+      label: 'Paso 01 · Búsqueda',
+      defaultTitle: 'Busca por Perfil y Corredor',
+      defaultDescription:
+        'Filtra Empresas, Emprendimientos, Profesionales matriculados o Servicios técnicos según provincia y especialidad.',
+      defaultCtaLabel: 'Ir al módulo',
+      defaultCtaPath: '/servicios',
+    },
+    {
+      key: '02.',
+      label: 'Paso 02 · Calificación IA',
+      defaultTitle: 'Califica con ARN IA + CRM',
+      defaultDescription:
+        'Cada lead o correo comercial entra al CRM y a la cola híbrida de ARN IA con reglas automáticas por monto y confianza.',
+      defaultCtaLabel: 'Ir al módulo',
+      defaultCtaPath: '/dashboard?area=arn_crm',
+    },
+    {
+      key: '03.',
+      label: 'Paso 03 · Cotización',
+      defaultTitle: 'Cotiza con tu Equipo PyME',
+      defaultDescription:
+        'Opera pedidos RFQ y presupuestos con hasta 2, 5 o 10 usuarios integrados en tu espacio organizacional.',
+      defaultCtaLabel: 'Ir al módulo',
+      defaultCtaPath: '/dashboard?area=team',
+    },
+    {
+      key: '04.',
+      label: 'Paso 04 · Despacho',
+      defaultTitle: 'Despacha con Flota & OSRM',
+      defaultDescription:
+        'Calcula kilómetros reales, asigna transportistas con LINTI y controla contratos y retornos vacíos por Ruta 3, 22 y 40.',
+      defaultCtaLabel: 'Ir al módulo',
+      defaultCtaPath: '/logistica?tab=rutas',
+    },
+  ],
+  contact: [
+    {
+      key: 'form-card',
+      label: 'Tarjeta de Formulario RFQ',
+      defaultTitle: 'Solicitar Cotización (RFQ)',
+      defaultTagline: 'Conectado a CRM y proveedores verificados en producción',
+      defaultDescription: 'Podés sumar una imagen o ajustar el texto del botón de envío del formulario.',
+      defaultCtaLabel: 'Generar Oportunidad B2B',
+    },
+  ],
+};
+
+export function isLightColor(rawColor?: string | null): boolean | null {
+  const val = (rawColor || '').trim();
+  if (!val) return null;
+
+  let r: number | null = null;
+  let g: number | null = null;
+  let b: number | null = null;
+
+  const hexMatch = val.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    }
+  } else {
+    const rgbMatch = val.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+    if (rgbMatch) {
+      r = Number(rgbMatch[1]);
+      g = Number(rgbMatch[2]);
+      b = Number(rgbMatch[3]);
+    }
+  }
+
+  if (r === null || g === null || b === null) return null;
+  // Relative luminance (WCAG sRGB approximation)
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance > 0.56;
+}
+
 export const CHART_DATASET_PRESETS: Record<
   Exclude<SectionChartPreset, 'custom'>,
   {
@@ -357,6 +604,8 @@ function makeDefaultSectionConfig(
       accentColor: '#f97316',
       customSeriesJson: JSON.stringify(chartMeta.series, null, 2),
     },
+    blockOverrides: {},
+    customBlocks: [],
     ...overrides,
   };
 }
@@ -680,6 +929,13 @@ function mergeSectionConfig(
       ...base.chartBlock,
       ...(incoming.chartBlock || {}),
     },
+    blockOverrides: {
+      ...(base.blockOverrides || {}),
+      ...(incoming.blockOverrides || {}),
+    },
+    customBlocks: Array.isArray(incoming.customBlocks)
+      ? incoming.customBlocks
+      : base.customBlocks || [],
   };
 }
 

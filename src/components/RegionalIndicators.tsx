@@ -20,6 +20,7 @@ import ConfigurableSection, {
   getSectionCardClass,
   getSectionGridClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 import {
@@ -278,17 +279,48 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
     : '';
 
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const blockOverrides = config?.blockOverrides || {};
 
   const gridClass = getSectionGridClass(
     config?.columnStyle,
     'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'
   );
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const isBento = config?.columnStyle === 'bento';
+
+  const applyCardOverride = (card: IndicatorCardData) => {
+    const ov = blockOverrides[card.id];
+    if (!ov) return { ...card, imageUrl: '' };
+    return {
+      ...card,
+      title: ov.title || card.title,
+      metaLabel: ov.tagline || card.metaLabel,
+      subValue: ov.description || card.subValue,
+      imageUrl: ov.imageUrl || '',
+    };
+  };
+
+  const visiblePrimary = primaryCards
+    .filter((c) => !blockOverrides[c.id]?.hidden)
+    .map(applyCardOverride);
+  const visibleFiltered = filteredCards
+    .filter((c) => !blockOverrides[c.id]?.hidden)
+    .map(applyCardOverride);
+
+  const alertBarClass =
+    surfaceTone === 'light'
+      ? 'bg-white border-slate-200 text-slate-900'
+      : surfaceTone === 'dark'
+      ? 'bg-[#181424] border-white/10 text-slate-100'
+      : 'bg-white dark:bg-[#181424] border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100';
+
+  const secondaryBtnClass =
+    surfaceTone === 'light'
+      ? 'bg-white border-slate-300 text-slate-800 hover:border-purple-500/40'
+      : surfaceTone === 'dark'
+      ? 'bg-[#1A1625] border-white/15 text-slate-100 hover:border-purple-500/40'
+      : 'bg-white dark:bg-[#1A1625] border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-purple-500/40';
 
   return (
     <ConfigurableSection
@@ -304,7 +336,9 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
 
       {/* Alertas de Variación Calculadas */}
       {snapshot.alerts.length > 0 && (
-        <div className="mb-4 px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#181424] border border-slate-200 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-800 dark:text-slate-100">
+        <div
+          className={`mb-4 px-3.5 py-2.5 rounded-xl border flex flex-wrap items-center gap-x-4 gap-y-2 text-xs ${alertBarClass}`}
+        >
           <span
             className="inline-flex items-center gap-1.5 font-bold shrink-0"
             style={{ color: accentColor }}
@@ -312,11 +346,11 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
             <Bell className="w-3.5 h-3.5" />
             Alertas de Mercado
           </span>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 dark:text-slate-300 min-w-0">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 opacity-85 min-w-0">
             {snapshot.alerts.map((al, idx) => (
               <React.Fragment key={al.id}>
                 <span className="inline-flex items-center gap-1.5">
-                  <strong className="font-mono text-slate-900 dark:text-white">{al.symbol}</strong>
+                  <strong className="font-mono">{al.symbol}</strong>
                   <span
                     className={`font-mono tabular-nums font-bold ${
                       al.severity === 'up'
@@ -328,12 +362,10 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
                   >
                     {al.change}
                   </span>
-                  <span className="text-slate-500 dark:text-slate-400 truncate max-w-[320px]">
-                    — {al.title}
-                  </span>
+                  <span className="opacity-75 truncate max-w-[320px]">— {al.title}</span>
                 </span>
                 {idx < snapshot.alerts.length - 1 && (
-                  <span className="text-slate-300 dark:text-white/15 hidden sm:inline" aria-hidden="true">
+                  <span className="opacity-30 hidden sm:inline" aria-hidden="true">
                     ·
                   </span>
                 )}
@@ -379,7 +411,7 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
             type="button"
             onClick={loadData}
             disabled={isRefreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-purple-500/40 transition-colors whitespace-nowrap"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${secondaryBtnClass}`}
           >
             <RefreshCw className={`w-3.5 h-3.5 text-purple-500 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span className="hidden md:inline">Actualizar</span>
@@ -387,7 +419,7 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
           <button
             type="button"
             onClick={() => setShowSourcesModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-emerald-500/40 transition-colors whitespace-nowrap"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${secondaryBtnClass}`}
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
             <span>Auditar Fuentes</span>
@@ -417,11 +449,12 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
               key={tab.id}
               type="button"
               onClick={() => setFilter(tab.id as any)}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 border ${
                 filter === tab.id
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                  : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-purple-500/40'
+                  ? 'text-white border-transparent'
+                  : secondaryBtnClass
               }`}
+              style={filter === tab.id ? { backgroundColor: accentColor } : undefined}
             >
               {tab.label}
             </button>
@@ -431,13 +464,23 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
 
       {/* Configurable Indicators Grid */}
       <div className={gridClass}>
-        {(isExpanded ? filteredCards : primaryCards).map((card, idx) => (
+        {(isExpanded ? visibleFiltered : visiblePrimary).map((card, idx) => (
           <div
             key={card.id}
-            className={`p-3.5 rounded-xl flex flex-col justify-between transition-colors ${cardSurfaceClass} ${
+            className={`p-3.5 rounded-xl flex flex-col justify-between transition-colors overflow-hidden ${cardSurfaceClass} ${
               isBento && idx === 0 ? 'md:col-span-4' : isBento ? 'md:col-span-2' : ''
             }`}
           >
+            {card.imageUrl && (
+              <div className="-mx-3.5 -mt-3.5 mb-3 h-24 overflow-hidden bg-slate-900">
+                <img
+                  src={card.imageUrl}
+                  alt={card.title}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
@@ -461,7 +504,11 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
               <span
                 className={`text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded shrink-0 ${
                   card.dataMode === 'official_reference'
-                    ? 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10'
+                    ? surfaceTone === 'light'
+                      ? 'text-slate-700 bg-slate-100'
+                      : surfaceTone === 'dark'
+                      ? 'text-slate-200 bg-white/10'
+                      : 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10'
                     : card.isPositive
                     ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
                     : 'text-rose-700 dark:text-rose-400 bg-rose-500/10'
@@ -471,7 +518,7 @@ export default function RegionalIndicators({ config }: { config?: HomeSectionDes
               </span>
             </div>
 
-            <div className="flex items-baseline justify-between pt-2 border-t border-slate-100 dark:border-white/10 gap-2 font-mono tabular-nums">
+            <div className="flex items-baseline justify-between pt-2 border-t border-slate-200/60 dark:border-white/10 gap-2 font-mono tabular-nums">
               <span className="text-sm font-bold truncate">{card.value}</span>
               <span className="text-[11px] opacity-70 truncate max-w-[140px]">
                 {card.subValue}

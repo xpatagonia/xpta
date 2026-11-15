@@ -5,6 +5,7 @@ import { getApiUrl } from '../lib/apiConfig';
 import ConfigurableSection, {
   getSectionCardClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
@@ -45,22 +46,27 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
   };
 
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const headingSizeClass = getSectionHeadingSizeClass(
     config?.headingScale,
     'text-3xl md:text-5xl'
   );
   const isSplit = config?.columnStyle === 'split-left' || config?.columnStyle === 'split-right';
+  const formOverride = config?.blockOverrides?.['form-card'];
+
+  const inputSurfaceClass =
+    surfaceTone === 'light'
+      ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+      : surfaceTone === 'dark'
+      ? 'bg-[#110E17] border-white/15 text-white placeholder:text-slate-500'
+      : 'bg-white dark:bg-[#110E17] border-slate-200 dark:border-white/10 text-slate-900 dark:text-white';
 
   return (
     <ConfigurableSection
       id="rfq"
       config={config}
-      defaultClassName="bg-slate-50 dark:bg-[#0C0A11] text-slate-900 dark:text-white border-t border-slate-100 dark:border-white/5"
+      defaultClassName="bg-slate-50 dark:bg-[#0C0A11] border-t border-slate-100 dark:border-white/5"
     >
       <div className={isSplit ? 'grid grid-cols-1 lg:grid-cols-12 gap-10 items-start' : 'max-w-4xl mx-auto'}>
         <motion.div
@@ -77,7 +83,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
             {config?.eyebrowOverride || 'Genera múltiples presupuestos'}
           </p>
           <h2 className={`${headingSizeClass} font-display font-bold mb-4 tracking-tight text-balance`}>
-            {config?.titleOverride || 'Solicitar Cotización (RFQ)'}
+            {config?.titleOverride || formOverride?.title || 'Solicitar Cotización (RFQ)'}
           </h2>
           <p className="opacity-80 text-base sm:text-lg leading-relaxed">
             {config?.subtitleOverride ||
@@ -96,6 +102,16 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
               : ''
           }`}
         >
+          {formOverride?.imageUrl && (
+            <div className="-mx-6 sm:-mx-10 -mt-6 sm:-mt-10 mb-6 h-44 overflow-hidden bg-slate-900">
+              <img
+                src={formOverride.imageUrl}
+                alt={config?.titleOverride || 'Imagen sección RFQ'}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          )}
           <form className="space-y-6 relative z-10" onSubmit={handleSubmit}>
             <div className="grid md:grid-cols-2 gap-6">
               <div>
@@ -107,7 +123,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                   type="text"
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium text-slate-900 dark:text-white"
+                  className={`w-full px-4 py-3.5 border rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium ${inputSurfaceClass}`}
                   placeholder="Ej: Ingeniería Austral S.A."
                 />
               </div>
@@ -120,7 +136,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium text-slate-900 dark:text-white"
+                  className={`w-full px-4 py-3.5 border rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium ${inputSurfaceClass}`}
                   placeholder="compras@empresa.com"
                 />
               </div>
@@ -134,7 +150,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium text-slate-900 dark:text-white"
+                  className={`w-full px-4 py-3.5 border rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium ${inputSurfaceClass}`}
                 >
                   <option value="Logística y Supply Chain">Logística y Supply Chain</option>
                   <option value="Ingeniería e Industrial">Ingeniería e Industrial</option>
@@ -149,7 +165,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                 <select
                   value={budget}
                   onChange={(e) => setBudget(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium text-slate-900 dark:text-white"
+                  className={`w-full px-4 py-3.5 border rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium ${inputSurfaceClass}`}
                 >
                   <option value="Consultar precio">- Consultar precio -</option>
                   <option value="Menos de $1,000">Menos de $1,000</option>
@@ -168,7 +184,7 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                 rows={4}
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
-                className="w-full px-4 py-3.5 bg-white dark:bg-[#110E17] border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium resize-none text-slate-900 dark:text-white"
+                className={`w-full px-4 py-3.5 border rounded-xl focus:ring-2 focus:ring-purple-500/40 outline-none transition-colors text-sm font-medium resize-none ${inputSurfaceClass}`}
                 placeholder="Especificar cantidades, fechas de entrega, estándares técnicos requeridos..."
               />
             </div>
@@ -189,14 +205,16 @@ export default function Contact({ config }: { config?: HomeSectionDesignConfig }
                 <span>Solicitud Registrada y Notificada</span>
               ) : (
                 <span className="flex items-center gap-2">
-                  Generar Oportunidad B2B <ArrowRight className="w-4 h-4" />
+                  {formOverride?.ctaLabel || 'Generar Oportunidad B2B'} <ArrowRight className="w-4 h-4" />
                 </span>
               )}
             </button>
 
             <div className="flex items-center justify-center gap-2 text-xs font-medium opacity-70 pt-1">
               <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-              <span>Conectado a CRM y proveedores verificados en producción</span>
+              <span>
+                {formOverride?.tagline || 'Conectado a CRM y proveedores verificados en producción'}
+              </span>
             </div>
           </form>
         </motion.div>

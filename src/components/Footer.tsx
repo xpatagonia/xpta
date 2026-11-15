@@ -29,7 +29,7 @@ export default function Footer() {
               <img
                 src="/logo.png"
                 alt="x.patagonia logo"
-                className="h-10 w-auto object-contain dark:invert-0 invert"
+                className="h-10 w-auto object-contain dark:invert-0 dark:hue-rotate-0 invert hue-rotate-180"
               />
             </div>
             <p className="text-sm max-w-sm leading-relaxed text-slate-500 font-medium">

@@ -4,6 +4,7 @@ import ConfigurableSection, {
   getSectionCardClass,
   getSectionGridClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
@@ -44,17 +45,27 @@ const STEPS = [
 
 export default function HowItWorks({ config }: { config?: HomeSectionDesignConfig }) {
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const blockOverrides = config?.blockOverrides || {};
   const gridClass = getSectionGridClass(
     config?.columnStyle,
     'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'
   );
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const headingSizeClass = getSectionHeadingSizeClass(config?.headingScale);
   const isBento = config?.columnStyle === 'bento';
+
+  const visibleSteps = STEPS.filter((s) => !blockOverrides[s.id]?.hidden).map((s) => {
+    const ov = blockOverrides[s.id];
+    return {
+      ...s,
+      title: ov?.title || s.title,
+      description: ov?.description || s.description,
+      imageUrl: ov?.imageUrl || '',
+      ctaLabel: ov?.ctaLabel || 'Ir al módulo',
+      href: ov?.ctaPath || s.href,
+    };
+  });
 
   return (
     <ConfigurableSection
@@ -85,15 +96,25 @@ export default function HowItWorks({ config }: { config?: HomeSectionDesignConfi
       </div>
 
       <div className={gridClass}>
-        {STEPS.map((step, idx) => (
+        {visibleSteps.map((step, idx) => (
           <Link
             key={step.id}
             to={step.href}
-            className={`group p-6 rounded-2xl flex flex-col justify-between transition-colors ${cardSurfaceClass} ${
+            className={`group p-6 rounded-2xl flex flex-col justify-between transition-colors overflow-hidden ${cardSurfaceClass} ${
               isBento ? (idx === 0 || idx === 3 ? 'md:col-span-4' : 'md:col-span-2') : ''
             }`}
           >
             <div>
+              {step.imageUrl && (
+                <div className="-mx-6 -mt-6 mb-5 h-36 overflow-hidden bg-slate-900">
+                  <img
+                    src={step.imageUrl}
+                    alt={step.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+              )}
               <div className="flex items-center justify-between mb-5">
                 <div className="w-10 h-10 rounded-xl bg-slate-500/10 border border-slate-300/30 dark:border-white/10 flex items-center justify-center transition-colors">
                   <step.icon className="w-5 h-5" style={{ color: accentColor }} />
@@ -109,7 +130,7 @@ export default function HowItWorks({ config }: { config?: HomeSectionDesignConfi
               className="pt-4 mt-5 border-t border-slate-200/60 dark:border-white/10 flex items-center gap-1.5 text-xs font-bold"
               style={{ color: accentColor }}
             >
-              <span>Ir al módulo</span>
+              <span>{step.ctaLabel}</span>
               <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </Link>

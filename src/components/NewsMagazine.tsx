@@ -9,6 +9,7 @@ import ConfigurableSection, {
   getSectionCardClass,
   getSectionGridClass,
   getSectionHeadingSizeClass,
+  resolveSectionSurfaceTone,
 } from './ConfigurableSection';
 import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
@@ -58,16 +59,14 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
   }, []);
 
   const accentColor = config?.accentColor || '#f97316';
-  const hasDarkMedia =
-    config?.backgroundType === 'image' ||
-    config?.backgroundType === 'video' ||
-    config?.backgroundType === 'gradient';
+  const surfaceTone = resolveSectionSurfaceTone(config);
+  const blockOverrides = config?.blockOverrides || {};
 
   const isDefaultColumns = !config?.columnStyle || config.columnStyle === 'auto';
   const gridClass = isDefaultColumns
     ? 'grid grid-cols-1 lg:grid-cols-12 gap-6'
     : getSectionGridClass(config?.columnStyle, 'grid grid-cols-1 lg:grid-cols-12 gap-6');
-  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, surfaceTone);
   const headingSizeClass = getSectionHeadingSizeClass(config?.headingScale);
 
   return (
@@ -110,8 +109,18 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
       {/* Configurable Grid */}
       <div className={gridClass}>
         {news.map((item, index) => {
+          const ov = blockOverrides[`card-${index}`];
+          if (ov?.hidden) return null;
           const parsed = parseInsightLocation(item.content || '');
-          const cover = item.image || getYouTubeThumbnail(item.videoUrl);
+          const cover = ov?.imageUrl || item.image || getYouTubeThumbnail(item.videoUrl);
+          const cardTitle = ov?.title || item.title;
+          const cardTag = ov?.tagline || item.category || 'Actualidad';
+          const cardExcerpt =
+            ov?.description ||
+            `${parsed.cleanContent.replace(/[#*`_~]/g, '').substring(0, 160)}...`;
+          const cardCtaLabel = ov?.ctaLabel || 'Leer más';
+          const cardCtaPath = ov?.ctaPath || '/insights';
+
           const isPrimary = index === 0;
           const bentoSpan =
             config?.columnStyle === 'bento'
@@ -148,7 +157,7 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
                 >
                   <img
                     src={cover}
-                    alt={item.title}
+                    alt={cardTitle}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
@@ -169,7 +178,7 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
                 <div>
                   <div className="flex flex-wrap items-center gap-2 text-xs opacity-75 mb-2">
                     <span className="font-semibold" style={{ color: accentColor }}>
-                      {item.category || 'Actualidad'}
+                      {cardTag}
                     </span>
                     {parsed.location && (
                       <>
@@ -187,10 +196,10 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
                       isPrimary ? 'text-xl sm:text-2xl leading-snug' : 'text-lg leading-snug line-clamp-2'
                     }`}
                   >
-                    {item.title}
+                    {cardTitle}
                   </h3>
                   <p className="opacity-80 text-sm line-clamp-2 mb-4 leading-relaxed">
-                    {parsed.cleanContent.replace(/[#*`_~]/g, '').substring(0, 160)}...
+                    {cardExcerpt}
                   </p>
                 </div>
 
@@ -209,11 +218,11 @@ export default function NewsMagazine({ config }: { config?: HomeSectionDesignCon
                       </button>
                     )}
                     <Link
-                      to="/insights"
+                      to={cardCtaPath}
                       className="font-bold hover:underline flex items-center gap-1 whitespace-nowrap"
                       style={{ color: accentColor }}
                     >
-                      <span>Leer más</span>
+                      <span>{cardCtaLabel}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </Link>
                   </div>
