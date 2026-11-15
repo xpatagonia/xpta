@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bot, Users, Truck, ArrowRight, CheckCircle2, Mail, Route, ShieldCheck } from 'lucide-react';
+import ConfigurableSection, {
+  getSectionCardClass,
+  getSectionGridClass,
+  getSectionHeadingSizeClass,
+} from './ConfigurableSection';
+import { HomeSectionDesignConfig } from '../lib/siteSettings';
 
 interface CapabilityPillar {
   id: 'arn' | 'pyme' | 'fleet';
@@ -81,34 +87,108 @@ const PILLARS: CapabilityPillar[] = [
   },
 ];
 
-export default function PlatformCapabilities() {
+export default function PlatformCapabilities({ config }: { config?: HomeSectionDesignConfig }) {
   const [selectedId, setSelectedId] = useState<CapabilityPillar['id']>('arn');
   const active = PILLARS.find((p) => p.id === selectedId) || PILLARS[0];
   const ActiveIcon = active.icon;
 
-  return (
-    <section
-      id="servicios-plataforma"
-      className="py-16 md:py-20 px-4 sm:px-6 md:px-12 bg-white dark:bg-[#0D0A13] border-t border-slate-200 dark:border-white/5"
-    >
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-10">
-          <div className="max-w-2xl">
-            <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">
-              Infraestructura Operativa B2B en Producción
-            </p>
-            <h2 className="text-3xl md:text-4xl font-display font-bold text-slate-900 dark:text-white tracking-tight text-balance">
-              Tres motores diseñados para operar la industria patagónica
-            </h2>
-          </div>
-          <p className="text-sm text-slate-600 dark:text-slate-400 max-w-md">
-            Desde la automatización comercial con inteligencia artificial hasta el control de flotas y la operación multi-usuario de tu PyME.
-          </p>
-        </div>
+  const accentColor = config?.accentColor || '#f97316';
+  const hasDarkMedia =
+    config?.backgroundType === 'image' ||
+    config?.backgroundType === 'video' ||
+    config?.backgroundType === 'gradient';
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const headingSizeClass = getSectionHeadingSizeClass(config?.headingScale);
+  const columnStyle = config?.columnStyle || 'auto';
+  const useColumnCardsMode =
+    columnStyle === '1-col' ||
+    columnStyle === '2-col' ||
+    columnStyle === '3-col' ||
+    columnStyle === '4-col';
 
-        {/* Asymmetric Split: Left Pillar Selector List / Right Active Showcase */}
+  return (
+    <ConfigurableSection
+      id="servicios-plataforma"
+      config={config}
+      defaultClassName="bg-white dark:bg-[#0D0A13] border-t border-slate-200 dark:border-white/5"
+    >
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-10">
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold mb-2" style={{ color: accentColor }}>
+            {config?.eyebrowOverride || 'Infraestructura Operativa B2B en Producción'}
+          </p>
+          <h2 className={`${headingSizeClass} font-display font-bold tracking-tight text-balance`}>
+            {config?.titleOverride || 'Tres motores diseñados para operar la industria patagónica'}
+          </h2>
+        </div>
+        <p className="text-sm opacity-80 max-w-md">
+          {config?.subtitleOverride ||
+            'Desde la automatización comercial con inteligencia artificial hasta el control de flotas y la operación multi-usuario de tu PyME.'}
+        </p>
+      </div>
+
+      {useColumnCardsMode ? (
+        <div className={getSectionGridClass(columnStyle, 'grid grid-cols-1 lg:grid-cols-3 gap-5')}>
+          {PILLARS.map((pillar) => {
+            const Icon = pillar.icon;
+            return (
+              <div
+                key={pillar.id}
+                className={`rounded-2xl p-6 flex flex-col justify-between ${cardSurfaceClass}`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
+                      style={{ backgroundColor: accentColor }}
+                    >
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="text-right font-mono tabular-nums">
+                      <span className="text-xs opacity-60 block">{pillar.index}</span>
+                      <span className="text-sm font-bold">{pillar.metricValue}</span>
+                    </div>
+                  </div>
+                  <h3 className="text-lg font-display font-bold mb-1.5">{pillar.title}</h3>
+                  <p className="text-xs opacity-75 mb-4">{pillar.tagline}</p>
+                  <p className="text-sm opacity-85 leading-relaxed mb-4">{pillar.description}</p>
+                  <ul className="space-y-2 mb-6">
+                    {pillar.highlights.map((item) => (
+                      <li key={item} className="flex items-start gap-2 text-xs opacity-90">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200/60 dark:border-white/10 flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    to={pillar.secondaryPath}
+                    className="text-xs font-bold opacity-80 hover:opacity-100 whitespace-nowrap"
+                  >
+                    {pillar.secondaryLabel}
+                  </Link>
+                  <Link
+                    to={pillar.ctaPath}
+                    className="px-4 py-2 rounded-xl text-white text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 whitespace-nowrap"
+                    style={{ backgroundColor: accentColor }}
+                  >
+                    <span>{pillar.ctaLabel}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          <div className="lg:col-span-5 flex flex-col gap-3">
+          <div
+            className={`lg:col-span-5 flex flex-col gap-3 ${
+              columnStyle === 'split-right' ? 'lg:order-2' : ''
+            }`}
+          >
             {PILLARS.map((pillar) => {
               const Icon = pillar.icon;
               const isSelected = pillar.id === active.id;
@@ -119,31 +199,32 @@ export default function PlatformCapabilities() {
                   onClick={() => setSelectedId(pillar.id)}
                   className={`text-left p-5 rounded-2xl border transition-colors flex items-start gap-4 ${
                     isSelected
-                      ? 'bg-slate-900 dark:bg-[#1A1625] text-white border-orange-500/60'
-                      : 'bg-slate-50 dark:bg-[#14111C] text-slate-800 dark:text-slate-200 border-slate-200 dark:border-white/10 hover:border-purple-500/40'
+                      ? 'bg-slate-900 dark:bg-[#1A1625] text-white'
+                      : `${cardSurfaceClass} hover:border-purple-500/40`
                   }`}
+                  style={isSelected ? { borderColor: accentColor } : undefined}
                 >
                   <div
                     className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
                       isSelected
-                        ? 'bg-orange-500 text-white'
+                        ? 'text-white'
                         : 'bg-white dark:bg-white/5 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10'
                     }`}
+                    style={isSelected ? { backgroundColor: accentColor } : undefined}
                   >
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
                       <span
-                        className={`text-xs font-mono tabular-nums font-bold ${
-                          isSelected ? 'text-orange-400' : 'text-slate-400'
-                        }`}
+                        className="text-xs font-mono tabular-nums font-bold"
+                        style={{ color: isSelected ? accentColor : undefined }}
                       >
                         {pillar.index}
                       </span>
                       <span
                         className={`text-xs font-mono tabular-nums font-bold ${
-                          isSelected ? 'text-emerald-400' : 'text-slate-500'
+                          isSelected ? 'text-emerald-400' : 'opacity-70'
                         }`}
                       >
                         {pillar.metricValue}
@@ -152,7 +233,7 @@ export default function PlatformCapabilities() {
                     <h3 className="text-base font-bold mt-1 leading-snug">{pillar.title}</h3>
                     <p
                       className={`text-xs mt-1 leading-relaxed ${
-                        isSelected ? 'text-slate-300' : 'text-slate-500 dark:text-slate-400'
+                        isSelected ? 'text-slate-300' : 'opacity-75'
                       }`}
                     >
                       {pillar.tagline}
@@ -163,43 +244,43 @@ export default function PlatformCapabilities() {
             })}
           </div>
 
-          <div className="lg:col-span-7 bg-slate-50 dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 rounded-2xl p-6 sm:p-8 flex flex-col justify-between">
+          <div
+            className={`lg:col-span-7 rounded-2xl p-6 sm:p-8 flex flex-col justify-between ${cardSurfaceClass} ${
+              columnStyle === 'split-right' ? 'lg:order-1' : ''
+            }`}
+          >
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-6 border-b border-slate-200 dark:border-white/10">
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-6 border-b border-slate-200/70 dark:border-white/10">
                 <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 flex items-center justify-center shrink-0">
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: `${accentColor}1A`, color: accentColor }}
+                  >
                     <ActiveIcon className="w-5 h-5" />
                   </div>
                   <div>
                     <span className="text-xs font-mono tabular-nums font-semibold text-purple-600 dark:text-purple-400">
                       {active.index} Módulo Integrado
                     </span>
-                    <h3 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white">
-                      {active.title}
-                    </h3>
+                    <h3 className="text-xl sm:text-2xl font-display font-bold">{active.title}</h3>
                   </div>
                 </div>
 
                 <div className="text-left sm:text-right">
-                  <div className="text-2xl font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+                  <div className="text-2xl font-mono tabular-nums font-bold">
                     {active.metricValue}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    {active.metricCaption}
-                  </div>
+                  <div className="text-xs opacity-70">{active.metricCaption}</div>
                 </div>
               </div>
 
-              <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+              <p className="text-sm sm:text-base opacity-85 leading-relaxed mb-6">
                 {active.description}
               </p>
 
               <ul className="space-y-3 mb-8">
                 {active.highlights.map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-start gap-2.5 text-sm text-slate-700 dark:text-slate-200"
-                  >
+                  <li key={item} className="flex items-start gap-2.5 text-sm opacity-90">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                     <span>{item}</span>
                   </li>
@@ -207,14 +288,14 @@ export default function PlatformCapabilities() {
               </ul>
             </div>
 
-            <div className="pt-5 border-t border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
+            <div className="pt-5 border-t border-slate-200/70 dark:border-white/10 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4 text-xs opacity-75">
                 <span className="inline-flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-purple-500" /> Correo IMAP + ARN
                 </span>
                 <span aria-hidden="true">·</span>
                 <span className="inline-flex items-center gap-1.5">
-                  <Route className="w-3.5 h-3.5 text-orange-500" /> Corredores OSRM
+                  <Route className="w-3.5 h-3.5" style={{ color: accentColor }} /> Corredores OSRM
                 </span>
                 <span aria-hidden="true">·</span>
                 <span className="inline-flex items-center gap-1.5">
@@ -225,13 +306,14 @@ export default function PlatformCapabilities() {
               <div className="flex flex-wrap items-center gap-3">
                 <Link
                   to={active.secondaryPath}
-                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-orange-500 transition-colors whitespace-nowrap"
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-bold hover:border-orange-500 transition-colors whitespace-nowrap"
                 >
                   {active.secondaryLabel}
                 </Link>
                 <Link
                   to={active.ctaPath}
-                  className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap"
+                  className="px-5 py-2.5 rounded-xl text-white text-xs font-bold transition-opacity hover:opacity-90 flex items-center gap-2 whitespace-nowrap"
+                  style={{ backgroundColor: accentColor }}
                 >
                   <span>{active.ctaLabel}</span>
                   <ArrowRight className="w-4 h-4" />
@@ -240,7 +322,7 @@ export default function PlatformCapabilities() {
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      )}
+    </ConfigurableSection>
   );
 }

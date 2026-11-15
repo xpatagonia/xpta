@@ -13,6 +13,8 @@ import CookieBanner from './components/CookieBanner';
 import NewsMagazine from './components/NewsMagazine';
 import {
   SiteSettings,
+  HomeSectionId,
+  applyGlobalDesignTokens,
   fetchSiteSettings,
   getCachedSiteSettings,
   SITE_SETTINGS_EVENT,
@@ -34,31 +36,57 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Insights = lazy(() => import('./pages/Insights'));
 const B2BMessenger = lazy(() => import('./pages/B2BMessenger'));
 const PublicTracking = lazy(() => import('./pages/PublicTracking'));
+const DesignStudioDrawer = lazy(() => import('./components/admin/DesignStudioDrawer'));
 
 function Home() {
   const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
 
   useEffect(() => {
-    fetchSiteSettings().then(setSettings);
+    applyGlobalDesignTokens(getCachedSiteSettings());
+    fetchSiteSettings().then((loaded) => {
+      applyGlobalDesignTokens(loaded);
+      setSettings(loaded);
+    });
     const handler = (e: Event) => {
       const custom = e as CustomEvent<SiteSettings>;
-      setSettings(custom.detail || getCachedSiteSettings());
+      const next = custom.detail || getCachedSiteSettings();
+      applyGlobalDesignTokens(next);
+      setSettings(next);
     };
     window.addEventListener(SITE_SETTINGS_EVENT, handler);
     return () => window.removeEventListener(SITE_SETTINGS_EVENT, handler);
   }, []);
 
-  const { sections } = settings;
+  const { sections, sectionOrder, sectionConfigs } = settings;
+
+  const renderSection = (sectionId: HomeSectionId) => {
+    if (!sections[sectionId]) return null;
+    const config = sectionConfigs[sectionId];
+    switch (sectionId) {
+      case 'indicators':
+        return <RegionalIndicators key={sectionId} config={config} />;
+      case 'insights':
+        return <NewsMagazine key={sectionId} config={config} />;
+      case 'ecosystem':
+        return <PlatformCapabilities key={sectionId} config={config} />;
+      case 'categories':
+        return <Categories key={sectionId} config={config} />;
+      case 'howItWorks':
+        return <HowItWorks key={sectionId} config={config} />;
+      case 'contact':
+        return <Contact key={sectionId} config={config} />;
+      default:
+        return null;
+    }
+  };
 
   return (
     <>
       <Hero />
-      {sections.indicators && <RegionalIndicators />}
-      {sections.insights && <NewsMagazine />}
-      {sections.ecosystem && <PlatformCapabilities />}
-      {sections.categories && <Categories />}
-      {sections.howItWorks && <HowItWorks />}
-      {sections.contact && <Contact />}
+      {sectionOrder.map(renderSection)}
+      <Suspense fallback={null}>
+        <DesignStudioDrawer settings={settings} />
+      </Suspense>
     </>
   );
 }

@@ -16,6 +16,12 @@ import {
   Bell,
 } from 'lucide-react';
 import WallStreetTicker from './WallStreetTicker';
+import ConfigurableSection, {
+  getSectionCardClass,
+  getSectionGridClass,
+  getSectionHeadingSizeClass,
+} from './ConfigurableSection';
+import { HomeSectionDesignConfig } from '../lib/siteSettings';
 import {
   fetchSharedMarketSnapshot,
   getInitialMarketSnapshot,
@@ -40,7 +46,7 @@ interface IndicatorCardData {
   updatedAt: string;
 }
 
-export default function RegionalIndicators() {
+export default function RegionalIndicators({ config }: { config?: HomeSectionDesignConfig }) {
   const [snapshot, setSnapshot] = useState<SharedMarketSnapshot>(() => getInitialMarketSnapshot());
   const [filter, setFilter] = useState<'all' | 'crypto-forex' | 'energy' | 'patagonia'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -271,169 +277,208 @@ export default function RegionalIndicators() {
       })
     : '';
 
+  const accentColor = config?.accentColor || '#f97316';
+  const hasDarkMedia =
+    config?.backgroundType === 'image' ||
+    config?.backgroundType === 'video' ||
+    config?.backgroundType === 'gradient';
+
+  const gridClass = getSectionGridClass(
+    config?.columnStyle,
+    'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'
+  );
+  const cardSurfaceClass = getSectionCardClass(config?.cardStyle, hasDarkMedia);
+  const isBento = config?.columnStyle === 'bento';
+
   return (
-    <section className="bg-slate-50/70 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/5 relative z-20">
-      <WallStreetTicker />
+    <ConfigurableSection
+      id="indicadores"
+      config={config}
+      noPaddingWrapper
+      defaultClassName="bg-slate-50/70 dark:bg-[#110E17] border-b border-slate-200 dark:border-white/5 relative z-20"
+      innerContainerClassName="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 pt-3 pb-6 md:pb-8 relative z-10"
+    >
+      <div className="-mx-4 sm:-mx-6 md:-mx-12 mb-3">
+        <WallStreetTicker />
+      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 pt-3 pb-6 md:pb-8">
-        {/* Alertas de Variación Calculadas */}
-        {snapshot.alerts.length > 0 && (
-          <div className="mb-4 px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#181424] border border-slate-200 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 font-bold text-orange-600 dark:text-orange-400 shrink-0">
-              <Bell className="w-3.5 h-3.5" />
-              Alertas de Mercado
-            </span>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 dark:text-slate-300 min-w-0">
-              {snapshot.alerts.map((al, idx) => (
-                <React.Fragment key={al.id}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <strong className="font-mono text-slate-900 dark:text-white">{al.symbol}</strong>
-                    <span
-                      className={`font-mono tabular-nums font-bold ${
-                        al.severity === 'up'
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : al.severity === 'down'
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-purple-600 dark:text-purple-400'
-                      }`}
-                    >
-                      {al.change}
-                    </span>
-                    <span className="text-slate-500 dark:text-slate-400 truncate max-w-[320px]">
-                      — {al.title}
-                    </span>
+      {/* Alertas de Variación Calculadas */}
+      {snapshot.alerts.length > 0 && (
+        <div className="mb-4 px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#181424] border border-slate-200 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-800 dark:text-slate-100">
+          <span
+            className="inline-flex items-center gap-1.5 font-bold shrink-0"
+            style={{ color: accentColor }}
+          >
+            <Bell className="w-3.5 h-3.5" />
+            Alertas de Mercado
+          </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 dark:text-slate-300 min-w-0">
+            {snapshot.alerts.map((al, idx) => (
+              <React.Fragment key={al.id}>
+                <span className="inline-flex items-center gap-1.5">
+                  <strong className="font-mono text-slate-900 dark:text-white">{al.symbol}</strong>
+                  <span
+                    className={`font-mono tabular-nums font-bold ${
+                      al.severity === 'up'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : al.severity === 'down'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-purple-600 dark:text-purple-400'
+                    }`}
+                  >
+                    {al.change}
                   </span>
-                  {idx < snapshot.alerts.length - 1 && (
-                    <span className="text-slate-300 dark:text-white/15 hidden sm:inline" aria-hidden="true">
-                      ·
-                    </span>
-                  )}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-200/70 dark:border-white/5 gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="p-1.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
-              <TrendingUp className="w-4 h-4" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2 text-xs">
-                <h3 className="font-bold tracking-tight text-slate-900 dark:text-slate-100">
-                  Indicadores de Contexto & Mercado
-                </h3>
-                {lastRefreshed && (
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums hidden md:inline">
-                    · Sincronizado {lastRefreshed}
+                  <span className="text-slate-500 dark:text-slate-400 truncate max-w-[320px]">
+                    — {al.title}
+                  </span>
+                </span>
+                {idx < snapshot.alerts.length - 1 && (
+                  <span className="text-slate-300 dark:text-white/15 hidden sm:inline" aria-hidden="true">
+                    ·
                   </span>
                 )}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Brent y divisas en vivo con cálculo de variación diaria más referencias sectoriales auditadas.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-            <button
-              onClick={loadData}
-              disabled={isRefreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-purple-500/40 transition-colors whitespace-nowrap"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-purple-500 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden md:inline">Actualizar</span>
-            </button>
-            <button
-              onClick={() => setShowSourcesModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-emerald-500/40 transition-colors whitespace-nowrap"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Auditar Fuentes</span>
-            </button>
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-colors whitespace-nowrap"
-            >
-              <span>{isExpanded ? 'Vista compacta' : `Ver todos (${allCards.length})`}</span>
-              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Category Filter Bar when expanded */}
-        {isExpanded && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-3 text-xs font-semibold">
-            {[
-              { id: 'all', label: `Todos (${allCards.length})` },
-              { id: 'energy', label: 'Energía & Brent' },
-              { id: 'crypto-forex', label: 'Divisas & Cripto' },
-              { id: 'patagonia', label: 'Sectores Patagónicos' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setFilter(tab.id as any)}
-                className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 ${
-                  filter === tab.id
-                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                    : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-purple-500/40'
-                }`}
-              >
-                {tab.label}
-              </button>
+              </React.Fragment>
             ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Single-Elevation Indicators Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(isExpanded ? filteredCards : primaryCards).map((card) => (
-            <div
-              key={card.id}
-              className="p-3.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#181424] flex flex-col justify-between hover:border-purple-500/40 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${card.iconBg} ${card.iconText}`}
-                  >
-                    {card.icon}
-                  </div>
-                  <div className="min-w-0">
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block truncate leading-tight">
-                      {card.metaLabel}
-                    </span>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      {card.title}
-                    </h4>
-                  </div>
-                </div>
-                <span
-                  className={`text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded shrink-0 ${
-                    card.dataMode === 'official_reference'
-                      ? 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10'
-                      : card.isPositive
-                      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
-                      : 'text-rose-700 dark:text-rose-400 bg-rose-500/10'
-                  }`}
-                >
-                  {card.change}
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-200/70 dark:border-white/10 gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="p-1.5 rounded-lg"
+            style={{ backgroundColor: `${accentColor}1A`, color: accentColor }}
+          >
+            <TrendingUp className="w-4 h-4" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2 text-xs">
+              <h3
+                className={`font-display font-bold tracking-tight ${
+                  config?.headingScale === 'editorial' ? 'text-xl sm:text-2xl' : 'text-sm sm:text-base'
+                }`}
+              >
+                {config?.titleOverride || 'Indicadores de Contexto & Mercado'}
+              </h3>
+              {lastRefreshed && (
+                <span className="text-[11px] opacity-70 font-mono tabular-nums hidden md:inline">
+                  · Sincronizado {lastRefreshed}
                 </span>
-              </div>
-
-              <div className="flex items-baseline justify-between pt-2 border-t border-slate-100 dark:border-white/5 gap-2 font-mono tabular-nums">
-                <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                  {card.value}
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[140px]">
-                  {card.subValue}
-                </span>
-              </div>
+              )}
             </div>
+            <p className="text-xs opacity-75">
+              {config?.subtitleOverride ||
+                'Brent y divisas en vivo con cálculo de variación diaria más referencias sectoriales auditadas.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-purple-500/40 transition-colors whitespace-nowrap"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-purple-500 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden md:inline">Actualizar</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowSourcesModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-[#1A1625] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:border-emerald-500/40 transition-colors whitespace-nowrap"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Auditar Fuentes</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90 whitespace-nowrap"
+            style={{ backgroundColor: accentColor }}
+          >
+            <span>{isExpanded ? 'Vista compacta' : `Ver todos (${allCards.length})`}</span>
+            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Category Filter Bar when expanded */}
+      {isExpanded && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-3 text-xs font-semibold">
+          {[
+            { id: 'all', label: `Todos (${allCards.length})` },
+            { id: 'energy', label: 'Energía & Brent' },
+            { id: 'crypto-forex', label: 'Divisas & Cripto' },
+            { id: 'patagonia', label: 'Sectores Patagónicos' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setFilter(tab.id as any)}
+              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                filter === tab.id
+                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                  : 'bg-white dark:bg-[#1A1625] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-purple-500/40'
+              }`}
+            >
+              {tab.label}
+            </button>
           ))}
         </div>
+      )}
+
+      {/* Configurable Indicators Grid */}
+      <div className={gridClass}>
+        {(isExpanded ? filteredCards : primaryCards).map((card, idx) => (
+          <div
+            key={card.id}
+            className={`p-3.5 rounded-xl flex flex-col justify-between transition-colors ${cardSurfaceClass} ${
+              isBento && idx === 0 ? 'md:col-span-4' : isBento ? 'md:col-span-2' : ''
+            }`}
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${card.iconBg} ${card.iconText}`}
+                >
+                  {card.icon}
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[11px] opacity-70 block truncate leading-tight">
+                    {card.metaLabel}
+                  </span>
+                  <h4
+                    className={`font-bold truncate ${
+                      config?.headingScale === 'editorial' ? 'text-base' : 'text-sm'
+                    }`}
+                  >
+                    {card.title}
+                  </h4>
+                </div>
+              </div>
+              <span
+                className={`text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded shrink-0 ${
+                  card.dataMode === 'official_reference'
+                    ? 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10'
+                    : card.isPositive
+                    ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+                    : 'text-rose-700 dark:text-rose-400 bg-rose-500/10'
+                }`}
+              >
+                {card.change}
+              </span>
+            </div>
+
+            <div className="flex items-baseline justify-between pt-2 border-t border-slate-100 dark:border-white/10 gap-2 font-mono tabular-nums">
+              <span className="text-sm font-bold truncate">{card.value}</span>
+              <span className="text-[11px] opacity-70 truncate max-w-[140px]">
+                {card.subValue}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Sources Modal */}
@@ -452,13 +497,16 @@ export default function RegionalIndicators() {
                   <ShieldCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold tracking-tight">Fuentes de Información y Metodología</h3>
+                  <h3 className={getSectionHeadingSizeClass('compact', 'text-lg') + ' font-bold tracking-tight'}>
+                    Fuentes de Información y Metodología
+                  </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Diferenciación transparente entre feeds en vivo y referencias sectoriales de Patagonia
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowSourcesModal(false)}
                 className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
               >
@@ -469,7 +517,7 @@ export default function RegionalIndicators() {
             <div className="space-y-4 text-xs">
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/5">
                 <div className="flex items-center justify-between font-bold text-sm mb-1 text-orange-600 dark:text-orange-400">
-                  <span>Petróleo Brent (BZ=F) & Paridad Medanito — En Vivo</span>
+                  <span>Petróleo Brent (BZ=F) &amp; Paridad Medanito — En Vivo</span>
                   <a
                     href="https://finance.yahoo.com/quote/BZ=F"
                     target="_blank"
@@ -531,8 +579,10 @@ export default function RegionalIndicators() {
 
             <div className="mt-6 flex justify-end">
               <button
+                type="button"
                 onClick={() => setShowSourcesModal(false)}
-                className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 rounded-xl text-xs font-bold text-white transition-colors"
+                className="px-6 py-2.5 rounded-xl text-xs font-bold text-white transition-opacity hover:opacity-90"
+                style={{ backgroundColor: accentColor }}
               >
                 Cerrar Auditoría
               </button>
@@ -540,6 +590,6 @@ export default function RegionalIndicators() {
           </div>
         </div>
       )}
-    </section>
+    </ConfigurableSection>
   );
 }

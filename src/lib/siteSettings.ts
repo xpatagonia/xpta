@@ -4,6 +4,124 @@ import { supabase, isSupabaseConfigured } from './supabase';
 export type HeroBackgroundType = 'gradient' | 'image' | 'video';
 export type HeroOverlayTint = 'dark' | 'purple' | 'slate';
 
+export type HomeSectionId =
+  | 'indicators'
+  | 'insights'
+  | 'ecosystem'
+  | 'categories'
+  | 'howItWorks'
+  | 'contact';
+
+export type DesignFontPreset =
+  | 'Outfit'
+  | 'Plus Jakarta Sans'
+  | 'Bricolage Grotesque'
+  | 'Barlow Condensed'
+  | 'Fraunces'
+  | 'Playfair Display'
+  | 'DM Sans'
+  | 'Manrope'
+  | 'Public Sans'
+  | 'Lora';
+
+export type SectionColumnStyle =
+  | 'auto'
+  | '1-col'
+  | '2-col'
+  | '3-col'
+  | '4-col'
+  | 'bento'
+  | 'split-left'
+  | 'split-right';
+
+export type SectionCardStyle = 'bordered' | 'elevated' | 'glass' | 'minimal';
+export type SectionBackgroundType = 'default' | 'solid' | 'gradient' | 'image' | 'video';
+export type SectionChartPreset =
+  | 'vaca_muerta_capex'
+  | 'logistics_corridors'
+  | 'directory_mix'
+  | 'custom';
+
+export interface SectionChartDataPoint {
+  label: string;
+  primary: number;
+  secondary?: number;
+}
+
+export interface SectionChartBlock {
+  enabled: boolean;
+  position: 'top' | 'bottom';
+  chartType: 'bar' | 'area' | 'line';
+  title: string;
+  subtitle: string;
+  dataPreset: SectionChartPreset;
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  accentColor?: string;
+  customSeriesJson?: string;
+}
+
+export interface SectionMediaBlock {
+  enabled: boolean;
+  position: 'top' | 'bottom' | 'split';
+  kind: 'image' | 'video';
+  url: string;
+  title: string;
+  caption: string;
+}
+
+export interface HomeSectionDesignConfig {
+  id: HomeSectionId;
+  eyebrowOverride?: string;
+  titleOverride?: string;
+  subtitleOverride?: string;
+  backgroundType: SectionBackgroundType;
+  backgroundColor: string;
+  gradientFrom: string;
+  gradientTo: string;
+  backgroundImageUrl: string;
+  backgroundVideoUrl: string;
+  overlayOpacity: number;
+  textColor: string;
+  accentColor: string;
+  headingFont: 'inherit' | DesignFontPreset;
+  bodyFont: 'inherit' | DesignFontPreset;
+  headingScale: 'compact' | 'standard' | 'editorial';
+  columnStyle: SectionColumnStyle;
+  cardStyle: SectionCardStyle;
+  paddingScale: 'compact' | 'standard' | 'spacious';
+  mediaBlock: SectionMediaBlock;
+  chartBlock: SectionChartBlock;
+}
+
+export interface MenuLinkItem {
+  id: string;
+  label: string;
+  path: string;
+  visible: boolean;
+}
+
+export interface MenuSettings {
+  variant: 'solid' | 'glass' | 'minimal';
+  sticky: boolean;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+  fontFamily: 'inherit' | DesignFontPreset;
+  ctaLabel: string;
+  ctaPath: string;
+  items: MenuLinkItem[];
+}
+
+export interface GlobalDesignTheme {
+  presetId: string;
+  displayFont: DesignFontPreset;
+  bodyFont: DesignFontPreset;
+  accentColor: string;
+  secondaryAccentColor: string;
+  borderRadius: 'sharp' | 'balanced' | 'editorial';
+}
+
 export interface HeroSlideConfig {
   id: number;
   tag: string;
@@ -52,10 +170,316 @@ export interface PricingSummarySettings {
 export interface SiteSettings {
   hero: HeroSettings;
   sections: HomeSectionsVisibility;
+  sectionOrder: HomeSectionId[];
+  sectionConfigs: Record<HomeSectionId, HomeSectionDesignConfig>;
+  menu: MenuSettings;
+  designTheme: GlobalDesignTheme;
   footer: FooterSettings;
   platform: PricingSummarySettings;
   updatedAt: string;
 }
+
+export const DISPLAY_FONT_OPTIONS: { value: DesignFontPreset; label: string; tone: string }[] = [
+  { value: 'Outfit', label: 'Outfit', tone: 'Geométrica Industrial' },
+  { value: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans', tone: 'Moderna Corporativa' },
+  { value: 'Bricolage Grotesque', label: 'Bricolage Grotesque', tone: 'Expresiva Técnica' },
+  { value: 'Barlow Condensed', label: 'Barlow Condensed', tone: 'Condensada Ingeniería' },
+  { value: 'Fraunces', label: 'Fraunces', tone: 'Editorial Austral' },
+  { value: 'Playfair Display', label: 'Playfair Display', tone: 'Editorial Institucional' },
+];
+
+export const BODY_FONT_OPTIONS: { value: DesignFontPreset; label: string; tone: string }[] = [
+  { value: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans', tone: 'Lectura Nítida' },
+  { value: 'DM Sans', label: 'DM Sans', tone: 'Minimalista SaaS' },
+  { value: 'Manrope', label: 'Manrope', tone: 'Operativa B2B' },
+  { value: 'Public Sans', label: 'Public Sans', tone: 'Institucional Clara' },
+  { value: 'Lora', label: 'Lora', tone: 'Editorial Serif' },
+];
+
+const SERIF_FONTS = new Set<string>(['Fraunces', 'Playfair Display', 'Lora']);
+
+export function resolveFontFamilyCss(
+  font: 'inherit' | DesignFontPreset | string | undefined,
+  fallbackCss = 'var(--xp-font-sans)'
+): string {
+  if (!font || font === 'inherit') return fallbackCss;
+  return SERIF_FONTS.has(font)
+    ? `"${font}", Georgia, serif`
+    : `"${font}", ui-sans-serif, system-ui, sans-serif`;
+}
+
+export const HOME_SECTION_META: Record<
+  HomeSectionId,
+  { label: string; description: string; defaultChartPreset: SectionChartPreset }
+> = {
+  indicators: {
+    label: 'Indicadores de Mercado',
+    description: 'Ticker en vivo + Brent, Medanito, divisas e indicadores patagónicos.',
+    defaultChartPreset: 'vaca_muerta_capex',
+  },
+  insights: {
+    label: 'Patagonia Insights',
+    description: 'Noticias sectoriales, reportes estratégicos y cápsulas multimedia.',
+    defaultChartPreset: 'vaca_muerta_capex',
+  },
+  ecosystem: {
+    label: 'Motores de Plataforma',
+    description: 'Showcase de ARN IA + CRM, Suite PyME por asientos y Flota Logística.',
+    defaultChartPreset: 'logistics_corridors',
+  },
+  categories: {
+    label: 'Directorio & Rubros B2B',
+    description: 'Empresas, emprendimientos, profesionales y servicios filtrables.',
+    defaultChartPreset: 'directory_mix',
+  },
+  howItWorks: {
+    label: 'Ciclo Operativo (Cómo Funciona)',
+    description: 'Flujo paso a paso de búsqueda, calificación ARN IA, RFQ y despacho.',
+    defaultChartPreset: 'logistics_corridors',
+  },
+  contact: {
+    label: 'Solicitud de Cotización (RFQ)',
+    description: 'Formulario de captura de demanda industrial conectado al Hub.',
+    defaultChartPreset: 'vaca_muerta_capex',
+  },
+};
+
+export const CHART_DATASET_PRESETS: Record<
+  Exclude<SectionChartPreset, 'custom'>,
+  {
+    title: string;
+    subtitle: string;
+    primaryLabel: string;
+    secondaryLabel: string;
+    series: SectionChartDataPoint[];
+  }
+> = {
+  vaca_muerta_capex: {
+    title: 'Demanda Industrial & Licitaciones B2B por Trimestre',
+    subtitle: 'Índice de requerimientos canalizados en Cuenca Neuquina y Golfo San Jorge (M USD eq.)',
+    primaryLabel: 'Demanda RFQ',
+    secondaryLabel: 'Contratos Adjudicados',
+    series: [
+      { label: 'Q1', primary: 42, secondary: 28 },
+      { label: 'Q2', primary: 58, secondary: 39 },
+      { label: 'Q3', primary: 71, secondary: 52 },
+      { label: 'Q4', primary: 89, secondary: 66 },
+    ],
+  },
+  logistics_corridors: {
+    title: 'Tráfico & Carga Verificada por Corredor Vial',
+    subtitle: 'Distribución mensual de despachos trazados por OSRM (toneladas eq. x100)',
+    primaryLabel: 'Carga Consolidada',
+    secondaryLabel: 'Retornos Aprovechados',
+    series: [
+      { label: 'RN 3', primary: 94, secondary: 61 },
+      { label: 'RN 22', primary: 86, secondary: 54 },
+      { label: 'RN 40', primary: 62, secondary: 38 },
+      { label: 'RN 25', primary: 48, secondary: 29 },
+    ],
+  },
+  directory_mix: {
+    title: 'Composición del Ecosistema Productivo Regional',
+    subtitle: 'Distribución de actores activos validados por vertical industrial',
+    primaryLabel: 'Activos Verificados',
+    secondaryLabel: 'Suscripción Pro/Corp',
+    series: [
+      { label: 'Oil & Gas', primary: 118, secondary: 74 },
+      { label: 'Logística', primary: 92, secondary: 63 },
+      { label: 'Metalurgia', primary: 76, secondary: 44 },
+      { label: 'Renovables', primary: 54, secondary: 36 },
+      { label: 'Pesca/Agro', primary: 68, secondary: 41 },
+    ],
+  },
+};
+
+export function parseCustomChartSeries(jsonRaw?: string): SectionChartDataPoint[] {
+  if (!jsonRaw) return CHART_DATASET_PRESETS.vaca_muerta_capex.series;
+  try {
+    const parsed = JSON.parse(jsonRaw);
+    if (!Array.isArray(parsed)) return CHART_DATASET_PRESETS.vaca_muerta_capex.series;
+    const valid = parsed
+      .slice(0, 12)
+      .map((item: any) => ({
+        label: String(item?.label || '').slice(0, 24),
+        primary: Number(item?.primary ?? item?.value ?? 0),
+        secondary: item?.secondary !== undefined ? Number(item.secondary) : undefined,
+      }))
+      .filter((d) => d.label && Number.isFinite(d.primary));
+    return valid.length > 0 ? valid : CHART_DATASET_PRESETS.vaca_muerta_capex.series;
+  } catch {
+    return CHART_DATASET_PRESETS.vaca_muerta_capex.series;
+  }
+}
+
+function makeDefaultSectionConfig(
+  id: HomeSectionId,
+  overrides?: Partial<HomeSectionDesignConfig>
+): HomeSectionDesignConfig {
+  const chartMeta = CHART_DATASET_PRESETS[HOME_SECTION_META[id].defaultChartPreset];
+  return {
+    id,
+    eyebrowOverride: '',
+    titleOverride: '',
+    subtitleOverride: '',
+    backgroundType: 'default',
+    backgroundColor: '#0D0A13',
+    gradientFrom: '#0F172A',
+    gradientTo: '#1E1B4B',
+    backgroundImageUrl: '',
+    backgroundVideoUrl: '',
+    overlayOpacity: 55,
+    textColor: '',
+    accentColor: '',
+    headingFont: 'inherit',
+    bodyFont: 'inherit',
+    headingScale: 'standard',
+    columnStyle: 'auto',
+    cardStyle: 'bordered',
+    paddingScale: 'standard',
+    mediaBlock: {
+      enabled: false,
+      position: 'top',
+      kind: 'image',
+      url: '',
+      title: '',
+      caption: '',
+    },
+    chartBlock: {
+      enabled: false,
+      position: 'bottom',
+      chartType: 'bar',
+      title: chartMeta.title,
+      subtitle: chartMeta.subtitle,
+      dataPreset: HOME_SECTION_META[id].defaultChartPreset,
+      primaryLabel: chartMeta.primaryLabel,
+      secondaryLabel: chartMeta.secondaryLabel,
+      accentColor: '#f97316',
+      customSeriesJson: JSON.stringify(chartMeta.series, null, 2),
+    },
+    ...overrides,
+  };
+}
+
+export const DEFAULT_SECTION_ORDER: HomeSectionId[] = [
+  'indicators',
+  'insights',
+  'ecosystem',
+  'categories',
+  'howItWorks',
+  'contact',
+];
+
+export const DEFAULT_MENU_ITEMS: MenuLinkItem[] = [
+  { id: 'insights', label: 'Insights', path: '/insights', visible: true },
+  { id: 'directory', label: 'Directorio B2B', path: '/servicios', visible: true },
+  { id: 'marketplace', label: 'Catálogo RFQ', path: '/marketplace', visible: true },
+  { id: 'logistics', label: 'Logística', path: '/logistica', visible: true },
+  { id: 'chat', label: 'Chat B2B', path: '/chat', visible: true },
+  { id: 'plans', label: 'Planes & CRM', path: '/planes', visible: true },
+];
+
+export interface AestheticThemePreset {
+  id: string;
+  name: string;
+  description: string;
+  displayFont: DesignFontPreset;
+  bodyFont: DesignFontPreset;
+  accentColor: string;
+  secondaryAccentColor: string;
+  borderRadius: GlobalDesignTheme['borderRadius'];
+  menuVariant: MenuSettings['variant'];
+  menuBg: string;
+  menuText: string;
+  sectionBackgrounds: Partial<Record<HomeSectionId, Partial<HomeSectionDesignConfig>>>;
+}
+
+export const AESTHETIC_THEME_PRESETS: AestheticThemePreset[] = [
+  {
+    id: 'patagonia-default',
+    name: 'Patagonia Base',
+    description: 'Contraste limpio oscuro/claro con acento naranja industrial y púrpura.',
+    displayFont: 'Outfit',
+    bodyFont: 'Plus Jakarta Sans',
+    accentColor: '#f97316',
+    secondaryAccentColor: '#9333ea',
+    borderRadius: 'balanced',
+    menuVariant: 'glass',
+    menuBg: '',
+    menuText: '',
+    sectionBackgrounds: {
+      indicators: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      insights: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      ecosystem: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      categories: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      howItWorks: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+      contact: { backgroundType: 'default', cardStyle: 'bordered', columnStyle: 'auto' },
+    },
+  },
+  {
+    id: 'vaca-muerta-industrial',
+    name: 'Ingeniería & Energía',
+    description: 'Tipografía condensada técnica, pizarras oscuras profundas y acento ámbar.',
+    displayFont: 'Barlow Condensed',
+    bodyFont: 'Public Sans',
+    accentColor: '#ea580c',
+    secondaryAccentColor: '#0284c7',
+    borderRadius: 'sharp',
+    menuVariant: 'solid',
+    menuBg: '#090D16',
+    menuText: '#F8FAFC',
+    sectionBackgrounds: {
+      indicators: { backgroundType: 'solid', backgroundColor: '#0B1120', textColor: '#F8FAFC', accentColor: '#ea580c', cardStyle: 'bordered' },
+      insights: { backgroundType: 'solid', backgroundColor: '#0F172A', textColor: '#F8FAFC', accentColor: '#0284c7', cardStyle: 'minimal' },
+      ecosystem: { backgroundType: 'gradient', gradientFrom: '#090D16', gradientTo: '#1E293B', textColor: '#F8FAFC', accentColor: '#ea580c', cardStyle: 'glass' },
+      categories: { backgroundType: 'solid', backgroundColor: '#0B1120', textColor: '#F8FAFC', accentColor: '#ea580c', cardStyle: 'bordered' },
+      howItWorks: { backgroundType: 'solid', backgroundColor: '#0F172A', textColor: '#F8FAFC', accentColor: '#0284c7', cardStyle: 'bordered' },
+      contact: { backgroundType: 'gradient', gradientFrom: '#090D16', gradientTo: '#172554', textColor: '#F8FAFC', accentColor: '#ea580c', cardStyle: 'glass' },
+    },
+  },
+  {
+    id: 'editorial-austral',
+    name: 'Editorial Austral',
+    description: 'Titulares serif de alto prestigio con respiro blanco/grafito y verde esmeralda.',
+    displayFont: 'Fraunces',
+    bodyFont: 'DM Sans',
+    accentColor: '#059669',
+    secondaryAccentColor: '#0f172a',
+    borderRadius: 'editorial',
+    menuVariant: 'minimal',
+    menuBg: '#FFFFFF',
+    menuText: '#0F172A',
+    sectionBackgrounds: {
+      indicators: { backgroundType: 'solid', backgroundColor: '#F8FAFC', textColor: '#0F172A', accentColor: '#059669', headingScale: 'editorial', cardStyle: 'minimal' },
+      insights: { backgroundType: 'solid', backgroundColor: '#FFFFFF', textColor: '#0F172A', accentColor: '#059669', headingScale: 'editorial', cardStyle: 'bordered' },
+      ecosystem: { backgroundType: 'solid', backgroundColor: '#0F172A', textColor: '#F8FAFC', accentColor: '#10b981', headingScale: 'editorial', cardStyle: 'glass' },
+      categories: { backgroundType: 'solid', backgroundColor: '#F8FAFC', textColor: '#0F172A', accentColor: '#059669', headingScale: 'editorial', cardStyle: 'elevated' },
+      howItWorks: { backgroundType: 'solid', backgroundColor: '#FFFFFF', textColor: '#0F172A', accentColor: '#059669', headingScale: 'editorial', cardStyle: 'minimal' },
+      contact: { backgroundType: 'solid', backgroundColor: '#F1F5F9', textColor: '#0F172A', accentColor: '#059669', headingScale: 'editorial', cardStyle: 'elevated' },
+    },
+  },
+  {
+    id: 'modern-b2b-tech',
+    name: 'Hub Tecnológico',
+    description: 'Bricolage Grotesque + Manrope con bloques bento y acento cobalto.',
+    displayFont: 'Bricolage Grotesque',
+    bodyFont: 'Manrope',
+    accentColor: '#2563eb',
+    secondaryAccentColor: '#f97316',
+    borderRadius: 'balanced',
+    menuVariant: 'glass',
+    menuBg: '',
+    menuText: '',
+    sectionBackgrounds: {
+      indicators: { backgroundType: 'default', accentColor: '#2563eb', cardStyle: 'elevated' },
+      insights: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: 'bento', cardStyle: 'bordered' },
+      ecosystem: { backgroundType: 'gradient', gradientFrom: '#0A0E1A', gradientTo: '#172554', textColor: '#F8FAFC', accentColor: '#3b82f6', cardStyle: 'glass' },
+      categories: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: '2-col', cardStyle: 'elevated' },
+      howItWorks: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: '4-col', cardStyle: 'bordered' },
+      contact: { backgroundType: 'default', accentColor: '#2563eb', columnStyle: 'split-left', cardStyle: 'elevated' },
+    },
+  },
+];
 
 export type ParsedHeroVideo =
   | { kind: 'youtube'; embedUrl: string }
@@ -79,7 +503,7 @@ export function parseHeroVideoSource(rawUrl: string): ParsedHeroVideo {
     };
   }
 
-  // 2. Cloudflare Stream URLs (customer-xxx.cloudflarestream.com/<id>/iframe|watch|manifest/video.m3u8 or videodelivery.net/<id>)
+  // 2. Cloudflare Stream URLs
   const cfCustomerMatch = url.match(
     /https?:\/\/(customer-[a-zA-Z0-9]+\.cloudflarestream\.com)\/([a-zA-Z0-9]{16,64})(?:\/(?:iframe|watch|manifest\/video\.m3u8|downloads\/[^\s?]+))?/i
   );
@@ -190,6 +614,34 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     ecosystem: true,
     contact: true,
   },
+  sectionOrder: [...DEFAULT_SECTION_ORDER],
+  sectionConfigs: {
+    indicators: makeDefaultSectionConfig('indicators'),
+    insights: makeDefaultSectionConfig('insights'),
+    ecosystem: makeDefaultSectionConfig('ecosystem'),
+    categories: makeDefaultSectionConfig('categories'),
+    howItWorks: makeDefaultSectionConfig('howItWorks'),
+    contact: makeDefaultSectionConfig('contact'),
+  },
+  menu: {
+    variant: 'glass',
+    sticky: true,
+    backgroundColor: '',
+    textColor: '',
+    accentColor: '#f97316',
+    fontFamily: 'inherit',
+    ctaLabel: 'Suscribir Empresa',
+    ctaPath: '/planes',
+    items: DEFAULT_MENU_ITEMS.map((item) => ({ ...item })),
+  },
+  designTheme: {
+    presetId: 'patagonia-default',
+    displayFont: 'Outfit',
+    bodyFont: 'Plus Jakarta Sans',
+    accentColor: '#f97316',
+    secondaryAccentColor: '#9333ea',
+    borderRadius: 'balanced',
+  },
   footer: {
     tagline:
       'Impulsando la innovación y agilizando las operaciones en la cadena de suministro B2B. Conectamos empresas y proveedores verificados en la Patagonia.',
@@ -208,11 +660,40 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
 
 export const SITE_SETTINGS_EVENT = 'xpatagonia:site-settings-updated';
 
-// In-memory session mirror only (never persisted to localStorage across devices)
 let activeSessionSettings: SiteSettings | null = null;
 
-function mergeSettings(partial?: Partial<SiteSettings> | null): SiteSettings {
+function mergeSectionConfig(
+  id: HomeSectionId,
+  incoming?: Partial<HomeSectionDesignConfig>
+): HomeSectionDesignConfig {
+  const base = DEFAULT_SITE_SETTINGS.sectionConfigs[id];
+  if (!incoming) return base;
+  return {
+    ...base,
+    ...incoming,
+    id,
+    mediaBlock: {
+      ...base.mediaBlock,
+      ...(incoming.mediaBlock || {}),
+    },
+    chartBlock: {
+      ...base.chartBlock,
+      ...(incoming.chartBlock || {}),
+    },
+  };
+}
+
+export function mergeSettings(partial?: Partial<SiteSettings> | null): SiteSettings {
   if (!partial) return DEFAULT_SITE_SETTINGS;
+
+  const incomingOrder = Array.isArray(partial.sectionOrder)
+    ? partial.sectionOrder.filter((id): id is HomeSectionId => DEFAULT_SECTION_ORDER.includes(id))
+    : [];
+  const mergedOrder = [...incomingOrder];
+  for (const id of DEFAULT_SECTION_ORDER) {
+    if (!mergedOrder.includes(id)) mergedOrder.push(id);
+  }
+
   return {
     hero: {
       ...DEFAULT_SITE_SETTINGS.hero,
@@ -226,6 +707,27 @@ function mergeSettings(partial?: Partial<SiteSettings> | null): SiteSettings {
       ...DEFAULT_SITE_SETTINGS.sections,
       ...(partial.sections || {}),
     },
+    sectionOrder: mergedOrder,
+    sectionConfigs: {
+      indicators: mergeSectionConfig('indicators', partial.sectionConfigs?.indicators),
+      insights: mergeSectionConfig('insights', partial.sectionConfigs?.insights),
+      ecosystem: mergeSectionConfig('ecosystem', partial.sectionConfigs?.ecosystem),
+      categories: mergeSectionConfig('categories', partial.sectionConfigs?.categories),
+      howItWorks: mergeSectionConfig('howItWorks', partial.sectionConfigs?.howItWorks),
+      contact: mergeSectionConfig('contact', partial.sectionConfigs?.contact),
+    },
+    menu: {
+      ...DEFAULT_SITE_SETTINGS.menu,
+      ...(partial.menu || {}),
+      items:
+        Array.isArray(partial.menu?.items) && partial.menu.items.length > 0
+          ? partial.menu.items
+          : DEFAULT_SITE_SETTINGS.menu.items.map((item) => ({ ...item })),
+    },
+    designTheme: {
+      ...DEFAULT_SITE_SETTINGS.designTheme,
+      ...(partial.designTheme || {}),
+    },
     footer: {
       ...DEFAULT_SITE_SETTINGS.footer,
       ...(partial.footer || {}),
@@ -238,8 +740,66 @@ function mergeSettings(partial?: Partial<SiteSettings> | null): SiteSettings {
   };
 }
 
+export function applyGlobalDesignTokens(settings: SiteSettings): void {
+  if (typeof document === 'undefined') return;
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty(
+    '--xp-font-display',
+    resolveFontFamilyCss(settings.designTheme.displayFont, '"Outfit", ui-sans-serif, system-ui, sans-serif')
+  );
+  rootStyle.setProperty(
+    '--xp-font-sans',
+    resolveFontFamilyCss(settings.designTheme.bodyFont, '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif')
+  );
+  if (settings.designTheme.accentColor) {
+    rootStyle.setProperty('--xp-accent', settings.designTheme.accentColor);
+  }
+  if (settings.designTheme.secondaryAccentColor) {
+    rootStyle.setProperty('--xp-accent-secondary', settings.designTheme.secondaryAccentColor);
+  }
+}
+
+export function applyThemePresetToSettings(
+  current: SiteSettings,
+  presetId: string
+): SiteSettings {
+  const preset = AESTHETIC_THEME_PRESETS.find((p) => p.id === presetId);
+  if (!preset) return current;
+
+  const nextConfigs = { ...current.sectionConfigs };
+  for (const id of DEFAULT_SECTION_ORDER) {
+    const patch = preset.sectionBackgrounds[id];
+    if (patch) {
+      nextConfigs[id] = mergeSectionConfig(id, {
+        ...nextConfigs[id],
+        ...patch,
+      });
+    }
+  }
+
+  return mergeSettings({
+    ...current,
+    designTheme: {
+      ...current.designTheme,
+      presetId: preset.id,
+      displayFont: preset.displayFont,
+      bodyFont: preset.bodyFont,
+      accentColor: preset.accentColor,
+      secondaryAccentColor: preset.secondaryAccentColor,
+      borderRadius: preset.borderRadius,
+    },
+    menu: {
+      ...current.menu,
+      variant: preset.menuVariant,
+      backgroundColor: preset.menuBg,
+      textColor: preset.menuText,
+      accentColor: preset.accentColor,
+    },
+    sectionConfigs: nextConfigs,
+  });
+}
+
 export function getCachedSiteSettings(): SiteSettings {
-  // Clean up any legacy localStorage override from earlier builds so all devices reflect DB truth
   if (typeof window !== 'undefined') {
     try {
       localStorage.removeItem('xpatagonia_site_settings_v1');
@@ -253,6 +813,7 @@ export function getCachedSiteSettings(): SiteSettings {
 export function publishSessionSiteSettings(settings: SiteSettings): SiteSettings {
   const merged = mergeSettings(settings);
   activeSessionSettings = merged;
+  applyGlobalDesignTokens(merged);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(SITE_SETTINGS_EVENT, { detail: merged }));
   }
@@ -260,7 +821,6 @@ export function publishSessionSiteSettings(settings: SiteSettings): SiteSettings
 }
 
 export async function fetchSiteSettings(): Promise<SiteSettings> {
-  // 1. Primary authoritative read: Production API (/api/site-settings -> Postgres / Supabase)
   try {
     const res = await fetch(`${getApiUrl()}/api/site-settings?_t=${Date.now()}`, {
       cache: 'no-store',
@@ -277,7 +837,6 @@ export async function fetchSiteSettings(): Promise<SiteSettings> {
     // Try direct Supabase public read fallback
   }
 
-  // 2. Secondary authoritative read: Supabase public read policy on site_settings
   if (isSupabaseConfigured) {
     try {
       const { data } = await supabase

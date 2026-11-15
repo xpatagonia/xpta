@@ -2,11 +2,16 @@ import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_SITE_SETTINGS,
+  DEFAULT_SECTION_ORDER,
   parseHeroVideoSource,
   getCachedSiteSettings,
   publishSessionSiteSettings,
   fetchSiteSettings,
   persistSiteSettings,
+  mergeSettings,
+  applyThemePresetToSettings,
+  parseCustomChartSeries,
+  resolveFontFamilyCss,
 } from '../src/lib/siteSettings.ts';
 import { sanitizeApiBaseUrl } from '../src/lib/apiConfig.ts';
 
@@ -154,4 +159,65 @@ test('sanitizeApiBaseUrl rejects legacy onrender.com URLs and localhost on HTTPS
   assert.equal(sanitizeApiBaseUrl('https://api.xpatagonia.online/'), 'https://api.xpatagonia.online');
   (globalThis as any).window = { location: { protocol: 'https:' } };
   assert.equal(sanitizeApiBaseUrl('http://localhost:3000'), '');
+});
+
+test('mergeSettings hydrates legacy partial configs with menu, designTheme, sectionOrder, and sectionConfigs', () => {
+  const hydrated = mergeSettings({
+    hero: { ...DEFAULT_SITE_SETTINGS.hero, rotationSeconds: 9 },
+    sectionOrder: ['categories', 'indicators'] as any,
+    sectionConfigs: {
+      indicators: {
+        ...DEFAULT_SITE_SETTINGS.sectionConfigs.indicators,
+        columnStyle: '2-col',
+      },
+    } as any,
+  });
+
+  assert.equal(hydrated.hero.rotationSeconds, 9);
+  assert.equal(hydrated.sectionOrder[0], 'categories');
+  assert.equal(hydrated.sectionOrder[1], 'indicators');
+  assert.equal(hydrated.sectionOrder.length, DEFAULT_SECTION_ORDER.length);
+  for (const id of DEFAULT_SECTION_ORDER) {
+    assert.ok(hydrated.sectionOrder.includes(id));
+    assert.ok(hydrated.sectionConfigs[id]);
+  }
+  assert.equal(hydrated.sectionConfigs.indicators.columnStyle, '2-col');
+  assert.ok(hydrated.menu.items.length > 0);
+  assert.equal(hydrated.designTheme.displayFont, 'Outfit');
+});
+
+test('applyThemePresetToSettings updates global typography, menu styling, and section aesthetics', () => {
+  const themed = applyThemePresetToSettings(DEFAULT_SITE_SETTINGS, 'editorial-austral');
+  assert.equal(themed.designTheme.presetId, 'editorial-austral');
+  assert.equal(themed.designTheme.displayFont, 'Fraunces');
+  assert.equal(themed.designTheme.bodyFont, 'DM Sans');
+  assert.equal(themed.menu.variant, 'minimal');
+  assert.equal(themed.sectionConfigs.insights.headingScale, 'editorial');
+  assert.equal(themed.sectionConfigs.insights.backgroundType, 'solid');
+
+  const unchanged = applyThemePresetToSettings(DEFAULT_SITE_SETTINGS, 'non-existent-preset');
+  assert.equal(unchanged.designTheme.presetId, DEFAULT_SITE_SETTINGS.designTheme.presetId);
+});
+
+test('parseCustomChartSeries parses valid JSON arrays and safely falls back on invalid inputs', () => {
+  const custom = parseCustomChartSeries(
+    JSON.stringify([
+      { label: 'Neuquén', primary: 120, secondary: 85 },
+      { label: 'Chubut', primary: 95, secondary: 60 },
+    ])
+  );
+  assert.equal(custom.length, 2);
+  assert.deepEqual(custom[0], { label: 'Neuquén', primary: 120, secondary: 85 });
+
+  const fallbackInvalidJson = parseCustomChartSeries('{not-valid-json');
+  assert.ok(fallbackInvalidJson.length >= 3);
+
+  const fallbackEmptyArray = parseCustomChartSeries('[]');
+  assert.ok(fallbackEmptyArray.length >= 3);
+});
+
+test('resolveFontFamilyCss distinguishes serif vs sans font stacks and honors inherit', () => {
+  assert.equal(resolveFontFamilyCss('inherit', 'var(--xp-font-sans)'), 'var(--xp-font-sans)');
+  assert.match(resolveFontFamilyCss('Fraunces'), /"Fraunces", Georgia, serif/);
+  assert.match(resolveFontFamilyCss('Outfit'), /"Outfit", ui-sans-serif/);
 });
