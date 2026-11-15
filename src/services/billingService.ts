@@ -17,6 +17,12 @@ export interface BillingCatalogItem {
 }
 
 export const BILLING_CATALOG: Record<string, BillingCatalogItem> = {
+  autonomo: {
+    targetType: "plan",
+    slug: "autonomo",
+    title: SAAS_PLANS.autonomo.displayName,
+    amountArs: SAAS_PLANS.autonomo.priceMonthlyArs,
+  },
   pro: {
     targetType: "plan",
     slug: "pro",

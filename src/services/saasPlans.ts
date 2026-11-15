@@ -1,4 +1,4 @@
-export type PymePlanSlug = "gratis" | "pro" | "corporativo";
+export type PymePlanSlug = "gratis" | "autonomo" | "pro" | "corporativo";
 
 export type SaasModuleSlug =
   | "logistica_flota"
@@ -41,6 +41,15 @@ export const SAAS_PLANS: Record<PymePlanSlug, SaasPlanConfig> = {
     priceLabel: "Gratis (hasta 2 usuarios)",
     tier: 1,
   },
+  autonomo: {
+    slug: "autonomo",
+    membershipLabel: "Autónomo",
+    displayName: "Plan Autónomos & Profesionales",
+    seatLimit: 1,
+    priceMonthlyArs: 24900,
+    priceLabel: "$24.900 ARS/mes",
+    tier: 2,
+  },
   pro: {
     slug: "pro",
     membershipLabel: "Pro Industria",
@@ -74,12 +83,14 @@ export const PLAN_RESOURCE_LIMITS: Record<
   { maxProducts: number; maxRfqsMonthly: number; aiAccessLevel: "standard" | "advanced" | "predictive" }
 > = {
   gratis: { maxProducts: 10, maxRfqsMonthly: 3, aiAccessLevel: "standard" },
+  autonomo: { maxProducts: 25, maxRfqsMonthly: 10, aiAccessLevel: "standard" },
   pro: { maxProducts: 100, maxRfqsMonthly: 25, aiAccessLevel: "advanced" },
   corporativo: { maxProducts: 999999, maxRfqsMonthly: 999999, aiAccessLevel: "predictive" },
 };
 
 export const INCLUDED_MODULES_BY_PLAN: Record<PymePlanSlug, SaasModuleSlug[]> = {
   gratis: ["chat_b2b"],
+  autonomo: ["chat_b2b"],
   pro: ["ecommerce_b2b", "chat_b2b"],
   corporativo: ["warehousing", "kyb_compliance", "erp_sync", "ecommerce_b2b", "chat_b2b"],
 };
@@ -177,12 +188,12 @@ export const SAAS_MODULES: Record<SaasModuleSlug, SaasModuleConfig> = {
     shortName: "Chat B2B",
     priceMonthlyArs: 19900,
     priceLabel: "$19.900 ARS/mes",
-    includedInPlans: ["gratis", "pro", "corporativo"],
+    includedInPlans: ["gratis", "autonomo", "pro", "corporativo"],
     routePath: "/chat",
     description:
       "Comunicación directa entre empresas registradas en Zona de Miembros con tarjetas de licitación RFQ vinculadas y salas sectoriales.",
     highlights: [
-      "Exclusivo para empresas registradas (oculto al público)",
+      "Exclusivo para empresas y profesionales registrados (oculto al público)",
       "Hilos persistentes por corredor, logística y compras",
       "Salas privadas y videollamadas para miembros verificados",
     ],
@@ -206,6 +217,15 @@ export function resolvePlanConfig(input?: string | null): SaasPlanConfig {
     normalized.includes("corporativo")
   ) {
     return SAAS_PLANS.corporativo;
+  }
+  if (
+    normalized === "autonomo" ||
+    normalized === "autónomo" ||
+    normalized === "independiente" ||
+    normalized.includes("autonom") ||
+    normalized.includes("autónom")
+  ) {
+    return SAAS_PLANS.autonomo;
   }
   if (
     normalized === "pro" ||

@@ -8,6 +8,7 @@ import {  collection, getDocs, updateDoc, doc, query, orderBy, setDoc, getDoc, a
 import ReactMarkdown from 'react-markdown';
 import AdminSiteEditor from '../components/admin/AdminSiteEditor';
 import AdminAutomationPanel from '../components/admin/AdminAutomationPanel';
+import AdminCompanyServicesTable from '../components/admin/AdminCompanyServicesTable';
 
 type AdminTab = 'empresas' | 'solicitudes' | 'pagos' | 'insights' | 'membresias' | 'sitio' | 'odoo';
 
@@ -20,6 +21,7 @@ export default function AdminDashboard() {
       : 'sitio';
 
   const [activeTab, setActiveTab] = useState<AdminTab>(resolvedInitialTab);
+  const [empresasSubTab, setEmpresasSubTab] = useState<'control_table' | 'users_rbac'>('control_table');
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
@@ -697,78 +699,107 @@ export default function AdminDashboard() {
 
             {activeTab === 'empresas' && (
               <div className="space-y-6">
-                <div className="flex justify-between items-center bg-white dark:bg-[#1A1625] p-6 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Directorio de Empresas y Usuarios</h2>
-                    <p className="text-sm text-slate-500">Gestiona roles, membresías y accesos de los clientes y equipo interno.</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#1A1625] p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEmpresasSubTab('control_table')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+                        empresasSubTab === 'control_table'
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      Tabla de Control: Empresas, Servicios &amp; Precios
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEmpresasSubTab('users_rbac')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+                        empresasSubTab === 'users_rbac'
+                          ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                          : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      Usuarios &amp; Accesos RBAC ({empresas.length})
+                    </button>
                   </div>
-                  <button onClick={() => setIsCreateUserModalOpen(true)} className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-orange-500/20">
+
+                  <button
+                    onClick={() => setIsCreateUserModalOpen(true)}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-2 self-start sm:self-auto"
+                  >
                     <Plus className="w-4 h-4" /> Crear Usuario Interno
                   </button>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {empresas.map((emp) => (
-                    <div key={emp.id} className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden group flex flex-col">
-                      <div className="flex items-center gap-4 mb-4">
-                        <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
-                          <Building2 className="w-6 h-6 text-slate-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{emp.companyName || 'Usuario sin empresa'}</h3>
-                          <p className="text-xs text-slate-500 truncate max-w-[180px]">{emp.email || emp.id}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex-1">
-                        {emp.category && (
-                          <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-400 rounded-md text-[10px] font-bold uppercase tracking-wider mb-2">
-                            {emp.category}
-                          </span>
-                        )}
-                        <p className="text-sm text-slate-600 dark:text-slate-400">{emp.city ? `${emp.city}, ` : ''}{emp.province}</p>
-                      </div>
-                      
-                      <div className="space-y-3 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Rol en el Sistema</label>
-                          <select 
-                            value={emp.roleName || 'vendor'}
-                            onChange={(e) => handleUpdateRole(emp.id, e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors"
-                          >
-                            <option value="vendor">Vendor</option>
-                            <option value="buyer">Buyer</option>
-                            <option value="company_admin">Company Admin</option>
-                            <option value="system_admin">System Admin</option>
-                            <option value="content_editor">Editor de Contenidos</option>
-                            <option value="support_operator">Soporte y Operaciones</option>
-                          </select>
+
+                {empresasSubTab === 'control_table' ? (
+                  <AdminCompanyServicesTable onNotify={notifyAdmin} />
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {empresas.map((emp) => (
+                      <div key={emp.id} className="bg-white dark:bg-[#1A1625] rounded-2xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden group flex flex-col">
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
+                            <Building2 className="w-6 h-6 text-slate-400" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{emp.companyName || 'Usuario sin empresa'}</h3>
+                            <p className="text-xs text-slate-500 truncate max-w-[180px]">{emp.email || emp.id}</p>
+                          </div>
                         </div>
                         
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Membresía Activa</label>
-                          {['system_admin', 'content_editor', 'support_operator'].includes(emp.roleName) ? (
-                            <div className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-bold text-slate-500 dark:text-slate-400">
-                              Interno (N/A)
-                            </div>
-                          ) : (
-                            <select 
-                              value={emp.membershipName || 'Basic'}
-                              onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
-                              className="w-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
-                            >
-                              <option value="Basic">Basic (Gratis)</option>
-                              <option value="Premium">Premium</option>
-                              <option value="Enterprise">Enterprise</option>
-                            </select>
+                        <div className="flex-1">
+                          {emp.category && (
+                            <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-400 rounded-md text-[10px] font-bold uppercase tracking-wider mb-2">
+                              {emp.category}
+                            </span>
                           )}
+                          <p className="text-sm text-slate-600 dark:text-slate-400">{emp.city ? `${emp.city}, ` : ''}{emp.province}</p>
+                        </div>
+                        
+                        <div className="space-y-3 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Rol en el Sistema</label>
+                            <select 
+                              value={emp.roleName || 'vendor'}
+                              onChange={(e) => handleUpdateRole(emp.id, e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 dark:text-white outline-none focus:border-orange-500 transition-colors"
+                            >
+                              <option value="vendor">Vendor</option>
+                              <option value="buyer">Buyer</option>
+                              <option value="company_admin">Company Admin</option>
+                              <option value="system_admin">System Admin</option>
+                              <option value="content_editor">Editor de Contenidos</option>
+                              <option value="support_operator">Soporte y Operaciones</option>
+                            </select>
+                          </div>
+                          
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Membresía Activa</label>
+                            {['system_admin', 'content_editor', 'support_operator'].includes(emp.roleName) ? (
+                              <div className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-bold text-slate-500 dark:text-slate-400">
+                                Interno (N/A)
+                              </div>
+                            ) : (
+                              <select 
+                                value={emp.membershipName || 'Basic'}
+                                onChange={(e) => handleUpdateMembership(emp.id, e.target.value)}
+                                className="w-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
+                              >
+                                <option value="Basic">Basic (Gratis)</option>
+                                <option value="Autonomo">Autónomo ($24.900)</option>
+                                <option value="Premium">Pro Industria</option>
+                                <option value="Enterprise">Corporativo</option>
+                              </select>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  {empresas.length === 0 && <p className="text-slate-500 text-sm col-span-full">No hay usuarios registrados.</p>}
-                </div>
+                    ))}
+                    {empresas.length === 0 && <p className="text-slate-500 text-sm col-span-full">No hay usuarios registrados.</p>}
+                  </div>
+                )}
               </div>
             )}
             

@@ -19,6 +19,7 @@ import { eq, desc } from "drizzle-orm";
 import { registerArnAndModuleRoutes, runArnPipelineForEvent } from "./arnRoutes.ts";
 import { registerWorkerAndWebhookRoutes } from "./workerAndWebhookRoutes.ts";
 import { registerBillingAndKybRoutes } from "./billingAndKybRoutes.ts";
+import { registerDirectoryControlRoutes } from "./directoryControlRoutes.ts";
 import { resolveTenantContext, ensureModuleAccess } from "./saasAndFleetRoutes.ts";
 import { resolveEffectiveModules, buildEntitlementsMap } from "../services/saasPlans.ts";
 import { computeNextRetryDate } from "../services/vpsWorkerService.ts";
@@ -1697,6 +1698,7 @@ Devuelve ÚNICAMENTE un array JSON válido de 3 strings, sin markdown.`;
   registerArnAndModuleRoutes(app, recordAutomationEvent);
   registerWorkerAndWebhookRoutes(app);
   registerBillingAndKybRoutes(app, recordAutomationEvent);
+  registerDirectoryControlRoutes(app);
 
   return { app, runAutoInsight };
 }

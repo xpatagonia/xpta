@@ -46,6 +46,7 @@ export const companyProfiles = pgTable('company_profiles', {
   entityType: text('entity_type').default('empresa'),
   credentialLabel: text('credential_label'),
   serviceModality: text('service_modality'),
+  priceDisplayMode: text('price_display_mode').default('net'),
 
   // Verificación Fiscal & Crediticia KYB (ARCA + BCRA)
   fiscalCondition: text('fiscal_condition'),
@@ -59,6 +60,22 @@ export const companyProfiles = pgTable('company_profiles', {
   networkingTags: jsonb('networking_tags').default('[]'), // AI extracted interests/capabilities for smart B2B matchmaking
   sustainabilityIndex: text('sustainability_index'), // ESG categorization, e.g., 'Eco-Level 1'
 
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const companyServiceItems = pgTable('company_service_items', {
+  id: serial('id').primaryKey(),
+  companyKey: text('company_key').notNull(),
+  organizationId: integer('organization_id'),
+  serviceName: text('service_name').notNull(),
+  category: text('category').default('Servicios'),
+  unitLabel: text('unit_label').default('Servicio'),
+  currency: text('currency').notNull().default('ARS'),
+  netPriceCents: integer('net_price_cents').notNull().default(0),
+  taxRateBps: integer('tax_rate_bps').notNull().default(2100),
+  taxDisplayMode: text('tax_display_mode').notNull().default('net'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

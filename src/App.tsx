@@ -11,6 +11,7 @@ import Footer from './components/Footer';
 import BackToTop from './components/BackToTop';
 import CookieBanner from './components/CookieBanner';
 import NewsMagazine from './components/NewsMagazine';
+import OfflineIndicator from './components/OfflineIndicator';
 import {
   SiteSettings,
   HomeSectionId,
@@ -104,6 +105,7 @@ export default function App() {
   return (
     <Router>
       <div className="min-h-screen text-slate-800 dark:text-slate-100 bg-white dark:bg-[#110E17] font-sans selection:bg-purple-500 selection:text-white flex flex-col">
+        <OfflineIndicator />
         <Navbar />
         <main className="flex-1">
           <Suspense fallback={<RouteFallback />}>

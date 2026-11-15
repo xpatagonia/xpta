@@ -86,7 +86,13 @@ export async function updateUserRole(uid: string, roleName: string) {
 export async function updateUserMembership(uid: string, membershipName: string) {
   let memRes = await db.select().from(memberships).where(eq(memberships.name, membershipName));
   if (memRes.length === 0) {
-    const tier = membershipName === 'Premium' ? 2 : membershipName === 'Enterprise' ? 3 : 1;
+    const lower = membershipName.toLowerCase();
+    const tier =
+      lower.includes('enterprise') || lower.includes('corporat')
+        ? 3
+        : lower.includes('premium') || lower.includes('pro') || lower.includes('autonom')
+        ? 2
+        : 1;
     memRes = await db.insert(memberships).values({ name: membershipName, tier, price: 0, maxProducts: 10, maxRfqsMonthly: 3, aiAccessLevel: 'standard' }).returning();
   }
   const memId = memRes[0].id;

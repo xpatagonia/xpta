@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock, Truck, Users, FileCheck } from 'lucide-react';
+import { Check, X, Shield, Zap, Crown, CreditCard, Database, Lock, Unlock, Truck, Users, FileCheck, GraduationCap } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { auth } from '../lib/db';
 import { SiteSettings, fetchSiteSettings, getCachedSiteSettings, SITE_SETTINGS_EVENT } from '../lib/siteSettings';
@@ -34,6 +34,32 @@ const tiers = [
     popular: false,
     icon: Shield,
     color: 'text-slate-500',
+    bg: 'bg-white dark:bg-[#1A1625]',
+  },
+  {
+    name: 'Autónomos & Profesionales',
+    id: 'tier-autonomo',
+    slug: 'autonomo',
+    audienceMeta: '1 Asiento · No Empresa',
+    priceMonthly: '$24.900',
+    currency: 'ARS',
+    billingPeriod: '/mes',
+    description: 'Para técnicos, ingenieros, matriculados y prestadores independientes sin estructura societaria.',
+    features: [
+      '1 usuario titular con insignia Profesional / Matrícula',
+      'Posicionamiento prioritario sobre cuentas gratuitas',
+      'Hasta 10 respuestas a Licitaciones (RFQs) por mes',
+      'Chat B2B (Patagonia Link) + carga de hasta 25 servicios',
+      'Descargas móviles de contactos (.vcf, .gpx y PDF)',
+    ],
+    notIncluded: [
+      'Invitación de múltiples asientos de equipo',
+      'Conector Odoo ERP / Warehousing WMS',
+    ],
+    cta: 'Activar Plan Autónomo (1 Usuario)',
+    popular: false,
+    icon: GraduationCap,
+    color: 'text-emerald-500',
     bg: 'bg-white dark:bg-[#1A1625]',
   },
   {
@@ -189,7 +215,7 @@ export default function Pricing() {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 max-w-7xl mx-auto">
           {tiers.map((tier, index) => {
             const Icon = tier.icon;
             const resolvedPrice = dynamicPrices[tier.id] || tier.priceMonthly;

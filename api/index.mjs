@@ -18,6 +18,7 @@ __export(schema_exports, {
   billingTransactions: () => billingTransactions,
   chatMessages: () => chatMessages,
   companyProfiles: () => companyProfiles,
+  companyServiceItems: () => companyServiceItems,
   contacts: () => contacts,
   fleetDrivers: () => fleetDrivers,
   fleetExpiryAlerts: () => fleetExpiryAlerts,
@@ -43,7 +44,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
-var users, companyProfiles, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, processedEmailUids, fleetExpiryAlerts, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts, billingTransactions, rfqQuotes;
+var users, companyProfiles, companyServiceItems, products, rfqs, contacts, insights, inventoryItems, moduleRequests, roles, permissions, rolePermissions, userRoles, memberships, userMemberships, organizations, orgMembers, orgInvitations, siteSettings, automationLogs, processedEmailUids, fleetExpiryAlerts, arnRules, arnOpportunities, arnActionsQueue, chatMessages, fleetVehicles, fleetDrivers, logisticsContracts, billingTransactions, rfqQuotes;
 var init_schema = __esm({
   "src/db/schema.ts"() {
     users = pgTable("users", {
@@ -89,6 +90,7 @@ var init_schema = __esm({
       entityType: text("entity_type").default("empresa"),
       credentialLabel: text("credential_label"),
       serviceModality: text("service_modality"),
+      priceDisplayMode: text("price_display_mode").default("net"),
       // Verificación Fiscal & Crediticia KYB (ARCA + BCRA)
       fiscalCondition: text("fiscal_condition"),
       arcaClaeCodes: jsonb("arca_clae_codes").default("[]"),
@@ -103,6 +105,21 @@ var init_schema = __esm({
       // AI extracted interests/capabilities for smart B2B matchmaking
       sustainabilityIndex: text("sustainability_index"),
       // ESG categorization, e.g., 'Eco-Level 1'
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    companyServiceItems = pgTable("company_service_items", {
+      id: serial("id").primaryKey(),
+      companyKey: text("company_key").notNull(),
+      organizationId: integer("organization_id"),
+      serviceName: text("service_name").notNull(),
+      category: text("category").default("Servicios"),
+      unitLabel: text("unit_label").default("Servicio"),
+      currency: text("currency").notNull().default("ARS"),
+      netPriceCents: integer("net_price_cents").notNull().default(0),
+      taxRateBps: integer("tax_rate_bps").notNull().default(2100),
+      taxDisplayMode: text("tax_display_mode").notNull().default("net"),
+      active: boolean("active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
       updatedAt: timestamp("updated_at").defaultNow()
     });
     products = pgTable("products", {
@@ -747,7 +764,8 @@ async function updateUserRole(uid, roleName) {
 async function updateUserMembership(uid, membershipName) {
   let memRes = await db.select().from(memberships).where(eq(memberships.name, membershipName));
   if (memRes.length === 0) {
-    const tier = membershipName === "Premium" ? 2 : membershipName === "Enterprise" ? 3 : 1;
+    const lower = membershipName.toLowerCase();
+    const tier = lower.includes("enterprise") || lower.includes("corporat") ? 3 : lower.includes("premium") || lower.includes("pro") || lower.includes("autonom") ? 2 : 1;
     memRes = await db.insert(memberships).values({ name: membershipName, tier, price: 0, maxProducts: 10, maxRfqsMonthly: 3, aiAccessLevel: "standard" }).returning();
   }
   const memId = memRes[0].id;
@@ -1234,6 +1252,11 @@ async function ensureProductionTables() {
         ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
       ALTER TABLE IF EXISTS public.company_profiles
+        ADD COLUMN IF NOT EXISTS company_key text,
+        ADD COLUMN IF NOT EXISTS corridor text,
+        ADD COLUMN IF NOT EXISTS base_lat double precision,
+        ADD COLUMN IF NOT EXISTS base_lng double precision,
+        ADD COLUMN IF NOT EXISTS price_display_mode text DEFAULT 'net',
         ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
         ADD COLUMN IF NOT EXISTS credential_label text,
         ADD COLUMN IF NOT EXISTS service_modality text,
@@ -1241,6 +1264,42 @@ async function ensureProductionTables() {
         ADD COLUMN IF NOT EXISTS arca_clae_codes jsonb DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS bcra_situation text,
         ADD COLUMN IF NOT EXISTS arca_verified_at timestamptz;
+
+      CREATE TABLE IF NOT EXISTS public.company_admin_overrides (
+        company_key text PRIMARY KEY,
+        name text,
+        entity_type text,
+        tier text,
+        category text,
+        province text,
+        city text,
+        corridor text,
+        service_modality text,
+        credential_label text,
+        verified boolean,
+        lat double precision,
+        lng double precision,
+        price_display_mode text NOT NULL DEFAULT 'net',
+        default_tax_rate_bps integer NOT NULL DEFAULT 2100,
+        active boolean NOT NULL DEFAULT true,
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.company_service_items (
+        id serial PRIMARY KEY,
+        company_key text NOT NULL,
+        organization_id integer,
+        service_name text NOT NULL,
+        category text DEFAULT 'Servicios',
+        unit_label text DEFAULT 'Servicio',
+        currency text NOT NULL DEFAULT 'ARS',
+        net_price_cents bigint NOT NULL DEFAULT 0,
+        tax_rate_bps integer NOT NULL DEFAULT 2100,
+        tax_display_mode text NOT NULL DEFAULT 'net',
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
 
       CREATE TABLE IF NOT EXISTS public.billing_transactions (
         id serial PRIMARY KEY,
@@ -1295,6 +1354,8 @@ async function ensureProductionTables() {
       ALTER TABLE IF EXISTS public.billing_transactions ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.rfq_quotes ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.company_profiles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_admin_overrides ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_service_items ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.rfqs ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.user_roles ENABLE ROW LEVEL SECURITY;
@@ -1804,12 +1865,35 @@ function sortCompaniesBySubscriptionTier(items) {
     return (a.name || "").localeCompare(b.name || "");
   });
 }
-var B2B_COMPANIES;
+var TIER_CONFIG, B2B_COMPANIES;
 var init_b2bDirectoryData = __esm({
   "src/lib/b2bDirectoryData.ts"() {
     init_db2();
     init_apiConfig();
     init_patagoniaRouting();
+    TIER_CONFIG = {
+      corporativo: {
+        label: "Plan Corporativo",
+        priority: 1,
+        badgeBg: "bg-purple-500/15 border-purple-500/30",
+        badgeText: "text-purple-600 dark:text-purple-300",
+        borderAccent: "border-purple-500/40 dark:border-purple-500/30"
+      },
+      pro: {
+        label: "Plan Pro Industrial",
+        priority: 2,
+        badgeBg: "bg-orange-500/15 border-orange-500/30",
+        badgeText: "text-orange-600 dark:text-orange-400",
+        borderAccent: "border-orange-500/35 dark:border-orange-500/25"
+      },
+      inicial: {
+        label: "Plan Inicial",
+        priority: 3,
+        badgeBg: "bg-slate-200/70 dark:bg-white/10 border-slate-300 dark:border-white/10",
+        badgeText: "text-slate-600 dark:text-slate-400",
+        borderAccent: "border-slate-200 dark:border-white/10"
+      }
+    };
     B2B_COMPANIES = [
       {
         id: "comp-petrosur",
@@ -2363,6 +2447,9 @@ function resolvePlanConfig(input) {
   if (normalized === "corporativo" || normalized === "enterprise" || normalized.includes("corporativo")) {
     return SAAS_PLANS.corporativo;
   }
+  if (normalized === "autonomo" || normalized === "aut\xF3nomo" || normalized === "independiente" || normalized.includes("autonom") || normalized.includes("aut\xF3nom")) {
+    return SAAS_PLANS.autonomo;
+  }
   if (normalized === "pro" || normalized === "premium" || normalized.includes("pro")) {
     return SAAS_PLANS.pro;
   }
@@ -2472,6 +2559,15 @@ var init_saasPlans = __esm({
         priceLabel: "Gratis (hasta 2 usuarios)",
         tier: 1
       },
+      autonomo: {
+        slug: "autonomo",
+        membershipLabel: "Aut\xF3nomo",
+        displayName: "Plan Aut\xF3nomos & Profesionales",
+        seatLimit: 1,
+        priceMonthlyArs: 24900,
+        priceLabel: "$24.900 ARS/mes",
+        tier: 2
+      },
       pro: {
         slug: "pro",
         membershipLabel: "Pro Industria",
@@ -2500,6 +2596,7 @@ var init_saasPlans = __esm({
     };
     INCLUDED_MODULES_BY_PLAN = {
       gratis: ["chat_b2b"],
+      autonomo: ["chat_b2b"],
       pro: ["ecommerce_b2b", "chat_b2b"],
       corporativo: ["warehousing", "kyb_compliance", "erp_sync", "ecommerce_b2b", "chat_b2b"]
     };
@@ -2591,11 +2688,11 @@ var init_saasPlans = __esm({
         shortName: "Chat B2B",
         priceMonthlyArs: 19900,
         priceLabel: "$19.900 ARS/mes",
-        includedInPlans: ["gratis", "pro", "corporativo"],
+        includedInPlans: ["gratis", "autonomo", "pro", "corporativo"],
         routePath: "/chat",
         description: "Comunicaci\xF3n directa entre empresas registradas en Zona de Miembros con tarjetas de licitaci\xF3n RFQ vinculadas y salas sectoriales.",
         highlights: [
-          "Exclusivo para empresas registradas (oculto al p\xFAblico)",
+          "Exclusivo para empresas y profesionales registrados (oculto al p\xFAblico)",
           "Hilos persistentes por corredor, log\xEDstica y compras",
           "Salas privadas y videollamadas para miembros verificados"
         ]
@@ -2729,6 +2826,12 @@ var init_billingService = __esm({
     init_saasPlans();
     init_arnSchema();
     BILLING_CATALOG = {
+      autonomo: {
+        targetType: "plan",
+        slug: "autonomo",
+        title: SAAS_PLANS.autonomo.displayName,
+        amountArs: SAAS_PLANS.autonomo.priceMonthlyArs
+      },
       pro: {
         targetType: "plan",
         slug: "pro",
@@ -4510,6 +4613,611 @@ var init_vpsWorkerService = __esm({
   }
 });
 
+// src/lib/taxPricing.ts
+function normalizeTaxRatePercent(raw) {
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num < 0) return 21;
+  return Math.round(num * 100) / 100;
+}
+function taxRatePercentToBps(taxRatePercent) {
+  return Math.max(0, Math.round(normalizeTaxRatePercent(taxRatePercent) * 100));
+}
+function taxRateBpsToPercent(taxRateBps) {
+  if (!Number.isFinite(taxRateBps) || taxRateBps < 0) return 21;
+  return Math.round(taxRateBps / 100 * 100) / 100;
+}
+function calculateTaxBreakdownFromNet(netPriceInput, taxRatePercentInput = 21) {
+  const safeNet = Number.isFinite(netPriceInput) && netPriceInput > 0 ? netPriceInput : 0;
+  const rate = normalizeTaxRatePercent(taxRatePercentInput);
+  const netCents = Math.round(safeNet * 100);
+  const rateBps = taxRatePercentToBps(rate);
+  const taxCents = Math.round(netCents * rateBps / 1e4);
+  const grossCents = netCents + taxCents;
+  return {
+    netPrice: netCents / 100,
+    taxRatePercent: rate,
+    taxRateBps: rateBps,
+    taxAmount: taxCents / 100,
+    grossPrice: grossCents / 100
+  };
+}
+function calculateTaxBreakdownFromGross(grossPriceInput, taxRatePercentInput = 21) {
+  const safeGross = Number.isFinite(grossPriceInput) && grossPriceInput > 0 ? grossPriceInput : 0;
+  const rate = normalizeTaxRatePercent(taxRatePercentInput);
+  const rateBps = taxRatePercentToBps(rate);
+  const grossCents = Math.round(safeGross * 100);
+  const netCents = rateBps === 0 ? grossCents : Math.round(grossCents * 1e4 / (1e4 + rateBps));
+  const taxCents = grossCents - netCents;
+  return {
+    netPrice: netCents / 100,
+    taxRatePercent: rate,
+    taxRateBps: rateBps,
+    taxAmount: taxCents / 100,
+    grossPrice: grossCents / 100
+  };
+}
+function normalizeTaxDisplayMode(raw) {
+  if (raw === "gross" || raw === "both") return raw;
+  return "net";
+}
+function getDefaultSeedServicesForCompany(companyKey) {
+  const seedMap = {
+    "comp-petrosur": [
+      { name: "Provisi\xF3n e inyecci\xF3n de fluidos de perforaci\xF3n", category: "Petr\xF3leo y Gas", unit: "Jornada", currency: "ARS", net: 145e4, tax: 21 },
+      { name: "Control s\xF3lido y tratamiento de cutting en locaci\xF3n", category: "Petr\xF3leo y Gas", unit: "D\xEDa", currency: "ARS", net: 89e4, tax: 21 }
+    ],
+    "comp-metalurgica-sur": [
+      { name: "Fabricaci\xF3n de tanques API 650 (por tonelada)", category: "Metalurgia", unit: "Tn", currency: "ARS", net: 285e4, tax: 21 },
+      { name: "Calderer\xEDa pesada y soldadura ASME certificada", category: "Metalurgia", unit: "Hora", currency: "ARS", net: 78e3, tax: 21 }
+    ],
+    "serv-izajes-neuquen": [
+      { name: "Servicio de Gr\xFAa Hidr\xE1ulica 120 Tn en yacimiento", category: "Log\xEDstica", unit: "Hora", currency: "ARS", net: 185e3, tax: 21 },
+      { name: "Traslado especial en carret\xF3n cama baja RN 7 / RN 22", category: "Log\xEDstica", unit: "Km", currency: "ARS", net: 4200, tax: 10.5 }
+    ],
+    "prof-ing-paredes": [
+      { name: "Auditor\xEDa de impacto ambiental y plan de gesti\xF3n PGAS", category: "Ingenier\xEDa", unit: "Servicio", currency: "ARS", net: 62e4, tax: 21 },
+      { name: "Direcci\xF3n t\xE9cnica e inspecci\xF3n HSEQ por jornada", category: "Ingenier\xEDa", unit: "Jornada", currency: "ARS", net: 165e3, tax: 21 }
+    ]
+  };
+  const rows = seedMap[companyKey] || [];
+  return rows.map((r, idx) => {
+    const breakdown = calculateTaxBreakdownFromNet(r.net, r.tax);
+    return {
+      id: -(idx + 1),
+      companyKey,
+      serviceName: r.name,
+      category: r.category,
+      unitLabel: r.unit,
+      currency: r.currency,
+      netPrice: breakdown.netPrice,
+      taxRatePercent: breakdown.taxRatePercent,
+      taxRateBps: breakdown.taxRateBps,
+      taxAmount: breakdown.taxAmount,
+      grossPrice: breakdown.grossPrice,
+      taxDisplayMode: "net",
+      active: true
+    };
+  });
+}
+var init_taxPricing = __esm({
+  "src/lib/taxPricing.ts"() {
+  }
+});
+
+// src/server/directoryControlRoutes.ts
+var directoryControlRoutes_exports = {};
+__export(directoryControlRoutes_exports, {
+  loadMergedDirectoryRecords: () => loadMergedDirectoryRecords,
+  registerDirectoryControlRoutes: () => registerDirectoryControlRoutes
+});
+function mapDbServiceRow(row) {
+  const netPrice = Number(row.net_price_cents || 0) / 100;
+  const taxRatePercent = taxRateBpsToPercent(Number(row.tax_rate_bps ?? 2100));
+  const breakdown = calculateTaxBreakdownFromNet(netPrice, taxRatePercent);
+  return {
+    id: Number(row.id),
+    companyKey: String(row.company_key),
+    serviceName: String(row.service_name || ""),
+    category: String(row.category || "Servicios"),
+    unitLabel: String(row.unit_label || "Servicio"),
+    currency: row.currency === "USD" ? "USD" : "ARS",
+    netPrice: breakdown.netPrice,
+    taxRatePercent: breakdown.taxRatePercent,
+    taxRateBps: breakdown.taxRateBps,
+    taxAmount: breakdown.taxAmount,
+    grossPrice: breakdown.grossPrice,
+    taxDisplayMode: normalizeTaxDisplayMode(row.tax_display_mode),
+    active: row.active !== false
+  };
+}
+function resolveTierMeta(tierInput) {
+  const t = String(tierInput || "").toLowerCase();
+  if (t === "corporativo") {
+    return { tier: "corporativo", tierPriority: 1, tierLabel: TIER_CONFIG.corporativo.label };
+  }
+  if (t === "pro") {
+    return { tier: "pro", tierPriority: 2, tierLabel: TIER_CONFIG.pro.label };
+  }
+  return { tier: "inicial", tierPriority: 3, tierLabel: TIER_CONFIG.inicial.label };
+}
+async function loadMergedDirectoryRecords(options) {
+  let dbCompanies = [];
+  const overridesMap = new Map(memoryOverrides);
+  const servicesByCompany = /* @__PURE__ */ new Map();
+  if (hasDatabaseConfig()) {
+    try {
+      await ensureProductionTables();
+      const [profilesRes, overridesRes, servicesRes] = await Promise.all([
+        pool.query(`
+          SELECT cp.*, u.email AS user_email
+          FROM public.company_profiles cp
+          LEFT JOIN public.users u ON u.uid = cp.user_uid
+          WHERE cp.company_name IS NOT NULL AND cp.company_name != ''
+          ORDER BY cp.trust_score DESC, cp.updated_at DESC
+          LIMIT 120
+        `),
+        pool.query(`SELECT * FROM public.company_admin_overrides`),
+        pool.query(`SELECT * FROM public.company_service_items ORDER BY id ASC`)
+      ]);
+      dbCompanies = (profilesRes.rows || []).map((r) => {
+        const normalizedType = [
+          "empresa",
+          "emprendimiento",
+          "profesional",
+          "servicio"
+        ].includes(String(r.entity_type || "").toLowerCase()) ? String(r.entity_type).toLowerCase() : "empresa";
+        const tierMeta = resolveTierMeta(
+          (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial"
+        );
+        const companyKey = String(r.company_key || `db-${r.id}`);
+        return {
+          id: companyKey,
+          entityType: normalizedType,
+          name: r.company_name,
+          cuit: r.cuit || "",
+          tier: tierMeta.tier,
+          tierPriority: tierMeta.tierPriority,
+          tierLabel: tierMeta.tierLabel,
+          verified: r.verification_status === "verified",
+          category: r.industry || "Servicios Industriales",
+          subcategories: Array.isArray(r.services) ? r.services : [],
+          province: r.province || "Chubut",
+          city: r.city || "Comodoro Rivadavia",
+          employeeCount: r.employee_count || (normalizedType === "profesional" ? "Profesional Matriculado" : "11-50"),
+          credentialLabel: r.credential_label || void 0,
+          serviceModality: r.service_modality || void 0,
+          publicSummary: r.description || "Actor registrado en la red B2B xPatagonia.",
+          contactName: r.contact_name || "",
+          contactRole: r.contact_role || "",
+          email: r.email || r.user_email || "",
+          phone: r.phone || "",
+          whatsapp: r.whatsapp || "",
+          website: r.website || "",
+          certifications: Array.isArray(r.certifications) ? r.certifications : [],
+          paymentTerms: r.payment_terms || "A convenir",
+          creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
+          priceDisplayMode: normalizeTaxDisplayMode(r.price_display_mode),
+          defaultTaxRatePercent: 21,
+          active: true,
+          adnComercial: {
+            ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
+            demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
+            corredorLogistico: r.corridor || (Array.isArray(r.corredores_logisticos) ? r.corredores_logisticos[0] || "Patagonia Sur" : "Patagonia Sur"),
+            ciudadBase: r.city || "Patagonia",
+            lat: Number(r.base_lat) || -45.8641,
+            lng: Number(r.base_lng) || -67.4965
+          }
+        };
+      });
+      for (const ov of overridesRes.rows || []) {
+        overridesMap.set(String(ov.company_key), ov);
+      }
+      for (const sRow of servicesRes.rows || []) {
+        const mapped = mapDbServiceRow(sRow);
+        const list = servicesByCompany.get(mapped.companyKey) || [];
+        list.push(mapped);
+        servicesByCompany.set(mapped.companyKey, list);
+      }
+    } catch (err) {
+      console.warn("[DIRECTORY_CONTROL] DB query fallback:", err);
+    }
+  } else {
+    for (const [key, list] of memoryServices.entries()) {
+      servicesByCompany.set(key, [...list]);
+    }
+  }
+  const baseCombined = [...dbCompanies, ...B2B_COMPANIES];
+  const merged = baseCombined.map((company) => {
+    const ov = overridesMap.get(company.id);
+    const tierMeta = ov?.tier ? resolveTierMeta(ov.tier) : null;
+    const dbServiceList = servicesByCompany.get(company.id);
+    const hasOverride = Boolean(ov);
+    const serviceItems = dbServiceList !== void 0 ? dbServiceList : hasOverride ? [] : getDefaultSeedServicesForCompany(company.id);
+    return {
+      ...company,
+      name: ov?.name || company.name,
+      entityType: ov?.entity_type || company.entityType || "empresa",
+      tier: tierMeta ? tierMeta.tier : company.tier,
+      tierPriority: tierMeta ? tierMeta.tierPriority : company.tierPriority,
+      tierLabel: tierMeta ? tierMeta.tierLabel : company.tierLabel,
+      category: ov?.category || company.category,
+      province: ov?.province || company.province,
+      city: ov?.city || company.city,
+      serviceModality: ov?.service_modality !== void 0 && ov?.service_modality !== null ? ov.service_modality : company.serviceModality,
+      credentialLabel: ov?.credential_label !== void 0 && ov?.credential_label !== null ? ov.credential_label : company.credentialLabel,
+      verified: typeof ov?.verified === "boolean" ? ov.verified : company.verified,
+      priceDisplayMode: normalizeTaxDisplayMode(ov?.price_display_mode || company.priceDisplayMode),
+      defaultTaxRatePercent: ov?.default_tax_rate_bps !== void 0 && ov?.default_tax_rate_bps !== null ? taxRateBpsToPercent(Number(ov.default_tax_rate_bps)) : company.defaultTaxRatePercent ?? 21,
+      active: typeof ov?.active === "boolean" ? ov.active : company.active !== false,
+      adnComercial: {
+        ...company.adnComercial,
+        corredorLogistico: ov?.corridor || company.adnComercial.corredorLogistico,
+        lat: Number.isFinite(Number(ov?.lat)) ? Number(ov.lat) : company.adnComercial.lat,
+        lng: Number.isFinite(Number(ov?.lng)) ? Number(ov.lng) : company.adnComercial.lng
+      },
+      serviceItems
+    };
+  });
+  const filtered = options?.includeInactive ? merged : merged.filter((item) => item.active !== false);
+  return sortCompaniesBySubscriptionTier(filtered);
+}
+function registerDirectoryControlRoutes(app) {
+  app.get(
+    "/api/admin/directory-control",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (_req, res) => {
+      try {
+        res.setHeader("Cache-Control", "no-store");
+        const companies = await loadMergedDirectoryRecords({ includeInactive: true });
+        res.json({ companies });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.put(
+    "/api/admin/directory-control/:companyKey",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const companyKey = String(req.params.companyKey || "").trim();
+        if (!companyKey) {
+          return res.status(400).json({ error: "Identificador de empresa requerido." });
+        }
+        const body = req.body || {};
+        const priceDisplayMode = normalizeTaxDisplayMode(body.priceDisplayMode);
+        const defaultTaxRateBps = taxRatePercentToBps(
+          normalizeTaxRatePercent(body.defaultTaxRatePercent ?? 21)
+        );
+        const entityType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
+          String(body.entityType || "").toLowerCase()
+        ) ? String(body.entityType).toLowerCase() : null;
+        const tier = ["corporativo", "pro", "inicial"].includes(String(body.tier || "").toLowerCase()) ? String(body.tier).toLowerCase() : null;
+        const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : null;
+        const lng = Number.isFinite(Number(body.lng)) ? Number(body.lng) : null;
+        if (hasDatabaseConfig()) {
+          await ensureProductionTables();
+          await pool.query(
+            `INSERT INTO public.company_admin_overrides (
+              company_key, name, entity_type, tier, category, province, city, corridor,
+              service_modality, credential_label, verified, lat, lng,
+              price_display_mode, default_tax_rate_bps, active, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8,
+              $9, $10, $11, $12, $13,
+              $14, $15, $16, now()
+            )
+            ON CONFLICT (company_key) DO UPDATE SET
+              name = COALESCE(EXCLUDED.name, public.company_admin_overrides.name),
+              entity_type = COALESCE(EXCLUDED.entity_type, public.company_admin_overrides.entity_type),
+              tier = COALESCE(EXCLUDED.tier, public.company_admin_overrides.tier),
+              category = COALESCE(EXCLUDED.category, public.company_admin_overrides.category),
+              province = COALESCE(EXCLUDED.province, public.company_admin_overrides.province),
+              city = COALESCE(EXCLUDED.city, public.company_admin_overrides.city),
+              corridor = COALESCE(EXCLUDED.corridor, public.company_admin_overrides.corridor),
+              service_modality = COALESCE(EXCLUDED.service_modality, public.company_admin_overrides.service_modality),
+              credential_label = COALESCE(EXCLUDED.credential_label, public.company_admin_overrides.credential_label),
+              verified = COALESCE(EXCLUDED.verified, public.company_admin_overrides.verified),
+              lat = COALESCE(EXCLUDED.lat, public.company_admin_overrides.lat),
+              lng = COALESCE(EXCLUDED.lng, public.company_admin_overrides.lng),
+              price_display_mode = EXCLUDED.price_display_mode,
+              default_tax_rate_bps = EXCLUDED.default_tax_rate_bps,
+              active = EXCLUDED.active,
+              updated_at = now()`,
+            [
+              companyKey,
+              body.name ? String(body.name).trim() : null,
+              entityType,
+              tier,
+              body.category ? String(body.category).trim() : null,
+              body.province ? String(body.province).trim() : null,
+              body.city ? String(body.city).trim() : null,
+              body.corridor ? String(body.corridor).trim() : null,
+              body.serviceModality !== void 0 ? String(body.serviceModality) : null,
+              body.credentialLabel !== void 0 ? String(body.credentialLabel) : null,
+              typeof body.verified === "boolean" ? body.verified : null,
+              lat,
+              lng,
+              priceDisplayMode,
+              defaultTaxRateBps,
+              body.active !== false
+            ]
+          );
+          if (companyKey.startsWith("db-")) {
+            const dbId = Number(companyKey.replace("db-", ""));
+            if (Number.isFinite(dbId)) {
+              await pool.query(
+                `UPDATE public.company_profiles
+                 SET entity_type = COALESCE($1, entity_type),
+                     verification_status = CASE WHEN $2::boolean IS TRUE THEN 'verified' WHEN $2::boolean IS FALSE THEN 'unverified' ELSE verification_status END,
+                     corridor = COALESCE($3, corridor),
+                     service_modality = COALESCE($4, service_modality),
+                     base_lat = COALESCE($5, base_lat),
+                     base_lng = COALESCE($6, base_lng),
+                     price_display_mode = $7,
+                     updated_at = now()
+                 WHERE id = $8`,
+                [
+                  entityType,
+                  typeof body.verified === "boolean" ? body.verified : null,
+                  body.corridor || null,
+                  body.serviceModality ?? null,
+                  lat,
+                  lng,
+                  priceDisplayMode,
+                  dbId
+                ]
+              ).catch(() => {
+              });
+            }
+          }
+        } else {
+          memoryOverrides.set(companyKey, {
+            company_key: companyKey,
+            name: body.name || void 0,
+            entity_type: entityType || void 0,
+            tier: tier || void 0,
+            category: body.category || void 0,
+            province: body.province || void 0,
+            city: body.city || void 0,
+            corridor: body.corridor || void 0,
+            service_modality: body.serviceModality,
+            credential_label: body.credentialLabel,
+            verified: typeof body.verified === "boolean" ? body.verified : void 0,
+            lat: lat ?? void 0,
+            lng: lng ?? void 0,
+            price_display_mode: priceDisplayMode,
+            default_tax_rate_bps: defaultTaxRateBps,
+            active: body.active !== false
+          });
+        }
+        const updated = (await loadMergedDirectoryRecords({ includeInactive: true })).find(
+          (c) => c.id === companyKey
+        );
+        res.json({ success: true, company: updated || null });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.post(
+    "/api/admin/directory-control/:companyKey/services",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const companyKey = String(req.params.companyKey || "").trim();
+        const b = req.body || {};
+        const serviceName = String(b.serviceName || "").trim();
+        if (!companyKey || !serviceName) {
+          return res.status(400).json({ error: "El nombre del servicio es obligatorio." });
+        }
+        const taxRatePercent = normalizeTaxRatePercent(b.taxRatePercent ?? 21);
+        const inputMode = b.priceInputMode === "gross" ? "gross" : "net";
+        const breakdown = inputMode === "gross" ? calculateTaxBreakdownFromGross(Number(b.grossPrice ?? 0), taxRatePercent) : calculateTaxBreakdownFromNet(Number(b.netPrice ?? 0), taxRatePercent);
+        const netPriceCents = Math.round(breakdown.netPrice * 100);
+        const taxRateBps = breakdown.taxRateBps;
+        const taxDisplayMode = normalizeTaxDisplayMode(b.taxDisplayMode);
+        const currency = b.currency === "USD" ? "USD" : "ARS";
+        const unitLabel = String(b.unitLabel || "Servicio").trim();
+        const category = String(b.category || "Servicios").trim();
+        const active = b.active !== false;
+        if (hasDatabaseConfig()) {
+          await ensureProductionTables();
+          const inserted = await pool.query(
+            `INSERT INTO public.company_service_items (
+              company_key, service_name, category, unit_label, currency,
+              net_price_cents, tax_rate_bps, tax_display_mode, active, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+            RETURNING *`,
+            [
+              companyKey,
+              serviceName,
+              category,
+              unitLabel,
+              currency,
+              netPriceCents,
+              taxRateBps,
+              taxDisplayMode,
+              active
+            ]
+          );
+          return res.status(201).json({ success: true, service: mapDbServiceRow(inserted.rows[0]) });
+        }
+        const existing = memoryServices.get(companyKey) || [];
+        const created = {
+          id: ++memoryServiceSeq,
+          companyKey,
+          serviceName,
+          category,
+          unitLabel,
+          currency,
+          netPrice: breakdown.netPrice,
+          taxRatePercent: breakdown.taxRatePercent,
+          taxRateBps,
+          taxAmount: breakdown.taxAmount,
+          grossPrice: breakdown.grossPrice,
+          taxDisplayMode,
+          active
+        };
+        memoryServices.set(companyKey, [...existing, created]);
+        res.status(201).json({ success: true, service: created });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.put(
+    "/api/admin/directory-control/services/:serviceId",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const serviceId = Number(req.params.serviceId);
+        if (!Number.isFinite(serviceId)) {
+          return res.status(400).json({ error: "ID de servicio inv\xE1lido." });
+        }
+        const b = req.body || {};
+        const taxRatePercent = normalizeTaxRatePercent(b.taxRatePercent ?? 21);
+        const inputMode = b.priceInputMode === "gross" ? "gross" : "net";
+        const breakdown = inputMode === "gross" ? calculateTaxBreakdownFromGross(Number(b.grossPrice ?? 0), taxRatePercent) : calculateTaxBreakdownFromNet(Number(b.netPrice ?? 0), taxRatePercent);
+        const netPriceCents = Math.round(breakdown.netPrice * 100);
+        const taxRateBps = breakdown.taxRateBps;
+        const taxDisplayMode = normalizeTaxDisplayMode(b.taxDisplayMode);
+        const currency = b.currency === "USD" ? "USD" : "ARS";
+        if (hasDatabaseConfig()) {
+          await ensureProductionTables();
+          const upd = await pool.query(
+            `UPDATE public.company_service_items
+             SET service_name = COALESCE($1, service_name),
+                 category = COALESCE($2, category),
+                 unit_label = COALESCE($3, unit_label),
+                 currency = $4,
+                 net_price_cents = $5,
+                 tax_rate_bps = $6,
+                 tax_display_mode = $7,
+                 active = $8,
+                 updated_at = now()
+             WHERE id = $9
+             RETURNING *`,
+            [
+              b.serviceName ? String(b.serviceName).trim() : null,
+              b.category ? String(b.category).trim() : null,
+              b.unitLabel ? String(b.unitLabel).trim() : null,
+              currency,
+              netPriceCents,
+              taxRateBps,
+              taxDisplayMode,
+              b.active !== false,
+              serviceId
+            ]
+          );
+          if (!upd.rows?.[0]) {
+            return res.status(404).json({ error: "Servicio no encontrado." });
+          }
+          return res.json({ success: true, service: mapDbServiceRow(upd.rows[0]) });
+        }
+        for (const [key, list] of memoryServices.entries()) {
+          const idx = list.findIndex((s) => s.id === serviceId);
+          if (idx !== -1) {
+            const nextItem = {
+              ...list[idx],
+              serviceName: b.serviceName ? String(b.serviceName).trim() : list[idx].serviceName,
+              category: b.category ? String(b.category).trim() : list[idx].category,
+              unitLabel: b.unitLabel ? String(b.unitLabel).trim() : list[idx].unitLabel,
+              currency,
+              netPrice: breakdown.netPrice,
+              taxRatePercent: breakdown.taxRatePercent,
+              taxRateBps,
+              taxAmount: breakdown.taxAmount,
+              grossPrice: breakdown.grossPrice,
+              taxDisplayMode,
+              active: b.active !== false
+            };
+            const nextList = [...list];
+            nextList[idx] = nextItem;
+            memoryServices.set(key, nextList);
+            return res.json({ success: true, service: nextItem });
+          }
+        }
+        res.status(404).json({ error: "Servicio no encontrado." });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.delete(
+    "/api/admin/directory-control/services/:serviceId",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const serviceId = Number(req.params.serviceId);
+        if (!Number.isFinite(serviceId)) {
+          return res.status(400).json({ error: "ID de servicio inv\xE1lido." });
+        }
+        if (hasDatabaseConfig()) {
+          await ensureProductionTables();
+          await pool.query(`DELETE FROM public.company_service_items WHERE id = $1`, [serviceId]);
+          return res.json({ success: true });
+        }
+        for (const [key, list] of memoryServices.entries()) {
+          memoryServices.set(
+            key,
+            list.filter((s) => s.id !== serviceId)
+          );
+        }
+        res.json({ success: true });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+  app.post(
+    "/api/admin/directory-control/bulk-tax-mode",
+    requireAuth,
+    requireRoles(["system_admin", "support_operator"]),
+    async (req, res) => {
+      try {
+        const mode = normalizeTaxDisplayMode(req.body?.mode);
+        if (hasDatabaseConfig()) {
+          await ensureProductionTables();
+          await pool.query(
+            `UPDATE public.company_admin_overrides SET price_display_mode = $1, updated_at = now()`,
+            [mode]
+          );
+          await pool.query(
+            `UPDATE public.company_service_items SET tax_display_mode = $1, updated_at = now()`,
+            [mode]
+          );
+        } else {
+          for (const [k, v] of memoryOverrides.entries()) {
+            memoryOverrides.set(k, { ...v, price_display_mode: mode });
+          }
+        }
+        res.json({ success: true, mode });
+      } catch (err) {
+        res.status(500).json({ error: formatPgError(err) });
+      }
+    }
+  );
+}
+var memoryOverrides, memoryServices, memoryServiceSeq;
+var init_directoryControlRoutes = __esm({
+  "src/server/directoryControlRoutes.ts"() {
+    init_db();
+    init_auth();
+    init_arnSchema();
+    init_b2bDirectoryData();
+    init_taxPricing();
+    memoryOverrides = /* @__PURE__ */ new Map();
+    memoryServices = /* @__PURE__ */ new Map();
+    memoryServiceSeq = 5e3;
+  }
+});
+
 // src/server/arnRoutes.ts
 var arnRoutes_exports = {};
 __export(arnRoutes_exports, {
@@ -5124,66 +5832,15 @@ ${mail.text || mail.snippet || ""}`,
       const member = await resolveOptionalMember(req);
       const revealProtected = Boolean(member.authenticated);
       const requestedEntityType = String(req.query.entityType || "").trim().toLowerCase();
-      let dbCompanies = [];
-      if (hasDatabaseConfig()) {
-        try {
-          await ensureProductionTables();
-          const rows = await pool.query(`
-            SELECT cp.*, u.email AS user_email
-            FROM public.company_profiles cp
-            LEFT JOIN public.users u ON u.uid = cp.user_uid
-            WHERE cp.company_name IS NOT NULL AND cp.company_name != ''
-            ORDER BY cp.trust_score DESC, cp.updated_at DESC
-            LIMIT 80
-          `);
-          dbCompanies = rows.rows.map((r) => {
-            const normalizedType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
-              String(r.entity_type || "").toLowerCase()
-            ) ? String(r.entity_type).toLowerCase() : "empresa";
-            return {
-              id: `db-${r.id}`,
-              entityType: normalizedType,
-              name: r.company_name,
-              cuit: r.cuit || "",
-              tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
-              tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
-              tierLabel: (r.trust_score || 50) >= 85 ? "Plan Corporativo" : (r.trust_score || 50) >= 65 ? "Plan Pro Industrial" : "Plan Inicial",
-              verified: r.verification_status === "verified",
-              category: r.industry || "Servicios Industriales",
-              subcategories: Array.isArray(r.services) ? r.services : [],
-              province: r.province || "Chubut",
-              city: r.city || "Comodoro Rivadavia",
-              employeeCount: r.employee_count || (normalizedType === "profesional" ? "Profesional Matriculado" : "11-50"),
-              credentialLabel: r.credential_label || void 0,
-              serviceModality: r.service_modality || void 0,
-              publicSummary: r.description || "Actor registrado en la red B2B xPatagonia.",
-              contactName: r.contact_name || "",
-              contactRole: r.contact_role || "",
-              email: r.email || r.user_email || "",
-              phone: r.phone || "",
-              whatsapp: r.whatsapp || "",
-              website: r.website || "",
-              certifications: Array.isArray(r.certifications) ? r.certifications : [],
-              paymentTerms: r.payment_terms || "A convenir",
-              creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
-              adnComercial: {
-                ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
-                demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
-                corredorLogistico: Array.isArray(r.corredores_logisticos) ? r.corredores_logisticos[0] || "Patagonia Sur" : "Patagonia Sur",
-                ciudadBase: r.city || "Patagonia",
-                lat: Number(r.base_lat) || -45.8641,
-                lng: Number(r.base_lng) || -67.4965
-              }
-            };
-          });
-        } catch {
-        }
-      }
-      const combined = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]);
+      const { loadMergedDirectoryRecords: loadMergedDirectoryRecords2 } = await Promise.resolve().then(() => (init_directoryControlRoutes(), directoryControlRoutes_exports));
+      const combined = await loadMergedDirectoryRecords2({ includeInactive: false });
       const filteredByType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(requestedEntityType) ? combined.filter((c) => (c.entityType || "empresa") === requestedEntityType) : combined;
       const merged = filteredByType.map((c) => {
         const entityType = c.entityType || "empresa";
-        if (revealProtected) return { ...c, entityType, protectedMasked: false };
+        const activeServices = (c.serviceItems || []).filter((s) => s.active !== false);
+        if (revealProtected) {
+          return { ...c, entityType, serviceItems: activeServices, protectedMasked: false };
+        }
         return {
           ...c,
           entityType,
@@ -5196,6 +5853,12 @@ ${mail.text || mail.snippet || ""}`,
           whatsapp: "",
           paymentTerms: "Visible con membres\xEDa",
           creditRating: "Acceso Miembro",
+          serviceItems: activeServices.map((s) => ({
+            ...s,
+            netPrice: 0,
+            taxAmount: 0,
+            grossPrice: 0
+          })),
           protectedMasked: true
         };
       });
@@ -6333,6 +6996,7 @@ function registerBillingAndKybRoutes(app, recordAutomationEvent) {
 }
 
 // src/server/createApp.ts
+init_directoryControlRoutes();
 init_saasAndFleetRoutes();
 init_saasPlans();
 init_vpsWorkerService();
@@ -8140,6 +8804,7 @@ Devuelve \xDANICAMENTE un array JSON v\xE1lido de 3 strings, sin markdown.`;
   registerArnAndModuleRoutes(app, recordAutomationEvent);
   registerWorkerAndWebhookRoutes(app);
   registerBillingAndKybRoutes(app, recordAutomationEvent);
+  registerDirectoryControlRoutes(app);
   return { app, runAutoInsight };
 }
 

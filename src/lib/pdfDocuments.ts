@@ -201,6 +201,10 @@ export function generateVendorPackPdf(params: {
   province: string;
   city: string;
   address?: string;
+  corridor?: string;
+  lat?: number;
+  lng?: number;
+  qrDataUrl?: string;
   credentialLabel?: string;
   serviceModality?: string;
   description: string;
@@ -209,12 +213,20 @@ export function generateVendorPackPdf(params: {
   website?: string;
   contactEmail?: string;
   phone?: string;
+  serviceItems?: Array<{
+    serviceName: string;
+    unitLabel: string;
+    currency: string;
+    netPrice: number;
+    taxRatePercent: number;
+    grossPrice: number;
+  }>;
 }) {
   const doc = new jsPDF();
   drawHeader(
     doc,
     'Legajo Técnico & Ficha KYB (Vendor Pack)',
-    'Documentación Comercial y Fiscal para Homologación de Proveedores',
+    'Documentación Comercial, Georreferencia GPS y Tarifario',
     params.cuit || 'CUIT EN VALIDACIÓN'
   );
 
@@ -233,8 +245,24 @@ export function generateVendorPackPdf(params: {
     14,
     y
   );
-  y += 10;
+  y += 5;
+  if (Number.isFinite(params.lat) && Number.isFinite(params.lng)) {
+    doc.text(
+      `GPS Base: ${Number(params.lat).toFixed(5)}, ${Number(params.lng).toFixed(5)}${params.corridor ? ` · ${params.corridor}` : ''}`,
+      14,
+      y
+    );
+    y += 5;
+  }
 
+  if (params.qrDataUrl) {
+    doc.addImage(params.qrDataUrl, 'PNG', 156, 40, 38, 38);
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Escanear GPS / Ruta', 175, 82, { align: 'center' });
+  }
+
+  y = Math.max(y + 6, params.qrDataUrl ? 62 : 60);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
@@ -284,9 +312,38 @@ export function generateVendorPackPdf(params: {
   doc.text(descLines, 14, y);
   y += descLines.length * 5 + 8;
 
+  if (params.serviceItems && params.serviceItems.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('3. Tarifario de Servicios (Neto & Final c/IVA)', 14, y);
+    y += 6;
+    doc.setFontSize(8.5);
+    for (const srv of params.serviceItems.slice(0, 6)) {
+      const sym = srv.currency === 'USD' ? 'U$S ' : '$';
+      const netTxt = `${sym}${Number(srv.netPrice).toLocaleString('es-AR')}`;
+      const grossTxt = `${sym}${Number(srv.grossPrice).toLocaleString('es-AR')}`;
+      doc.setFont('helvetica', 'bold');
+      doc.text(`• ${srv.serviceName} (${srv.unitLabel})`, 14, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(
+        `Neto: ${netTxt}  |  IVA ${srv.taxRatePercent}%  |  Final: ${grossTxt}`,
+        18,
+        y + 4.5
+      );
+      y += 10;
+    }
+    y += 2;
+  }
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text('3. Canales de Contacto Comercial', 14, y);
+  doc.text(
+    params.serviceItems && params.serviceItems.length > 0
+      ? '4. Canales de Contacto y Ubicación'
+      : '3. Canales de Contacto Comercial',
+    14,
+    y
+  );
   y += 7;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);

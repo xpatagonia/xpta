@@ -730,81 +730,18 @@ export function registerArnAndModuleRoutes(
       const revealProtected = Boolean(member.authenticated);
       const requestedEntityType = String(req.query.entityType || "").trim().toLowerCase();
 
-      let dbCompanies: any[] = [];
-      if (hasDatabaseConfig()) {
-        try {
-          await ensureProductionTables();
-          const rows = await pool.query(`
-            SELECT cp.*, u.email AS user_email
-            FROM public.company_profiles cp
-            LEFT JOIN public.users u ON u.uid = cp.user_uid
-            WHERE cp.company_name IS NOT NULL AND cp.company_name != ''
-            ORDER BY cp.trust_score DESC, cp.updated_at DESC
-            LIMIT 80
-          `);
-          dbCompanies = rows.rows.map((r: any) => {
-            const normalizedType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(
-              String(r.entity_type || "").toLowerCase()
-            )
-              ? String(r.entity_type).toLowerCase()
-              : "empresa";
-            return {
-              id: `db-${r.id}`,
-              entityType: normalizedType,
-              name: r.company_name,
-              cuit: r.cuit || "",
-              tier: (r.trust_score || 50) >= 85 ? "corporativo" : (r.trust_score || 50) >= 65 ? "pro" : "inicial",
-              tierPriority: (r.trust_score || 50) >= 85 ? 1 : (r.trust_score || 50) >= 65 ? 2 : 3,
-              tierLabel:
-                (r.trust_score || 50) >= 85
-                  ? "Plan Corporativo"
-                  : (r.trust_score || 50) >= 65
-                  ? "Plan Pro Industrial"
-                  : "Plan Inicial",
-              verified: r.verification_status === "verified",
-              category: r.industry || "Servicios Industriales",
-              subcategories: Array.isArray(r.services) ? r.services : [],
-              province: r.province || "Chubut",
-              city: r.city || "Comodoro Rivadavia",
-              employeeCount:
-                r.employee_count || (normalizedType === "profesional" ? "Profesional Matriculado" : "11-50"),
-              credentialLabel: r.credential_label || undefined,
-              serviceModality: r.service_modality || undefined,
-              publicSummary: r.description || "Actor registrado en la red B2B xPatagonia.",
-              contactName: r.contact_name || "",
-              contactRole: r.contact_role || "",
-              email: r.email || r.user_email || "",
-              phone: r.phone || "",
-              whatsapp: r.whatsapp || "",
-              website: r.website || "",
-              certifications: Array.isArray(r.certifications) ? r.certifications : [],
-              paymentTerms: r.payment_terms || "A convenir",
-              creditRating: r.verification_status === "verified" ? "Verificada KYB" : "Pendiente KYB",
-              adnComercial: {
-                ofrece: Array.isArray(r.adn_ofrece) ? r.adn_ofrece : [],
-                demanda: Array.isArray(r.adn_demanda) ? r.adn_demanda : [],
-                corredorLogistico: Array.isArray(r.corredores_logisticos)
-                  ? r.corredores_logisticos[0] || "Patagonia Sur"
-                  : "Patagonia Sur",
-                ciudadBase: r.city || "Patagonia",
-                lat: Number(r.base_lat) || -45.8641,
-                lng: Number(r.base_lng) || -67.4965,
-              },
-            };
-          });
-        } catch {
-          // Optional DB query
-        }
-      }
-
-      const combined = sortCompaniesBySubscriptionTier([...dbCompanies, ...B2B_COMPANIES]);
+      const { loadMergedDirectoryRecords } = await import("./directoryControlRoutes.ts");
+      const combined = await loadMergedDirectoryRecords({ includeInactive: false });
       const filteredByType = ["empresa", "emprendimiento", "profesional", "servicio"].includes(requestedEntityType)
         ? combined.filter((c) => (c.entityType || "empresa") === requestedEntityType)
         : combined;
 
       const merged = filteredByType.map((c) => {
         const entityType = c.entityType || "empresa";
-        if (revealProtected) return { ...c, entityType, protectedMasked: false };
+        const activeServices = (c.serviceItems || []).filter((s) => s.active !== false);
+        if (revealProtected) {
+          return { ...c, entityType, serviceItems: activeServices, protectedMasked: false };
+        }
         return {
           ...c,
           entityType,
@@ -817,6 +754,12 @@ export function registerArnAndModuleRoutes(
           whatsapp: "",
           paymentTerms: "Visible con membresía",
           creditRating: "Acceso Miembro",
+          serviceItems: activeServices.map((s) => ({
+            ...s,
+            netPrice: 0,
+            taxAmount: 0,
+            grossPrice: 0,
+          })),
           protectedMasked: true,
         };
       });

@@ -55,5 +55,8 @@
     "tsx": "^4.23.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "devDependencies": {
+    "vite-plugin-pwa": "^2.0.0"
   }
 }

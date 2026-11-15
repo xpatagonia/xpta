@@ -1,6 +1,7 @@
 import { db, auth, collection, addDoc, serverTimestamp } from './db';
 import { getApiUrl } from './apiConfig';
 import { haversineKm } from './patagoniaRouting';
+import type { CompanyServiceItem, TaxDisplayMode } from './taxPricing';
 
 export type SubscriptionTier = 'corporativo' | 'pro' | 'inicial';
 export type DirectoryEntityType = 'empresa' | 'emprendimiento' | 'profesional' | 'servicio';
@@ -73,6 +74,11 @@ export interface B2BCompanyRecord {
   paymentTerms: string;
   creditRating: string;
   adnComercial: AdnComercial;
+  // Service catalog & tax pricing control
+  priceDisplayMode?: TaxDisplayMode;
+  defaultTaxRatePercent?: number;
+  serviceItems?: CompanyServiceItem[];
+  active?: boolean;
 }
 
 export const TIER_CONFIG: Record<

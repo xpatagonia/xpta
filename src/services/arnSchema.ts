@@ -308,6 +308,11 @@ export async function ensureProductionTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
       ALTER TABLE IF EXISTS public.company_profiles
+        ADD COLUMN IF NOT EXISTS company_key text,
+        ADD COLUMN IF NOT EXISTS corridor text,
+        ADD COLUMN IF NOT EXISTS base_lat double precision,
+        ADD COLUMN IF NOT EXISTS base_lng double precision,
+        ADD COLUMN IF NOT EXISTS price_display_mode text DEFAULT 'net',
         ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'empresa',
         ADD COLUMN IF NOT EXISTS credential_label text,
         ADD COLUMN IF NOT EXISTS service_modality text,
@@ -315,6 +320,42 @@ export async function ensureProductionTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS arca_clae_codes jsonb DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS bcra_situation text,
         ADD COLUMN IF NOT EXISTS arca_verified_at timestamptz;
+
+      CREATE TABLE IF NOT EXISTS public.company_admin_overrides (
+        company_key text PRIMARY KEY,
+        name text,
+        entity_type text,
+        tier text,
+        category text,
+        province text,
+        city text,
+        corridor text,
+        service_modality text,
+        credential_label text,
+        verified boolean,
+        lat double precision,
+        lng double precision,
+        price_display_mode text NOT NULL DEFAULT 'net',
+        default_tax_rate_bps integer NOT NULL DEFAULT 2100,
+        active boolean NOT NULL DEFAULT true,
+        updated_at timestamptz DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.company_service_items (
+        id serial PRIMARY KEY,
+        company_key text NOT NULL,
+        organization_id integer,
+        service_name text NOT NULL,
+        category text DEFAULT 'Servicios',
+        unit_label text DEFAULT 'Servicio',
+        currency text NOT NULL DEFAULT 'ARS',
+        net_price_cents bigint NOT NULL DEFAULT 0,
+        tax_rate_bps integer NOT NULL DEFAULT 2100,
+        tax_display_mode text NOT NULL DEFAULT 'net',
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
 
       CREATE TABLE IF NOT EXISTS public.billing_transactions (
         id serial PRIMARY KEY,
@@ -369,6 +410,8 @@ export async function ensureProductionTables(): Promise<void> {
       ALTER TABLE IF EXISTS public.billing_transactions ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.rfq_quotes ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.company_profiles ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_admin_overrides ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE IF EXISTS public.company_service_items ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.rfqs ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
       ALTER TABLE IF EXISTS public.user_roles ENABLE ROW LEVEL SECURITY;

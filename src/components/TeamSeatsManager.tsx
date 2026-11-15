@@ -12,6 +12,7 @@ import {
   Clock,
   XCircle,
   CreditCard,
+  GraduationCap,
 } from 'lucide-react';
 import { auth } from '../lib/db';
 import { getApiUrl } from '../lib/apiConfig';
@@ -22,7 +23,7 @@ import { ALL_MODULE_SLUGS, SAAS_MODULES, SaasModuleSlug } from '../services/saas
 export interface OrganizationInfo {
   organizationId: number;
   orgName: string;
-  planSlug: 'gratis' | 'pro' | 'corporativo';
+  planSlug: 'gratis' | 'autonomo' | 'pro' | 'corporativo';
   planName: string;
   seatLimit: number;
   usedSeats: number;
@@ -48,6 +49,15 @@ const PLAN_CARDS = [
     priceShort: 'Gratis',
     summary: 'Ideal para PyMEs que inician operación en Patagonia.',
     icon: Shield,
+  },
+  {
+    slug: 'autonomo' as const,
+    title: 'Autónomos & Profesionales',
+    seats: 1,
+    price: '$24.900 ARS / mes',
+    priceShort: '$24.900 ARS / mes',
+    summary: '1 usuario independiente sin empresa, con matrícula verificada.',
+    icon: GraduationCap,
   },
   {
     slug: 'pro' as const,
@@ -208,7 +218,7 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
   };
 
   const handlePlanChange = async (payload: {
-    planSlug?: 'gratis' | 'pro' | 'corporativo';
+    planSlug?: 'gratis' | 'autonomo' | 'pro' | 'corporativo';
     logisticsPlanActive?: boolean;
   }) => {
     setUpdatingPlan(true);
@@ -428,10 +438,11 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
           Planes SaaS PyME y Membresía Aparte de Logística
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {PLAN_CARDS.map((card) => {
             const Icon = card.icon;
             const isCurrent = org?.planSlug === card.slug;
+            const seatText = card.seats === 1 ? '1 usuario' : `${card.seats} usuarios`;
             return (
               <div
                 key={card.slug}
@@ -445,7 +456,7 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
                   <div className="flex items-center justify-between mb-2">
                     <Icon className="w-5 h-5 text-purple-500" />
                     <span className="font-mono text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">
-                      Hasta {card.seats} usuarios
+                      {card.seats === 1 ? '1 usuario' : `Hasta ${card.seats} usuarios`}
                     </span>
                   </div>
                   <h4 className="font-bold text-slate-900 dark:text-white">{card.title}</h4>
@@ -463,7 +474,7 @@ export default function TeamSeatsManager({ onOrganizationUpdated }: Props) {
                       : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90'
                   }`}
                 >
-                  {isCurrent ? 'Plan Activo' : `Seleccionar (${card.seats} usuarios)`}
+                  {isCurrent ? 'Plan Activo' : `Seleccionar (${seatText})`}
                 </button>
               </div>
             );
